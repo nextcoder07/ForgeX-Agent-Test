@@ -60,6 +60,15 @@ class SyncedDict:
             except Exception as e:
                 logger.error(f"Supabase error saving to {self.table_name} for key {key}: {e}")
 
+    def __delitem__(self, key: str) -> None:
+        if key in self._local_data:
+            del self._local_data[key]
+        if self._sb:
+            try:
+                self._sb.table(self.table_name).delete().eq(self.key_col, key).execute()
+            except Exception as e:
+                logger.error(f"Supabase error deleting from {self.table_name} for key {key}: {e}")
+
     def get(self, key: str, default: Optional[Any] = None) -> Any:
         try:
             return self[key]
@@ -665,6 +674,79 @@ class Store:
 
     def save_agent(self, agent: AgentRecord):
         self.agents[agent.id] = agent
+
+    def delete_agent(self, agent_id: str) -> None:
+        """Deletes the agent and cascades deletion of scenarios, artifacts, results, jobs, and bindings."""
+        # 1. Delete associated scenarios
+        scenario_keys = [k for k, v in self.scenarios.items() if v.agent_id == agent_id]
+        for k in scenario_keys:
+            try:
+                del self.scenarios[k]
+            except Exception:
+                pass
+
+        # 2. Delete associated evaluation runs (jobs), scorecards, verdicts, traces, and clusters
+        eval_job_keys = [k for k, v in self.jobs.items() if v.agent_id == agent_id]
+        for k in eval_job_keys:
+            try:
+                del self.jobs[k]
+            except Exception:
+                pass
+            try:
+                del self.scorecards[k]
+            except Exception:
+                pass
+            try:
+                del self.verdicts[k]
+            except Exception:
+                pass
+            try:
+                del self.traces[k]
+            except Exception:
+                pass
+            try:
+                del self.clusters[k]
+            except Exception:
+                pass
+
+        # 3. Delete dependencies, platform resources bindings, and execution jobs
+        dep_keys = [k for k, v in self.agent_dependencies.items() if v.agent_id == agent_id]
+        for k in dep_keys:
+            try:
+                del self.agent_dependencies[k]
+            except Exception:
+                pass
+
+        binding_keys = [k for k, v in self.dependency_bindings.items() if v.agent_id == agent_id]
+        for k in binding_keys:
+            try:
+                del self.dependency_bindings[k]
+            except Exception:
+                pass
+
+        execution_job_keys = [k for k, v in self.execution_jobs.items() if v.agent_id == agent_id]
+        for k in execution_job_keys:
+            try:
+                del self.execution_jobs[k]
+            except Exception:
+                pass
+            # Traces/verdicts can also be keyed by execution job ID
+            try:
+                del self.traces[k]
+            except Exception:
+                pass
+            try:
+                del self.verdicts[k]
+            except Exception:
+                pass
+
+        # 4. Clean up local uploaded files/artifacts cache
+        if agent_id in self._local_artifacts:
+            del self._local_artifacts[agent_id]
+
+        # 5. Finally, delete the agent record itself
+        if agent_id in self.agents:
+            del self.agents[agent_id]
 
     def save_agent_artifact(
         self,
