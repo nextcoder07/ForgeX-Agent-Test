@@ -50,6 +50,9 @@ export interface AgentRecord {
   artifact_id?: string | null;
   artifact_hash?: string | null;
   source_files?: Record<string, string>;
+  runtime_manifest?: Record<string, any>;
+  execution_status?: string;
+  input_type?: string;
   created_at: string;
 }
 
@@ -107,6 +110,7 @@ export interface AgentUnderstandingResult {
   ambiguities: string[];
   graph_nodes: GraphNode[];
   graph_edges: GraphEdge[];
+  pipeline_run_id?: string;
 }
 
 export interface FaultInjection {
@@ -460,5 +464,145 @@ export async function fetchCalibrationReport(): Promise<CalibrationReport> {
 export async function fetchPipelineRun(runId: string = 'default'): Promise<PipelineRun> {
   const res = await fetch(`${API_BASE_URL}/pipeline/runs/${runId}`);
   if (!res.ok) throw new Error(`Failed to fetch pipeline run: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Dependency Setup Flow Types ─────────────────────────────────────────────
+
+export interface AgentDependency {
+  id: string;
+  agent_id: string;
+  dependency_name: string;
+  dependency_type: 'runtime' | 'tool' | 'credential' | 'external_api';
+  required: boolean;
+  detected_from: string;
+}
+
+export interface PlatformResource {
+  id: string;
+  capability: string;
+  provider: string;
+  mode: 'sandbox' | 'redirect' | 'simulate' | 'gateway' | 'unsupported';
+  status: 'active' | 'inactive';
+}
+
+export interface DependencyBindingType {
+  id: string;
+  agent_id: string;
+  dependency_name: string;
+  resolution_type: 'platform_sandbox' | 'free_provider' | 'adapter_mock' | 'user_credential' | 'block';
+  status: 'ready' | 'user_credential_required' | 'user_oauth_required' | 'unsupported';
+  user_value?: string | null;
+  created_at: string;
+}
+
+// ── Dependency Setup Flow API Methods ───────────────────────────────────────
+
+export async function getAgentDependencies(agentId: string): Promise<AgentDependency[]> {
+  const res = await fetch(`${API_BASE_URL}/intake/agents/${agentId}/dependencies`);
+  if (!res.ok) throw new Error(`Failed to fetch dependencies: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getPlatformResources(): Promise<PlatformResource[]> {
+  const res = await fetch(`${API_BASE_URL}/intake/platform/resources`);
+  if (!res.ok) throw new Error(`Failed to fetch platform resources: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getAgentBindings(agentId: string): Promise<DependencyBindingType[]> {
+  const res = await fetch(`${API_BASE_URL}/intake/agents/${agentId}/bindings`);
+  if (!res.ok) throw new Error(`Failed to fetch bindings: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateAgentBindings(agentId: string, bindings: DependencyBindingType[]): Promise<DependencyBindingType[]> {
+  const res = await fetch(`${API_BASE_URL}/intake/agents/${agentId}/bindings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bindings }),
+  });
+  if (!res.ok) throw new Error(`Failed to update bindings: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Activity Log / Red-Teaming Process Monitor ──────────────────────────────
+
+export interface ActivityEvent {
+  id: string;
+  timestamp: string;
+  category: 'LLM' | 'GATEWAY' | 'DEPENDENCY' | 'SANDBOX' | 'INTAKE' | 'EVALUATION';
+  action: string;
+  detail: string;
+  request_summary?: string | null;
+  response_summary?: string | null;
+  duration_ms?: number | null;
+  status: 'success' | 'warning' | 'error' | 'security_alert';
+}
+
+export async function fetchActivityEvents(since?: string): Promise<ActivityEvent[]> {
+  const query = since ? `?since=${encodeURIComponent(since)}` : '';
+  const res = await fetch(`${API_BASE_URL}/activity/events${query}`);
+  if (!res.ok) throw new Error(`Failed to fetch activity events: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Sandbox Execution Job ───────────────────────────────────────────────────
+
+export interface ExecutionJob {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  total_scenarios: number;
+  completed_scenarios: number;
+  scenario_ids: string[];
+  created_at: string;
+  finished_at?: string | null;
+}
+
+export async function runExecutionJob(
+  agentId: string,
+  scenarioIds: string[],
+  includeCounterfactuals: boolean = true
+): Promise<ExecutionJob> {
+  const res = await fetch(`${API_BASE_URL}/executions/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent_id: agentId,
+      scenario_ids: scenarioIds,
+      include_counterfactuals: includeCounterfactuals,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to start execution job: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchExecutionJobs(): Promise<ExecutionJob[]> {
+  const res = await fetch(`${API_BASE_URL}/executions/jobs`);
+  if (!res.ok) throw new Error(`Failed to fetch execution jobs: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchExecutionJobDetails(jobId: string): Promise<ExecutionJob> {
+  const res = await fetch(`${API_BASE_URL}/executions/jobs/${jobId}`);
+  if (!res.ok) throw new Error(`Failed to fetch execution job details: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchExecutionTraces(jobId: string): Promise<ExecutionTrace[]> {
+  const res = await fetch(`${API_BASE_URL}/executions/jobs/${jobId}/traces`);
+  if (!res.ok) throw new Error(`Failed to fetch execution traces: ${res.statusText}`);
+  return res.json();
+}
+
+export async function evaluateExecutionJob(executionJobId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/evaluate-execution`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ execution_job_id: executionJobId }),
+  });
+  if (!res.ok) throw new Error(`Failed to run LLM evaluation: ${res.statusText}`);
   return res.json();
 }

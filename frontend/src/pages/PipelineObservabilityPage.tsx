@@ -3,6 +3,8 @@ import { PipelineMonitor } from '../components/PipelineMonitor';
 import { Radio, Activity } from 'lucide-react';
 
 export const PipelineObservabilityPage: React.FC = () => {
+  const activeRunId = localStorage.getItem('lastPipelineRunId') || 'default';
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       <div>
@@ -15,7 +17,7 @@ export const PipelineObservabilityPage: React.FC = () => {
         </p>
       </div>
 
-      <PipelineMonitor runId="default" />
+      <PipelineMonitor runId={activeRunId} />
 
       {/* Stage Guide */}
       <div className="p-5 rounded-2xl glass-panel border border-slate-800 space-y-4">

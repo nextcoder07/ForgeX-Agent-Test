@@ -9,12 +9,24 @@ import uuid
 import datetime as dt
 from typing import Dict, List
 from fastapi import APIRouter, HTTPException
-from app.models.intake import AgentIntakePayload, AgentUnderstandingResult, NormalizedAgentSpec, RegisterSpecRequest
+from pydantic import BaseModel
+from app.models.intake import (
+    AgentIntakePayload,
+    AgentUnderstandingResult,
+    NormalizedAgentSpec,
+    RegisterSpecRequest,
+    AgentTestSpecification,
+    SandboxSpecification,
+    AgentDependency,
+    PlatformResource,
+    DependencyBinding,
+)
 from app.models.agent import AgentRecord
 from app.services.store import store
 from app.core.intake.spec_reconstructor import process_agent_intake
 from app.core.pipeline.monitor import PipelineTracker
 from app.core.llm.gemini_provider import GeminiProvider
+from app.services.activity_log import activity_log
 
 router = APIRouter(prefix="/intake", tags=["Intake"])
 
@@ -25,6 +37,196 @@ TEST_AGENTS_DIR = os.path.join(BACKEND_DIR, "test-agents")
 
 def _now() -> str:
     return dt.datetime.utcnow().isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Dependency Type → Platform Capability Mapping
+# ---------------------------------------------------------------------------
+_DEP_TYPE_TO_CAPABILITY = {
+    "database": "DATABASE",
+    "email": "EMAIL",
+    "browser": "BROWSER",
+    "payment": "PAYMENT",
+    "filesystem": "FILESYSTEM",
+    "http": "API_MOCK",
+    "web_search": "WEB_SEARCH",
+    "search": "WEB_SEARCH",
+    "news": "NEWS_API",
+    "location": "LOCATION_SERVICE",
+    "maps": "LOCATION_SERVICE",
+    "identity": "IDENTITY",
+    "auth": "IDENTITY",
+    "storage": "STORAGE",
+    "s3": "STORAGE",
+    "drive": "STORAGE",
+    "git": "GIT",
+    "runtime": "PYTHON_RUNTIME",
+}
+
+_CREDENTIAL_KEYWORDS = {
+    "openai", "anthropic", "claude", "gpt", "api_key", "apikey",
+    "oauth", "token", "secret", "credential", "google_drive",
+    "aws_access", "azure", "huggingface",
+}
+
+
+def _resolve_dependencies_for_agent(agent_id: str, spec: NormalizedAgentSpec):
+    """Auto-extract dependencies from a NormalizedAgentSpec and resolve them.
+
+    Priority:
+      1. Platform sandbox/resource (free)
+      2. Free API/provider
+      3. Adapter/mock/replay
+      4. User test credential (ask user)
+      5. Block execution
+    """
+    platform_resources = store.list_platform_resources()
+    capability_map = {r.capability: r for r in platform_resources}
+
+    seen_names: set = set()
+
+    # 1. Extract from spec.dependencies
+    for dep_def in spec.dependencies:
+        dep_name = dep_def.name
+        if dep_name in seen_names:
+            continue
+        seen_names.add(dep_name)
+
+        dep = AgentDependency(
+            id=f"dep-{uuid.uuid4().hex[:8]}",
+            agent_id=agent_id,
+            dependency_name=dep_name,
+            dependency_type=dep_def.type,
+            required=dep_def.required,
+            detected_from=dep_def.detected_from,
+        )
+        store.save_agent_dependency(dep)
+
+        # Try to match to a platform capability
+        cap_key = _DEP_TYPE_TO_CAPABILITY.get(dep_def.type.lower())
+        if cap_key and cap_key in capability_map:
+            binding = DependencyBinding(
+                id=f"bind-{uuid.uuid4().hex[:8]}",
+                agent_id=agent_id,
+                dependency_name=dep_name,
+                resolution_type="platform_sandbox",
+                status="ready",
+                created_at=_now(),
+            )
+        elif any(kw in dep_name.lower() for kw in _CREDENTIAL_KEYWORDS):
+            binding = DependencyBinding(
+                id=f"bind-{uuid.uuid4().hex[:8]}",
+                agent_id=agent_id,
+                dependency_name=dep_name,
+                resolution_type="user_credential",
+                status="user_credential_required",
+                created_at=_now(),
+            )
+        else:
+            # Attempt generic match by scanning name keywords
+            resolved = False
+            for keyword, cap in _DEP_TYPE_TO_CAPABILITY.items():
+                if keyword in dep_name.lower() and cap in capability_map:
+                    binding = DependencyBinding(
+                        id=f"bind-{uuid.uuid4().hex[:8]}",
+                        agent_id=agent_id,
+                        dependency_name=dep_name,
+                        resolution_type="platform_sandbox",
+                        status="ready",
+                        created_at=_now(),
+                    )
+                    resolved = True
+                    break
+            if not resolved:
+                binding = DependencyBinding(
+                    id=f"bind-{uuid.uuid4().hex[:8]}",
+                    agent_id=agent_id,
+                    dependency_name=dep_name,
+                    resolution_type="block",
+                    status="unsupported",
+                    created_at=_now(),
+                )
+        store.save_dependency_binding(binding)
+        activity_log.emit(
+            category="DEPENDENCY",
+            action="RESOLVE",
+            detail=f"Resolved spec dependency: {dep_name}",
+            response_summary=f"Resolved: {binding.resolution_type} ({binding.status})",
+            status="success" if binding.status == "ready" else "warning"
+        )
+
+    # 2. Extract from capabilities list (e.g. "WEB_SEARCH", "BROWSER")
+    for cap in spec.capabilities:
+        cap_upper = cap.upper().replace(" ", "_")
+        if cap_upper in seen_names:
+            continue
+        seen_names.add(cap_upper)
+
+        dep = AgentDependency(
+            id=f"dep-{uuid.uuid4().hex[:8]}",
+            agent_id=agent_id,
+            dependency_name=cap,
+            dependency_type="tool",
+            required=True,
+            detected_from="capabilities",
+        )
+        store.save_agent_dependency(dep)
+
+        if cap_upper in capability_map:
+            binding = DependencyBinding(
+                id=f"bind-{uuid.uuid4().hex[:8]}",
+                agent_id=agent_id,
+                dependency_name=cap,
+                resolution_type="platform_sandbox",
+                status="ready",
+                created_at=_now(),
+            )
+        else:
+            binding = DependencyBinding(
+                id=f"bind-{uuid.uuid4().hex[:8]}",
+                agent_id=agent_id,
+                dependency_name=cap,
+                resolution_type="user_credential",
+                status="user_credential_required",
+                created_at=_now(),
+            )
+        store.save_dependency_binding(binding)
+        activity_log.emit(
+            category="DEPENDENCY",
+            action="RESOLVE",
+            detail=f"Resolved capability dependency: {cap}",
+            response_summary=f"Resolved: {binding.resolution_type} ({binding.status})",
+            status="success" if binding.status == "ready" else "warning"
+        )
+
+    # 3. Always add a runtime dependency
+    runtime_name = "Python 3.12 Runtime"
+    if runtime_name not in seen_names:
+        dep = AgentDependency(
+            id=f"dep-{uuid.uuid4().hex[:8]}",
+            agent_id=agent_id,
+            dependency_name=runtime_name,
+            dependency_type="runtime",
+            required=True,
+            detected_from="config",
+        )
+        store.save_agent_dependency(dep)
+        binding = DependencyBinding(
+            id=f"bind-{uuid.uuid4().hex[:8]}",
+            agent_id=agent_id,
+            dependency_name=runtime_name,
+            resolution_type="platform_sandbox",
+            status="ready",
+            created_at=_now(),
+        )
+        store.save_dependency_binding(binding)
+        activity_log.emit(
+            category="DEPENDENCY",
+            action="RESOLVE",
+            detail=f"Resolved runtime: {runtime_name}",
+            response_summary=f"Resolved: {binding.resolution_type} ({binding.status})",
+            status="success"
+        )
 
 
 @router.get("/local-agents")
@@ -75,32 +277,48 @@ def get_local_demo_agent_files(agent_id: str):
 @router.post("/analyze", response_model=AgentUnderstandingResult)
 async def analyze_agent(payload: AgentIntakePayload):
     """Executes the complete Agent Intake & Understanding pipeline."""
-    # 1. Start Observable Pipeline Tracker
+    activity_log.emit(
+        category="INTAKE",
+        action="ANALYZE_START",
+        detail=f"Analyzing {len(payload.files)} files for agent: {payload.agent_name_hint}",
+        request_summary=f"Endpoint: {payload.endpoint_url or 'None'} | Files: {list(payload.files.keys())}",
+        status="success"
+    )
+
     tracker = PipelineTracker(
         agent_id=payload.agent_name_hint or "Discovered Agent",
         agent_name=payload.agent_name_hint or "Discovered Agent"
     )
 
-    tracker.start_stage(0, {"file_count": len(payload.files)})
-    tracker.complete_stage(0, duration_ms=45.0, input_tokens=100, output_tokens=50)
-
-    tracker.start_stage(1, {"mode": "AST_PARSING"})
-    tracker.complete_stage(1, duration_ms=120.0, input_tokens=300, output_tokens=150)
-
-    tracker.start_stage(2, {"model": os.getenv("GEMINI_MODEL", "gemini-3.6-flash")})
     llm = GeminiProvider()
-    result = await process_agent_intake(payload, llm)
-    tracker.complete_stage(2, duration_ms=380.0, input_tokens=850, output_tokens=420)
+    result = await process_agent_intake(payload, llm, tracker=tracker)
 
-    tracker.start_stage(3, {"tools_extracted": len(result.normalized_spec.tools)})
-    tracker.complete_stage(3, duration_ms=60.0, input_tokens=200, output_tokens=100)
+    activity_log.emit(
+        category="INTAKE",
+        action="AST_PARSE",
+        detail="Completed static AST parsing of files.",
+        status="success"
+    )
 
-    tracker.start_stage(4, {"deps_count": len(result.normalized_spec.dependencies)})
-    tracker.complete_stage(4, duration_ms=50.0, input_tokens=150, output_tokens=80)
+    activity_log.emit(
+        category="INTAKE",
+        action="SPEC_RECONSTRUCT",
+        detail="Reconstructed normalized spec using Gemini semantic analysis.",
+        status="success"
+    )
 
     # Save pipeline snapshot
     run_snap = tracker.get_run_snapshot()
     store.save_pipeline_run(run_snap)
+    result.pipeline_run_id = run_snap.id
+
+    activity_log.emit(
+        category="INTAKE",
+        action="ANALYZE_COMPLETE",
+        detail=f"Analysis complete for {result.normalized_spec.identity.get('name')}.",
+        response_summary=f"Tools: {len(result.normalized_spec.tools)} | Confidence: {result.confidence_score}%",
+        status="success"
+    )
 
     return result
 
@@ -114,12 +332,18 @@ def register_normalized_spec(payload: RegisterSpecRequest):
     if not chosen_name:
         raise HTTPException(status_code=422, detail="display_name must not be empty")
     agent_id = f"agent-{uuid.uuid4().hex[:8]}"
+
+    goals_list = spec.goals
+    goals_str = f" designed to {goals_list[0].lower()}" if goals_list else ""
+    domain_name = spec.identity.get("domain", "general").replace("_", " ").title()
+    inferred_desc = f"Autonomous {domain_name} agent{goals_str}."
+
     rec = AgentRecord(
         id=agent_id,
-        name=f"{chosen_name} [{agent_id}]",
+        name=chosen_name or agent_id,
         display_name=chosen_name,
         source_name=registered_name,
-        description="Reconstructed by Agent Evaluation & Reliability Platform Intake Engine",
+        description=inferred_desc,
         domain=spec.identity.get("domain", "general"),
         system_prompt="\n".join(spec.instructions),
         tools=spec.tools,
@@ -138,4 +362,108 @@ def register_normalized_spec(payload: RegisterSpecRequest):
     store.save_agent(rec)
     if payload.artifact:
         store.save_agent_artifact(rec, payload.artifact, payload.source_files)
+
+    # --- Auto-extract dependencies and resolve bindings ---
+    _resolve_dependencies_for_agent(rec.id, spec)
+
+    activity_log.emit(
+        category="INTAKE",
+        action="REGISTER",
+        detail=f"Registered agent spec: {chosen_name}",
+        response_summary=f"Agent ID: {agent_id} | Domain: {rec.domain} | Tools: {len(rec.tools)}",
+        status="success"
+    )
+
     return rec
+
+
+@router.get("/test-specs", response_model=List[AgentTestSpecification])
+def list_agent_test_specifications():
+    """List all registered agent test specifications."""
+    return store.list_agent_test_specs()
+
+
+@router.get("/test-specs/{spec_id}", response_model=AgentTestSpecification)
+def get_agent_test_specification(spec_id: str):
+    """Retrieve a specific agent test specification by ID."""
+    spec = store.get_agent_test_spec(spec_id)
+    if not spec:
+        raise HTTPException(status_code=404, detail=f"Agent test specification '{spec_id}' not found")
+    return spec
+
+
+@router.post("/test-specs", response_model=AgentTestSpecification)
+def create_agent_test_specification(spec: AgentTestSpecification):
+    """Save or update an agent test specification."""
+    store.save_agent_test_spec(spec)
+    return spec
+
+
+@router.get("/sandbox-specs", response_model=List[SandboxSpecification])
+def list_sandbox_specifications():
+    """List all registered sandbox specifications."""
+    return store.list_sandbox_specs()
+
+
+@router.get("/sandbox-specs/{spec_id}", response_model=SandboxSpecification)
+def get_sandbox_specification(spec_id: str):
+    """Retrieve a specific sandbox specification by ID."""
+    spec = store.get_sandbox_spec(spec_id)
+    if not spec:
+        raise HTTPException(status_code=404, detail=f"Sandbox specification '{spec_id}' not found")
+    return spec
+
+
+@router.post("/sandbox-specs", response_model=SandboxSpecification)
+def create_sandbox_specification(spec: SandboxSpecification):
+    """Save or update a sandbox specification."""
+    store.save_sandbox_spec(spec)
+    return spec
+
+
+# ---------------------------------------------------------------------------
+# Dependency Setup Flow Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/agents/{agent_id}/dependencies", response_model=List[AgentDependency])
+def get_agent_dependencies(agent_id: str):
+    """List all detected dependencies for an agent."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    return store.get_agent_dependencies(agent_id)
+
+
+@router.get("/platform/resources", response_model=List[PlatformResource])
+def list_platform_resources():
+    """List all platform-provided sandbox/mock resources."""
+    return store.list_platform_resources()
+
+
+@router.get("/agents/{agent_id}/bindings", response_model=List[DependencyBinding])
+def get_agent_bindings(agent_id: str):
+    """List all dependency bindings (resolutions) for an agent."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    return store.get_dependency_bindings(agent_id)
+
+
+class UpdateBindingsRequest(BaseModel):
+    bindings: List[DependencyBinding]
+
+
+@router.post("/agents/{agent_id}/bindings", response_model=List[DependencyBinding])
+def update_agent_bindings(agent_id: str, payload: UpdateBindingsRequest):
+    """Create or update dependency bindings for an agent (user provides credentials / custom endpoints)."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    for binding in payload.bindings:
+        binding.agent_id = agent_id
+        if not binding.id:
+            binding.id = f"bind-{uuid.uuid4().hex[:8]}"
+        if not binding.created_at:
+            binding.created_at = _now()
+        store.save_dependency_binding(binding)
+    return store.get_dependency_bindings(agent_id)

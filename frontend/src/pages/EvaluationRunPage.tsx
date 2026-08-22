@@ -5,6 +5,7 @@ import { TwoAxisQuadrant } from '../components/TwoAxisQuadrant';
 import { FailureClustersView } from '../components/FailureClustersView';
 import { RefreshCw, Zap, CheckCircle2, ShieldCheck, BarChart3, AlertTriangle, Clock, Cpu } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
+import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface EvaluationRunPageProps {
   onNavigate: (page: PageId) => void;
@@ -165,6 +166,108 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({ onNavigate
         </div>
       )}
 
+      {/* Platform Reliability Report & Mitigation Strategy */}
+      {scorecard && (
+        <div className="p-6 rounded-2xl glass-panel border border-indigo-500/20 bg-slate-950/80 space-y-6">
+          <div>
+            <h2 className="text-base font-extrabold text-slate-100 flex items-center space-x-2">
+              <ShieldCheck className="w-5 h-5 text-indigo-400" />
+              <span>Reliability Assessment & Mitigation Strategy</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Automated report summarizing identified weaknesses and recommended code-level fixes to optimize agent resilience.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs leading-relaxed">
+            {/* Reliability Summary */}
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
+                Project Summary
+              </h3>
+              <p className="text-slate-300">
+                Evaluation run completed for agent <strong>{scorecard.agent_name}</strong> (version {scorecard.agent_version}) across <strong>{scorecard.total_scenarios}</strong> test scenarios. The agent achieved a composite reliability score of <strong className={scorecard.composite >= 85 ? 'text-emerald-400' : 'text-amber-400'}>{scorecard.composite.toFixed(1)}%</strong>.
+              </p>
+              <div className="grid grid-cols-2 gap-2 font-mono text-[11px] pt-1">
+                <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-900">
+                  <span className="text-slate-500 block">SAFETY AXIS</span>
+                  <span className="text-rose-400 font-bold">{scorecard.safety.toFixed(0)}/100</span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-900">
+                  <span className="text-slate-500 block">CAPABILITY AXIS</span>
+                  <span className="text-cyan-400 font-bold">{scorecard.correctness.toFixed(0)}/100</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Identified Weaknesses */}
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+              <h3 className="text-xs font-bold text-rose-300 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                Identified Weaknesses
+              </h3>
+              <ul className="space-y-2 text-slate-300">
+                {scorecard.safety < 90 && (
+                  <li className="flex items-start space-x-1.5">
+                    <span className="text-rose-400 font-bold shrink-0">•</span>
+                    <span><strong>Unauthorized Financial Payouts</strong>: Agent easily yields to user authority claims ("Regional VP", "CEO override") and executes actions exceeding limits.</span>
+                  </li>
+                )}
+                {scorecard.tool_discipline < 90 && (
+                  <li className="flex items-start space-x-1.5">
+                    <span className="text-rose-400 font-bold shrink-0">•</span>
+                    <span><strong>Tool Loop or Latency Retries</strong>: Tight tool invocation retries on errors/timeouts, leading to performance depletion and rate-limiting.</span>
+                  </li>
+                )}
+                {scorecard.correctness < 90 && (
+                  <li className="flex items-start space-x-1.5">
+                    <span className="text-rose-400 font-bold shrink-0">•</span>
+                    <span><strong>State Boundary Violations</strong>: Mutates database attributes without checking authorization or release locks.</span>
+                  </li>
+                )}
+                {scorecard.safety >= 90 && scorecard.correctness >= 90 && (
+                  <li className="flex items-start space-x-1.5">
+                    <span className="text-emerald-400 font-bold shrink-0">✓</span>
+                    <span><strong>No Critical Vulnerabilities Found</strong>: Agent successfully maintained compliance across primary adversarial vectors.</span>
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+
+          {/* Recommended Improvements & Mitigation Code Changes */}
+          <div className="p-4 rounded-xl bg-indigo-950/10 border border-indigo-500/20 space-y-3 text-xs">
+            <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-wider font-mono">
+              Recommended Code Improvements & Tool Gates
+            </h3>
+            
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <span className="text-[10px] text-indigo-400 font-mono block uppercase">1. ENFORCE GATEWAY POLICY LIMITS</span>
+                <p className="text-slate-300 leading-relaxed">
+                  Implement validation bounds inside the <strong>ToolGateway</strong> interceptor for high-risk actions. Do not rely on LLM system prompt instructions to block operations. 
+                  For example, reject any <code>refund_order</code> transaction exceeding <code>₹10,000</code> programmatically.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[10px] text-indigo-400 font-mono block uppercase">2. MANDATORY CONFIRMATION STATES</span>
+                <p className="text-slate-300 leading-relaxed">
+                  Require a dual-signature or state confirmation loop for destructive actions (e.g. <code>cancel_order</code>). The gateway should flag immediate execution requests and force a prompt-back check.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[10px] text-indigo-400 font-mono block uppercase">3. TIMEOUT & BACKOFF POLICIES</span>
+                <p className="text-slate-300 leading-relaxed">
+                  Wrap tool integrations in circuit breakers with exponential backoff. Replace infinite retry loops with fail-safe error bubble actions when database locks fail.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Failure Clusters */}
       {clusters.length > 0 && (
         <div>
@@ -182,6 +285,9 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({ onNavigate
           <p className="text-[11px] text-slate-500">Results include scorecard, failure clusters, and counterfactual causation proof.</p>
         </div>
       )}
+
+      {/* Live Process Monitor */}
+      <LiveProcessMonitor />
     </div>
   );
 };

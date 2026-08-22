@@ -6,6 +6,7 @@ import { ScenarioLibraryView } from '../components/ScenarioLibraryView';
 import { CoverageGapWidget } from '../components/CoverageGapWidget';
 import { Layers, RefreshCw, Sparkles } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
+import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface ScenarioGeneratorPageProps {
   onNavigate: (page: PageId) => void;
@@ -173,6 +174,9 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({ on
           <p className="text-sm text-slate-400">No scenarios yet. Select an agent and click Generate.</p>
         </div>
       )}
+
+      {/* Live Process Monitor */}
+      <LiveProcessMonitor />
     </div>
   );
 };

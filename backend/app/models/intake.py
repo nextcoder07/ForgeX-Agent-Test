@@ -9,6 +9,70 @@ from pydantic import BaseModel, Field
 from app.models.agent import ToolDefinition, DependencyDefinition, AgentConstitution
 
 
+class CanonicalAgentInput(BaseModel):
+    artifact_id: str
+    artifact_hash: str
+    source_files: Dict[str, str] = Field(default_factory=dict)
+    runtime_manifest: Dict[str, Any] = Field(default_factory=dict)
+    detected_tools: List[ToolDefinition] = Field(default_factory=list)
+    detected_dependencies: List[DependencyDefinition] = Field(default_factory=list)
+    system_prompt: str = ""
+    custom_instructions: Optional[str] = None
+
+
+class AgentTestSpecification(BaseModel):
+    id: str
+    agent_id: str
+    goal: str
+    inputs: List[Dict[str, Any]] = Field(default_factory=list)
+    tools: List[Dict[str, Any]] = Field(default_factory=list)
+    workflow: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
+    created_at: str
+
+
+class SandboxSpecification(BaseModel):
+    id: str
+    agent_id: str
+    runtime: Dict[str, Any] = Field(default_factory=dict)
+    dependencies: List[Dict[str, Any]] = Field(default_factory=list)
+    filesystem: Dict[str, Any] = Field(default_factory=dict)
+    network: Dict[str, Any] = Field(default_factory=dict)
+    tools: List[Dict[str, Any]] = Field(default_factory=list)
+    credentials: List[Dict[str, Any]] = Field(default_factory=list)
+    created_at: str
+
+
+class AgentDependency(BaseModel):
+    id: str
+    agent_id: str
+    dependency_name: str
+    dependency_type: str  # "runtime", "tool", "credential", "external_api"
+    required: bool = True
+    detected_from: str  # "source_code", "doc_string", "config"
+
+
+class PlatformResource(BaseModel):
+    id: str
+    capability: str
+    provider: str
+    mode: str  # "sandbox", "redirect", "simulate", "gateway", "unsupported"
+    status: str  # "active", "inactive"
+
+
+class DependencyBinding(BaseModel):
+    id: str
+    agent_id: str
+    dependency_name: str
+    resolution_type: str  # "platform_sandbox", "free_provider", "adapter_mock", "user_credential", "block"
+    status: str  # "ready", "user_credential_required", "user_oauth_required", "unsupported"
+    user_value: Optional[str] = None
+    created_at: str
+
+
+
+
+
 class AgentIntakePayload(BaseModel):
     files: Dict[str, str] = Field(default_factory=dict)  # filename -> file content string
     input_type: str = "package"
@@ -83,3 +147,4 @@ class AgentUnderstandingResult(BaseModel):
     ambiguities: List[str]
     graph_nodes: List[GraphNode]
     graph_edges: List[GraphEdge]
+    pipeline_run_id: Optional[str] = None

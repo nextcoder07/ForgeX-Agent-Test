@@ -58,8 +58,14 @@ def _infer_runtime(files: Dict[str, str], endpoint_url: str = None) -> Dict[str,
 
 async def process_agent_intake(
     payload: AgentIntakePayload,
-    llm: LLMProvider
+    llm: LLMProvider,
+    tracker: Any = None
 ) -> AgentUnderstandingResult:
+    import time
+    t0_start = time.time()
+    if tracker:
+        tracker.start_stage(0, {"file_count": len(payload.files)})
+
     # 1. Compute Immutable SHA256 Artifact Hash
     hasher = hashlib.sha256()
     total_bytes = 0
@@ -96,6 +102,12 @@ async def process_agent_intake(
         created_at=_now()
     )
 
+    t0_dur = (time.time() - t0_start) * 1000.0
+    if tracker:
+        tracker.complete_stage(0, duration_ms=round(t0_dur, 2), input_tokens=total_bytes // 4, output_tokens=0)
+        tracker.start_stage(1, {"mode": "AST_PARSING"})
+
+    t1_start = time.time()
     # 2. Static AST Code Analysis
     all_code = payload.pasted_code or ""
     all_docs = payload.pasted_prompt or ""
@@ -128,9 +140,25 @@ async def process_agent_intake(
             seen_tools.add(t.name)
             dedup_tools.append(t)
 
+    t1_dur = (time.time() - t1_start) * 1000.0
+    if tracker:
+        tracker.complete_stage(1, duration_ms=round(t1_dur, 2), input_tokens=total_bytes // 4, output_tokens=0)
+        tracker.start_stage(2, {"model": getattr(llm, "model_name", "gemini-3.6-flash")})
+
+    t2_start = time.time()
     # 3. LLM Semantic Understanding
     semantic_data = await llm.analyze(all_code, all_docs)
+    t2_dur = (time.time() - t2_start) * 1000.0
+    if tracker:
+        tracker.complete_stage(
+            2,
+            duration_ms=round(t2_dur, 2),
+            input_tokens=len(all_code + all_docs) // 4,
+            output_tokens=len(str(semantic_data)) // 4
+        )
+        tracker.start_stage(3, {"tools_extracted": len(dedup_tools)})
 
+    t3_start = time.time()
     constitution = AgentConstitution(
         goals=semantic_data.get("goals", ["Help customers resolve order issues quickly and accurately"]),
         never_rules=semantic_data.get("never_rules", [
@@ -171,6 +199,12 @@ async def process_agent_intake(
         execution_status=runtime_manifest["execution_status"],
     )
 
+    t3_dur = (time.time() - t3_start) * 1000.0
+    if tracker:
+        tracker.complete_stage(3, duration_ms=round(t3_dur, 2), input_tokens=0, output_tokens=0)
+        tracker.start_stage(4, {"deps_count": len(norm_spec.dependencies)})
+
+    t4_start = time.time()
     # 4. Specification Conflict & Ambiguity Validation
     conflicts = detect_specification_conflicts(all_docs, payload.pasted_prompt or "", dedup_tools)
 
@@ -202,6 +236,9 @@ async def process_agent_intake(
             tid = f"node-tool-{tool.name}"
             edges.append(GraphEdge(source=tid, target=dep_node_id, label="uses"))
 
+    t4_dur = (time.time() - t4_start) * 1000.0
+    if tracker:
+        tracker.complete_stage(4, duration_ms=round(t4_dur, 2), input_tokens=0, output_tokens=0)
 
     return AgentUnderstandingResult(
         artifact=artifact_record,

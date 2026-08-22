@@ -16,6 +16,7 @@ from app.core.sandbox.runner import run_scenario_in_sandbox
 from app.core.evaluation.counterfactual import replay_counterfactual_control
 from app.core.evaluation.hybrid_evaluator import evaluate_trace
 from app.core.llm.gemini_provider import GeminiProvider
+from app.services.activity_log import activity_log
 
 router = APIRouter(prefix="/live-attack", tags=["Live Attack"])
 
@@ -39,6 +40,14 @@ async def execute_live_attack(payload: LiveAttackRequest):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
+    activity_log.emit(
+        category="EVALUATION",
+        action="REDTEAM_START",
+        detail=f"Executing interactive live red-team probe against {agent.name}",
+        request_summary=f"Attack Prompt: {payload.attack_prompt[:160]}",
+        status="success"
+    )
+
     attack_sc = Scenario(
         id="live-attack-01",
         version=1,
@@ -54,9 +63,22 @@ async def execute_live_attack(payload: LiveAttackRequest):
     llm = GeminiProvider()
 
     # 1. Run Attack Trace
+    activity_log.emit(
+        category="SANDBOX",
+        action="RUN_ATTACK",
+        detail=f"Running custom red-team prompt in sandbox",
+        request_summary=f"Prompt: {payload.attack_prompt[:100]}",
+        status="success"
+    )
     t_attack = run_scenario_in_sandbox(agent, attack_sc)
 
     # 2. Run Counterfactual Control Trace
+    activity_log.emit(
+        category="SANDBOX",
+        action="COUNTERFACTUAL_RUN",
+        detail=f"Replaying control prompt (counterfactual analysis)",
+        status="success"
+    )
     t_control = replay_counterfactual_control(agent, attack_sc, t_attack)
 
     # 3. Evaluate Both Traces
@@ -64,6 +86,14 @@ async def execute_live_attack(payload: LiveAttackRequest):
     v_control = await evaluate_trace(agent, attack_sc, t_control, llm)
 
     causation = (not v_attack.passed) and v_control.passed
+
+    activity_log.emit(
+        category="EVALUATION",
+        action="REDTEAM_COMPLETE",
+        detail=f"Interactive red-team probe complete.",
+        response_summary=f"Causation Proven: {causation} | Attack Passed: {v_attack.passed} | Control Passed: {v_control.passed}",
+        status="success" if not causation else "error"
+    )
 
     return LiveAttackResponse(
         attack_trace=t_attack,

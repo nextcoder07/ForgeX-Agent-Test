@@ -1,0 +1,146 @@
+import uuid
+import datetime as dt
+from typing import List, Optional
+from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+from app.models.execution import ExecutionJob, ExecutionTrace
+from app.services.store import store
+from app.core.sandbox.runner import run_scenario_in_sandbox
+from app.core.evaluation.counterfactual import replay_counterfactual_control
+from app.services.activity_log import activity_log
+
+router = APIRouter(prefix="/executions", tags=["Executions"])
+
+def _now() -> str:
+    return dt.datetime.utcnow().isoformat() + "Z"
+
+class RunExecutionRequest(BaseModel):
+    agent_id: str
+    scenario_ids: List[str]
+    include_counterfactuals: bool = True
+
+def _run_sandbox_scenarios_task(job_id: str, agent_id: str, scenario_ids: List[str], include_counterfactuals: bool):
+    """Background task to execute scenarios inside the sandbox runner and save traces."""
+    agent = store.get_agent(agent_id)
+    job = store.get_execution_job(job_id)
+    if not agent or not job:
+        return
+
+    job.status = "running"
+    store.save_execution_job(job)
+
+    traces: List[ExecutionTrace] = []
+
+    activity_log.emit(
+        category="SANDBOX",
+        action="BATCH_RUN_START",
+        detail=f"Executing {len(scenario_ids)} scenarios in sandbox for agent {agent.name}",
+        request_summary=f"Job ID: {job_id} | Scenario count: {len(scenario_ids)}",
+        status="success"
+    )
+
+    for idx, sc_id in enumerate(scenario_ids):
+        sc = store.scenarios.get(sc_id)
+        if not sc:
+            continue
+
+        activity_log.emit(
+            category="SANDBOX",
+            action="RUN_SCENARIO",
+            detail=f"[{idx+1}/{len(scenario_ids)}] Running scenario: {sc.title} ({sc.category.value})",
+            status="success"
+        )
+
+        try:
+            # 1. Run primary trace
+            t_primary = run_scenario_in_sandbox(agent, sc)
+            traces.append(t_primary)
+
+            # 2. Run counterfactual control if enabled
+            if include_counterfactuals and (sc.category.value in ["adversarial", "security", "safety"]):
+                activity_log.emit(
+                    category="SANDBOX",
+                    action="COUNTERFACTUAL_RUN",
+                    detail=f"Replaying counterfactual control for scenario: {sc.title}",
+                    status="warning"
+                )
+                t_cf = replay_counterfactual_control(agent, sc, t_primary)
+                traces.append(t_cf)
+
+        except Exception as e:
+            activity_log.emit(
+                category="SANDBOX",
+                action="RUN_ERROR",
+                detail=f"Error executing scenario {sc.title}: {str(e)}",
+                status="error"
+            )
+
+        job.completed_scenarios = idx + 1
+        store.save_execution_job(job)
+
+    # Store traces mapped under the job_id
+    store.traces[job_id] = traces
+
+    job.status = "completed"
+    job.finished_at = _now()
+    store.save_execution_job(job)
+
+    activity_log.emit(
+        category="SANDBOX",
+        action="BATCH_RUN_COMPLETE",
+        detail=f"Sandbox execution job {job_id} completed successfully.",
+        response_summary=f"Total traces collected: {len(traces)}",
+        status="success"
+    )
+
+@router.post("/run", response_model=ExecutionJob)
+async def start_execution_job(payload: RunExecutionRequest, background_tasks: BackgroundTasks):
+    agent = store.get_agent(payload.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
+
+    if not payload.scenario_ids:
+        raise HTTPException(status_code=422, detail="No scenarios selected for execution")
+
+    job_id = f"exec-{uuid.uuid4().hex[:8]}"
+    
+    job = ExecutionJob(
+        id=job_id,
+        agent_id=payload.agent_id,
+        agent_name=agent.name,
+        status="pending",
+        total_scenarios=len(payload.scenario_ids),
+        completed_scenarios=0,
+        scenario_ids=payload.scenario_ids,
+        created_at=_now(),
+    )
+    store.save_execution_job(job)
+
+    # Queue background task for non-blocking execution
+    background_tasks.add_task(
+        _run_sandbox_scenarios_task,
+        job_id,
+        payload.agent_id,
+        payload.scenario_ids,
+        payload.include_counterfactuals
+    )
+
+    return job
+
+@router.get("/jobs", response_model=List[ExecutionJob])
+def list_execution_jobs():
+    """List all manual sandbox execution jobs."""
+    return store.list_execution_jobs()
+
+@router.get("/jobs/{job_id}", response_model=ExecutionJob)
+def get_execution_job(job_id: str):
+    """Retrieve execution job status and metadata."""
+    job = store.get_execution_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Execution job '{job_id}' not found")
+    return job
+
+@router.get("/jobs/{job_id}/traces", response_model=List[ExecutionTrace])
+def get_execution_job_traces(job_id: str):
+    """Retrieve all execution traces generated by the manual execution job."""
+    return store.traces.get(job_id, [])

@@ -1,6 +1,7 @@
 import React from 'react';
 import { LiveAttackConsole } from '../components/LiveAttackConsole';
 import { Flame } from 'lucide-react';
+import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 export const LiveAttackPage: React.FC = () => {
   return (
@@ -40,6 +41,9 @@ export const LiveAttackPage: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Live Process Monitor */}
+      <LiveProcessMonitor />
     </div>
   );
 };

@@ -151,7 +151,7 @@ This is **not a purely algorithmic system**. The platform uses Gemini at these c
 
 ### Supabase Persistence
 
-Registered agents, normalized specifications, artifact hashes, uploaded source files, and evaluation data are persisted through the Supabase-backed store. Uploaded agents have first-class `agent_artifacts` and `agent_files` manifest records, while `agents.agent_spec` retains the derived specification and a backward-compatible source copy for this MVP. For a new Supabase project, run `migrations/001_init_schema.sql` in the Supabase SQL Editor. For an existing project, also run `migrations/002_store_compatibility.sql` to add the fields and tables expected by the current backend. Restart the API and confirm the startup log says `Supabase connected — persistent storage active.` Otherwise, the backend uses an in-memory fallback and data is lost when the process stops.
+Registered agents, normalized specifications, artifact hashes, uploaded source files, and evaluation data are persisted through the Supabase-backed store. Uploaded agents have first-class `agent_artifacts` and `agent_files` manifest records, while `agents.agent_spec` retains the derived specification and a backward-compatible source copy for this MVP. For a new Supabase project, run `migrations/001_init_schema.sql` in the Supabase SQL Editor. For an existing project, run `migrations/002_store_compatibility.sql` and `migrations/003_dependency_and_execution_flow.sql` to add the fields and tables expected by the current backend. Restart the API and confirm the startup log says `Supabase connected — persistent storage active.` Otherwise, the backend uses an in-memory fallback and data is lost when the process stops.
 
 ### Prerequisites
 - Python 3.10+

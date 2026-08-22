@@ -15,6 +15,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
+import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface AgentIntakePageProps {
   onNavigate: (page: PageId) => void;
@@ -32,6 +33,9 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onNavigate, on
 
   const handleAnalysisComplete = (result: AgentUnderstandingResult, uploadedFiles: Record<string, string>, analyzedEndpoint?: string, analyzedInputType?: string) => {
     setAnalysisResult(result);
+    if (result.pipeline_run_id) {
+      localStorage.setItem('lastPipelineRunId', result.pipeline_run_id);
+    }
     setRegisteredAgent(null);
     setDisplayName('');
     setSourceFiles(uploadedFiles);
@@ -135,6 +139,31 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onNavigate, on
             </div>
           </div>
 
+          {/* Agent Profile & Purpose Overview */}
+          <div className="p-6 rounded-2xl glass-panel border border-cyan-500/20 bg-gradient-to-r from-slate-950 via-cyan-950/5 to-slate-950 space-y-3">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-2">
+              <Sparkles className="w-4.5 h-4.5 text-cyan-400" />
+              Agent Profile & Purpose Overview
+            </h2>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Based on AST analysis and spec reconstruction, this agent is identified as a <strong>{analysisResult.normalized_spec.identity.framework || 'Custom'}</strong> framework agent designed to operate in the <strong>{analysisResult.normalized_spec.identity.domain || 'general'}</strong> domain. Its primary mission is to fulfill the defined goals by orchestrating its tool inventory ({analysisResult.normalized_spec.tools.length} discovered tools) under constitutional constraints.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 text-xs font-mono text-slate-400">
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800">
+                <span className="text-slate-500 block">FRAMEWORK / LANG</span>
+                <span className="text-slate-200 capitalize font-bold">{analysisResult.normalized_spec.identity.framework || 'Custom'} / {analysisResult.normalized_spec.identity.language || 'Python'}</span>
+              </div>
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800">
+                <span className="text-slate-500 block">ENTRYPOINT</span>
+                <span className="text-slate-200 font-bold">{analysisResult.normalized_spec.identity.entrypoint || 'agent.py'}</span>
+              </div>
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800">
+                <span className="text-slate-500 block">STATE MANAGEMENT</span>
+                <span className="text-slate-200 font-bold">{analysisResult.normalized_spec.state_management}</span>
+              </div>
+            </div>
+          </div>
+
           {/* Discovered Architecture Map */}
           {analysisResult.graph_nodes.length > 0 && (
             <AgentMapGraph
@@ -209,6 +238,9 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onNavigate, on
           </div>
         </div>
       )}
+
+      {/* Live Process Monitor */}
+      <LiveProcessMonitor />
     </div>
   );
 };

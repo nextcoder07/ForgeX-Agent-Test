@@ -16,8 +16,10 @@ import {
 export type PageId =
   | 'dashboard'
   | 'intake'
+  | 'dependencies'
   | 'agents'
   | 'scenarios'
+  | 'executions'
   | 'evaluations'
   | 'failures'
   | 'scorecard'
@@ -34,8 +36,10 @@ export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
   const navItems: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
     { id: 'intake', label: 'Bring Your Agent', icon: Sparkles },
+    { id: 'dependencies', label: 'Dep Setup', icon: Layers },
     { id: 'agents', label: 'Agents & X-Ray', icon: Cpu },
     { id: 'scenarios', label: 'Scenario Library', icon: Layers },
+    { id: 'executions', label: 'Execution Sandbox', icon: Radio },
     { id: 'evaluations', label: 'Evaluation Engine', icon: Zap },
     { id: 'live-attack', label: 'Live Attack', icon: Flame },
     { id: 'failures', label: 'Failure Clusters', icon: ShieldCheck },

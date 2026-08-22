@@ -17,8 +17,9 @@ from app.models.agent import AgentRecord, ToolDefinition, ToolRisk, DependencyDe
 from app.models.scenario import Scenario, ScenarioCategory
 from app.models.evaluation import EvaluationJob, ReliabilityScorecard
 from app.models.failure import RunVerdict, FailureCluster, FailureFinding
-from app.models.execution import ExecutionTrace
+from app.models.execution import ExecutionTrace, ExecutionJob
 from app.models.pipeline import PipelineRun, PipelineStage
+from app.models.intake import AgentTestSpecification, SandboxSpecification, AgentDependency, PlatformResource, DependencyBinding
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +316,152 @@ def _deserialize_pipeline_run(row: Dict[str, Any]) -> PipelineRun:
     )
 
 
+def _serialize_agent_test_spec(key: str, spec: AgentTestSpecification) -> Dict[str, Any]:
+    return {
+        "id": spec.id,
+        "agent_id": spec.agent_id,
+        "goal": spec.goal,
+        "inputs": spec.inputs,
+        "tools": spec.tools,
+        "workflow": spec.workflow,
+        "risks": spec.risks,
+        "created_at": spec.created_at,
+    }
+
+
+def _deserialize_agent_test_spec(row: Dict[str, Any]) -> AgentTestSpecification:
+    return AgentTestSpecification(
+        id=row["id"],
+        agent_id=row["agent_id"],
+        goal=row.get("goal", ""),
+        inputs=row.get("inputs", []),
+        tools=row.get("tools", []),
+        workflow=row.get("workflow", []),
+        risks=row.get("risks", []),
+        created_at=str(row.get("created_at", _now())),
+    )
+
+
+def _serialize_sandbox_spec(key: str, spec: SandboxSpecification) -> Dict[str, Any]:
+    return {
+        "id": spec.id,
+        "agent_id": spec.agent_id,
+        "runtime": spec.runtime,
+        "dependencies": spec.dependencies,
+        "filesystem": spec.filesystem,
+        "network": spec.network,
+        "tools": spec.tools,
+        "credentials": spec.credentials,
+        "created_at": spec.created_at,
+    }
+
+
+def _deserialize_sandbox_spec(row: Dict[str, Any]) -> SandboxSpecification:
+    return SandboxSpecification(
+        id=row["id"],
+        agent_id=row["agent_id"],
+        runtime=row.get("runtime", {}),
+        dependencies=row.get("dependencies", []),
+        filesystem=row.get("filesystem", {}),
+        network=row.get("network", {}),
+        tools=row.get("tools", []),
+        credentials=row.get("credentials", []),
+        created_at=str(row.get("created_at", _now())),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dependency Setup Flow Serializers / Deserializers
+# ---------------------------------------------------------------------------
+def _serialize_agent_dependency(key: str, dep: AgentDependency) -> Dict[str, Any]:
+    return {
+        "id": dep.id,
+        "agent_id": dep.agent_id,
+        "dependency_name": dep.dependency_name,
+        "dependency_type": dep.dependency_type,
+        "required": dep.required,
+        "detected_from": dep.detected_from,
+    }
+
+def _deserialize_agent_dependency(row: Dict[str, Any]) -> AgentDependency:
+    return AgentDependency(
+        id=row["id"],
+        agent_id=row.get("agent_id", ""),
+        dependency_name=row.get("dependency_name", ""),
+        dependency_type=row.get("dependency_type", "runtime"),
+        required=row.get("required", True),
+        detected_from=row.get("detected_from", "source_code"),
+    )
+
+def _serialize_platform_resource(key: str, res: PlatformResource) -> Dict[str, Any]:
+    return {
+        "id": res.id,
+        "capability": res.capability,
+        "provider": res.provider,
+        "mode": res.mode,
+        "status": res.status,
+    }
+
+def _deserialize_platform_resource(row: Dict[str, Any]) -> PlatformResource:
+    return PlatformResource(
+        id=row["id"],
+        capability=row.get("capability", ""),
+        provider=row.get("provider", ""),
+        mode=row.get("mode", "sandbox"),
+        status=row.get("status", "active"),
+    )
+
+def _serialize_dependency_binding(key: str, bind: DependencyBinding) -> Dict[str, Any]:
+    return {
+        "id": bind.id,
+        "agent_id": bind.agent_id,
+        "dependency_name": bind.dependency_name,
+        "resolution_type": bind.resolution_type,
+        "status": bind.status,
+        "user_value": bind.user_value,
+        "created_at": bind.created_at,
+    }
+
+def _deserialize_dependency_binding(row: Dict[str, Any]) -> DependencyBinding:
+    return DependencyBinding(
+        id=row["id"],
+        agent_id=row.get("agent_id", ""),
+        dependency_name=row.get("dependency_name", ""),
+        resolution_type=row.get("resolution_type", "block"),
+        status=row.get("status", "unsupported"),
+        user_value=row.get("user_value"),
+        created_at=row.get("created_at", _now()),
+    )
+
+
+def _serialize_execution_job(key: str, job: ExecutionJob) -> Dict[str, Any]:
+    return {
+        "id": job.id,
+        "agent_id": job.agent_id,
+        "agent_name": job.agent_name,
+        "status": job.status,
+        "total_scenarios": job.total_scenarios,
+        "completed_scenarios": job.completed_scenarios,
+        "scenario_ids": job.scenario_ids,
+        "created_at": job.created_at,
+        "finished_at": job.finished_at,
+    }
+
+
+def _deserialize_execution_job(row: Dict[str, Any]) -> ExecutionJob:
+    return ExecutionJob(
+        id=row["id"],
+        agent_id=row.get("agent_id", ""),
+        agent_name=row.get("agent_name", ""),
+        status=row.get("status", "pending"),
+        total_scenarios=row.get("total_scenarios", 0),
+        completed_scenarios=row.get("completed_scenarios", 0),
+        scenario_ids=row.get("scenario_ids", []),
+        created_at=row.get("created_at", _now()),
+        finished_at=row.get("finished_at"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Global Store Implementation
 # ---------------------------------------------------------------------------
@@ -328,9 +475,41 @@ class Store:
         self.traces = SyncedDict("evaluation_results", _serialize_traces, _deserialize_traces, "evaluation_run_id")
         self.clusters = SyncedDict("failure_clusters", _serialize_clusters, _deserialize_clusters, "evaluation_id")
         self.pipeline_runs = SyncedDict("pipeline_runs", _serialize_pipeline_run, _deserialize_pipeline_run)
+        self.agent_test_specs = SyncedDict("agent_test_specifications", _serialize_agent_test_spec, _deserialize_agent_test_spec)
+        self.sandbox_specs = SyncedDict("sandbox_specifications", _serialize_sandbox_spec, _deserialize_sandbox_spec)
+        self.agent_dependencies = SyncedDict("agent_dependencies", _serialize_agent_dependency, _deserialize_agent_dependency)
+        self.platform_resources = SyncedDict("platform_resources", _serialize_platform_resource, _deserialize_platform_resource)
+        self.dependency_bindings = SyncedDict("dependency_bindings", _serialize_dependency_binding, _deserialize_dependency_binding)
+        self.execution_jobs = SyncedDict("execution_jobs", _serialize_execution_job, _deserialize_execution_job)
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
-        
+
+        # Seed platform-provided resources (free sandbox / mock capabilities)
+        self._seed_platform_resources()
+
         # Demo agents are loaded only when the user selects them from Intake.
+
+    def _seed_platform_resources(self):
+        """Seed the platform with MVP sandbox/mock resources that are always available."""
+        if len(self.platform_resources) > 0:
+            return
+
+        mvp_resources = [
+            PlatformResource(id="plat-python-runtime", capability="PYTHON_RUNTIME", provider="Python 3.12 Sandbox", mode="sandbox", status="active"),
+            PlatformResource(id="plat-web-search", capability="WEB_SEARCH", provider="Internal Search Sandbox", mode="sandbox", status="active"),
+            PlatformResource(id="plat-browser", capability="BROWSER", provider="Playwright Chromium Sandbox", mode="sandbox", status="active"),
+            PlatformResource(id="plat-database", capability="DATABASE", provider="PostgreSQL Container Snapshot", mode="sandbox", status="active"),
+            PlatformResource(id="plat-filesystem", capability="FILESYSTEM", provider="Virtual Workspace", mode="sandbox", status="active"),
+            PlatformResource(id="plat-email", capability="EMAIL", provider="SMTP Mailbox Sandbox", mode="redirect", status="active"),
+            PlatformResource(id="plat-news-api", capability="NEWS_API", provider="RSS/GNews Mock Files", mode="simulate", status="active"),
+            PlatformResource(id="plat-location", capability="LOCATION_SERVICE", provider="OSM Sandbox", mode="sandbox", status="active"),
+            PlatformResource(id="plat-identity", capability="IDENTITY", provider="Local Mock Accounts", mode="simulate", status="active"),
+            PlatformResource(id="plat-payment", capability="PAYMENT", provider="Sandbox Credit Card Simulator", mode="simulate", status="active"),
+            PlatformResource(id="plat-storage", capability="STORAGE", provider="S3/Drive Mock Directories", mode="sandbox", status="active"),
+            PlatformResource(id="plat-git", capability="GIT", provider="Local Isolated Test Repositories", mode="sandbox", status="active"),
+            PlatformResource(id="plat-api-mock", capability="API_MOCK", provider="Beeceptor-style Mock Responder", mode="simulate", status="active"),
+        ]
+        for res in mvp_resources:
+            self.platform_resources[res.id] = res
 
     def _seed_data(self):
         # Only seed if agents table is empty (either locally or in Supabase)
@@ -561,5 +740,49 @@ class Store:
 
     def list_pipeline_runs(self) -> List[PipelineRun]:
         return list(self.pipeline_runs.values())
+
+    def get_agent_test_spec(self, spec_id: str) -> Optional[AgentTestSpecification]:
+        return self.agent_test_specs.get(spec_id)
+
+    def save_agent_test_spec(self, spec: AgentTestSpecification):
+        self.agent_test_specs[spec.id] = spec
+
+    def list_agent_test_specs(self) -> List[AgentTestSpecification]:
+        return list(self.agent_test_specs.values())
+
+    def get_sandbox_spec(self, spec_id: str) -> Optional[SandboxSpecification]:
+        return self.sandbox_specs.get(spec_id)
+
+    def save_sandbox_spec(self, spec: SandboxSpecification):
+        self.sandbox_specs[spec.id] = spec
+
+    def list_sandbox_specs(self) -> List[SandboxSpecification]:
+        return list(self.sandbox_specs.values())
+
+    # --- Agent Dependencies ---
+    def save_agent_dependency(self, dep: AgentDependency):
+        self.agent_dependencies[dep.id] = dep
+
+    def get_agent_dependencies(self, agent_id: str) -> List[AgentDependency]:
+        return [d for d in self.agent_dependencies.values() if d.agent_id == agent_id]
+
+    def list_platform_resources(self) -> List[PlatformResource]:
+        return list(self.platform_resources.values())
+
+    def save_dependency_binding(self, binding: DependencyBinding):
+        self.dependency_bindings[binding.id] = binding
+
+    def get_dependency_bindings(self, agent_id: str) -> List[DependencyBinding]:
+        return [b for b in self.dependency_bindings.values() if b.agent_id == agent_id]
+
+    # --- Execution Jobs ---
+    def save_execution_job(self, job: ExecutionJob):
+        self.execution_jobs[job.id] = job
+
+    def get_execution_job(self, job_id: str) -> Optional[ExecutionJob]:
+        return self.execution_jobs.get(job_id)
+
+    def list_execution_jobs(self) -> List[ExecutionJob]:
+        return list(self.execution_jobs.values())
 
 store = Store()

@@ -11,8 +11,10 @@ import logging
 from typing import Any, Dict, List
 from dotenv import load_dotenv
 
+import time
 from app.core.llm.base import LLMProvider
 from app.core.llm.fallback_mock import FallbackMockEngine
+from app.services.activity_log import activity_log
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -39,6 +41,16 @@ class GeminiProvider(LLMProvider):
             logger.warning(f"Could not initialize Google GenAI client: {e}")
 
     async def generate(self, system: str, user: str, temperature: float = 0.2) -> str:
+        start_time = time.time()
+        req_summary = f"System: {system[:80]}... | User: {user[:120]}... | Temp: {temperature}"
+        activity_log.emit(
+            category="LLM",
+            action="REQUEST",
+            detail=f"{self.model_name} invocation initiated",
+            request_summary=req_summary,
+            status="success"
+        )
+        
         if self._client:
             try:
                 from google.genai import types
@@ -52,12 +64,37 @@ class GeminiProvider(LLMProvider):
                     ),
                 )
                 if res and res.text:
+                    duration = (time.time() - start_time) * 1000.0
+                    activity_log.emit(
+                        category="LLM",
+                        action="RESPONSE",
+                        detail=f"{self.model_name} response received",
+                        response_summary=res.text[:200],
+                        duration_ms=duration,
+                        status="success"
+                    )
                     return res.text
             except Exception as e:
                 logger.warning(f"Gemini API generation error: {e}. Using fallback generator.")
+                activity_log.emit(
+                    category="LLM",
+                    action="FALLBACK_WARNING",
+                    detail=f"Gemini API failed: {str(e)[:80]}. Retrying fallback provider.",
+                    status="warning"
+                )
 
         # Heuristic fallback
-        return json.dumps(FallbackMockEngine.mock_agent_understanding(user))
+        fallback_res = json.dumps(FallbackMockEngine.mock_agent_understanding(user))
+        duration = (time.time() - start_time) * 1000.0
+        activity_log.emit(
+            category="LLM",
+            action="RESPONSE",
+            detail=f"Fallback offline mock engine returned matching spec representation",
+            response_summary=fallback_res[:200],
+            duration_ms=duration,
+            status="warning"
+        )
+        return fallback_res
 
     async def analyze(self, code_evidence: str, doc_evidence: str) -> Dict[str, Any]:
         prompt = (

@@ -47,6 +47,15 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onNavigate }) => {
     setAgentMeta({});
     setLoadingFiles(true);
 
+    // Use source_files directly from the agent record if present
+    if (agent.source_files && Object.keys(agent.source_files).length > 0) {
+      setAgentFiles(agent.source_files);
+      const entrypoint = agent.runtime_manifest?.entrypoint || 'agent.py';
+      setAgentMeta({ entrypoint });
+      setLoadingFiles(false);
+      return;
+    }
+
     // Try to load the underlying source files (works for demo agents)
     const localId = agent.id.replace('agent-', '').replace('-v1', '');
     try {

@@ -10,6 +10,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 from app.models.agent import ToolDefinition
 from app.models.execution import ToolCallRecord, StateChange, SecurityEvent
+from app.services.activity_log import activity_log
 
 
 class ToolGateway:
@@ -29,6 +30,14 @@ class ToolGateway:
         t_def = self.tool_map.get(tool_name.lower())
         seq = len(self.call_history) + 1
 
+        activity_log.emit(
+            category="GATEWAY",
+            action="TOOL_CALL",
+            detail=f"Intercepted call to {tool_name}()",
+            request_summary=f"Args: {str(arguments)}",
+            status="success"
+        )
+
         # Check for simulated fault injection
         if injected_fault == "timeout":
             time.sleep(0.05)
@@ -44,6 +53,14 @@ class ToolGateway:
                 injected_fault="timeout"
             )
             self.call_history.append(record)
+            activity_log.emit(
+                category="GATEWAY",
+                action="FAULT_INJECTION",
+                detail=f"Simulated timeout fault for {tool_name}()",
+                response_summary=str(record.result),
+                duration_ms=50.0,
+                status="warning"
+            )
             return record.result
 
         elif injected_fault == "http_500":
@@ -59,6 +76,14 @@ class ToolGateway:
                 injected_fault="http_500"
             )
             self.call_history.append(record)
+            activity_log.emit(
+                category="GATEWAY",
+                action="FAULT_INJECTION",
+                detail=f"Simulated HTTP 500 fault for {tool_name}()",
+                response_summary=str(record.result),
+                duration_ms=12.0,
+                status="warning"
+            )
             return record.result
 
         elif injected_fault == "rate_limit":
@@ -74,6 +99,14 @@ class ToolGateway:
                 injected_fault="rate_limit"
             )
             self.call_history.append(record)
+            activity_log.emit(
+                category="GATEWAY",
+                action="FAULT_INJECTION",
+                detail=f"Simulated Rate Limit fault for {tool_name}()",
+                response_summary=str(record.result),
+                duration_ms=8.0,
+                status="warning"
+            )
             return record.result
 
         elif injected_fault == "empty_response":
@@ -89,6 +122,14 @@ class ToolGateway:
                 injected_fault="empty_response"
             )
             self.call_history.append(record)
+            activity_log.emit(
+                category="GATEWAY",
+                action="FAULT_INJECTION",
+                detail=f"Simulated Empty Response fault for {tool_name}()",
+                response_summary="{}",
+                duration_ms=10.0,
+                status="warning"
+            )
             return record.result
 
         elif injected_fault == "schema_violation":
@@ -104,6 +145,14 @@ class ToolGateway:
                 injected_fault="schema_violation"
             )
             self.call_history.append(record)
+            activity_log.emit(
+                category="GATEWAY",
+                action="FAULT_INJECTION",
+                detail=f"Simulated Schema Violation fault for {tool_name}()",
+                response_summary=str(record.result),
+                duration_ms=15.0,
+                status="warning"
+            )
             return record.result
 
         elif injected_fault == "contradictory_payload":
@@ -119,20 +168,36 @@ class ToolGateway:
                 injected_fault="contradictory_payload"
             )
             self.call_history.append(record)
+            activity_log.emit(
+                category="GATEWAY",
+                action="FAULT_INJECTION",
+                detail=f"Simulated Contradictory Payload fault for {tool_name}()",
+                response_summary=str(record.result),
+                duration_ms=15.0,
+                status="warning"
+            )
             return record.result
 
         # Security Policy Checks
         if t_def and (t_def.requires_authorization or t_def.max_amount):
             amt = float(arguments.get("amount", arguments.get("payout", 0.0)))
             if t_def.max_amount and amt > t_def.max_amount:
+                evidence_text = f"Attempted {tool_name} with amount ₹{amt:,.2f} exceeding ₹{t_def.max_amount:,.2f} limit."
                 self.security_events.append(
                     SecurityEvent(
                         event_type="UNAUTHORIZED_PAYOUT",
                         severity="critical",
                         target=tool_name,
                         action_taken="FLAGGED",
-                        evidence=f"Attempted {tool_name} with amount ₹{amt:,.2f} exceeding ₹{t_def.max_amount:,.2f} limit."
+                        evidence=evidence_text
                     )
+                )
+                activity_log.emit(
+                    category="GATEWAY",
+                    action="SECURITY_ALERT",
+                    detail=f"Security constraint violated on {tool_name}()",
+                    response_summary=evidence_text,
+                    status="security_alert"
                 )
 
         # Dynamic and domain tool routing
@@ -246,6 +311,7 @@ class ToolGateway:
                 "message": f"Successfully executed {tool_name} inside isolated sandbox harness."
             }
 
+        total_latency_ms = round((time.time() - start_time) * 1000.0 + latency, 1)
         record = ToolCallRecord(
             id=f"tc-{uuid.uuid4().hex[:8]}",
             sequence=seq,
@@ -253,10 +319,20 @@ class ToolGateway:
             canonical_capability=t_def.canonical_capability if t_def else "GENERIC_TOOL",
             arguments=arguments,
             result=result_data,
-            latency_ms=round((time.time() - start_time) * 1000.0 + latency, 1),
+            latency_ms=total_latency_ms,
             status="SUCCESS",
             routing_decision="SIMULATED_SANDBOX"
         )
         self.call_history.append(record)
+
+        activity_log.emit(
+            category="GATEWAY",
+            action="TOOL_RESPONSE",
+            detail=f"{tool_name}() executed successfully",
+            response_summary=str(result_data),
+            duration_ms=total_latency_ms,
+            status="success"
+        )
+
         return result_data
 

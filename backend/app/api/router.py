@@ -13,6 +13,8 @@ from app.api.evaluations import router as evaluations_router
 from app.api.live_attack import router as live_attack_router
 from app.api.calibration import router as calibration_router
 from app.api.pipeline import router as pipeline_router
+from app.api.activity import router as activity_router
+from app.api.executions import router as executions_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(agents_router)
@@ -23,3 +25,5 @@ api_router.include_router(evaluations_router)
 api_router.include_router(live_attack_router)
 api_router.include_router(calibration_router)
 api_router.include_router(pipeline_router)
+api_router.include_router(activity_router)
+api_router.include_router(executions_router)

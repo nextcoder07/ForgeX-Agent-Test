@@ -70,3 +70,16 @@ class SandboxInstance(BaseModel):
     redirected_emails: List[Dict[str, Any]] = Field(default_factory=list)
     active_policy_gates: List[str] = Field(default_factory=list)
     created_at: str
+
+
+class ExecutionJob(BaseModel):
+    id: str
+    agent_id: str
+    agent_name: str
+    status: str = "pending"  # "pending", "running", "completed", "failed"
+    total_scenarios: int = 0
+    completed_scenarios: int = 0
+    scenario_ids: List[str] = Field(default_factory=list)
+    created_at: str
+    finished_at: Optional[str] = None
+
