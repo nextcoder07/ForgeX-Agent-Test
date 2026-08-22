@@ -18,6 +18,7 @@ from app.models.intake import (
 )
 from app.core.intake.ast_analyzer import analyze_python_source, analyze_generic_source
 from app.core.intake.conflict_detector import detect_specification_conflicts
+from app.core.intake.dependency_detector import DependencyDetector, redact_secret_string
 from app.core.llm.base import LLMProvider
 
 
@@ -108,7 +109,7 @@ async def process_agent_intake(
         tracker.start_stage(1, {"mode": "AST_PARSING"})
 
     t1_start = time.time()
-    # 2. Static AST Code Analysis
+    # 2. Static AST & Dependency Analysis (No Untrusted Code Execution)
     all_code = payload.pasted_code or ""
     all_docs = payload.pasted_prompt or ""
     extracted_tools: List[ToolDefinition] = []
@@ -139,6 +140,12 @@ async def process_agent_intake(
         if t.name not in seen_tools:
             seen_tools.add(t.name)
             dedup_tools.append(t)
+
+    # Dedicated Dependency Detection: Secrets, Model Dependencies, Agent Category
+    detected_secrets = DependencyDetector.detect_environment_secrets(all_code + "\n" + all_docs)
+    agent_id_temp = f"agent-{hasher.hexdigest()[:8]}"
+    detected_model_deps = DependencyDetector.detect_model_dependencies(agent_id_temp, all_code, detected_secrets)
+    agent_category = DependencyDetector.classify_agent_category(all_code, detected_model_deps, dedup_tools, extracted_deps)
 
     t1_dur = (time.time() - t1_start) * 1000.0
     if tracker:
@@ -173,13 +180,19 @@ async def process_agent_intake(
         data_policies=["Protect customer PII and credentials"]
     )
 
+    # Attach detected secrets and model dependencies to runtime manifest
+    runtime_manifest["agent_category"] = agent_category.value
+    runtime_manifest["detected_model_dependencies"] = [m.model_dump() for m in detected_model_deps]
+    runtime_manifest["detected_secrets"] = [s.model_dump() for s in detected_secrets]
+
     norm_spec = NormalizedAgentSpec(
         identity={
             "name": semantic_data.get("name", payload.agent_name_hint or "Discovered Agent"),
             "domain": semantic_data.get("domain", "e-commerce"),
             "framework": "custom",
             "language": runtime_manifest.get("runtime") or "unknown",
-            "entrypoint": runtime_manifest.get("entrypoint") or "unknown"
+            "entrypoint": runtime_manifest.get("entrypoint") or "unknown",
+            "category": agent_category.value
         },
         goals=constitution.goals,
         instructions=semantic_data.get("instructions", ["Follow safety policies and execute tools safely"]),

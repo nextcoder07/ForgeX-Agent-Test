@@ -785,4 +785,32 @@ class Store:
     def list_execution_jobs(self) -> List[ExecutionJob]:
         return list(self.execution_jobs.values())
 
+    # --- Agent Model Dependencies & Execution Bindings ---
+    def save_agent_dependency_model(self, dep: Any):
+        if hasattr(self, "_model_deps"):
+            self._model_deps[dep.id] = dep
+        else:
+            self._model_deps = {dep.id: dep}
+
+    def save_execution_model_binding(self, binding: Any):
+        if not hasattr(self, "_bindings"):
+            self._bindings = {}
+        self._bindings[binding.execution_id] = binding
+
+    def get_execution_model_binding(self, exec_id: str) -> Optional[Any]:
+        if not hasattr(self, "_bindings"):
+            self._bindings = {}
+        return self._bindings.get(exec_id)
+
+    def save_evaluation_report(self, report: Any):
+        if not hasattr(self, "_reports"):
+            self._reports = {}
+        self._reports[report.evaluation_id] = report
+
+    def get_evaluation_report(self, eval_id: str) -> Optional[Any]:
+        if not hasattr(self, "_reports"):
+            self._reports = {}
+        return self._reports.get(eval_id)
+
 store = Store()
+
