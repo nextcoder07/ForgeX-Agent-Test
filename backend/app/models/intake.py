@@ -117,9 +117,13 @@ class GraphEdge(BaseModel):
     label: Optional[str] = None
 
 
+from app.models.agent_behavior import AgentBehaviorProfile
+
+
 class NormalizedAgentSpec(BaseModel):
     identity: Dict[str, str]  # name, domain, framework, language, entrypoint
     agent_description: Optional[str] = None
+    behavior_profile: Optional[AgentBehaviorProfile] = None
     goals: List[str] = Field(default_factory=list)
     instructions: List[str] = Field(default_factory=list)
     tools: List[ToolDefinition] = Field(default_factory=list)
@@ -145,6 +149,7 @@ class AgentUnderstandingResult(BaseModel):
     artifact: ArtifactRecord
     normalized_spec: NormalizedAgentSpec
     agent_description: Optional[str] = None
+    behavior_profile: Optional[AgentBehaviorProfile] = None
     conflicts: List[SpecConflict]
     confidence_score: float  # e.g., 96.4%
     ambiguities: List[str]

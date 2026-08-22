@@ -471,3 +471,16 @@ CREATE INDEX IF NOT EXISTS idx_rt_state_changes_instance   ON runtime.state_chan
 CREATE INDEX IF NOT EXISTS idx_rt_exec_steps_session       ON runtime.execution_steps(execution_session_id);
 CREATE INDEX IF NOT EXISTS idx_rt_exec_metrics_session     ON runtime.execution_metrics(execution_session_id);
 CREATE INDEX IF NOT EXISTS idx_benchmark_records_session   ON public.benchmark_records(execution_session_id);
+
+-- 24. agent_behavior_profiles
+CREATE TABLE IF NOT EXISTS public.agent_behavior_profiles (
+    id                TEXT PRIMARY KEY,
+    agent_version_id  TEXT NOT NULL REFERENCES public.agent_versions(id) ON DELETE CASCADE,
+    schema_version    TEXT NOT NULL DEFAULT 'v1',
+    profile_json      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    analysis_run_id   TEXT,
+    confidence        DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_behavior_profiles_version ON public.agent_behavior_profiles(agent_version_id);

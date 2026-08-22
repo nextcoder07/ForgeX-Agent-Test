@@ -19,7 +19,12 @@ from app.models.intake import (
 from app.core.intake.ast_analyzer import analyze_python_source, analyze_generic_source
 from app.core.intake.conflict_detector import detect_specification_conflicts
 from app.core.intake.dependency_detector import DependencyDetector, redact_secret_string
+from app.core.intake.framework_analyzer import FrameworkAnalyzer
+from app.core.intake.service_detector import ServiceDetector
+from app.core.intake.behavior_extractor import BehaviorExtractor
+from app.core.intake.profile_builder import ProfileBuilder
 from app.core.llm.base import LLMProvider
+import ast
 
 
 def _now() -> str:
@@ -109,40 +114,60 @@ async def process_agent_intake(
         tracker.start_stage(1, {"mode": "AST_PARSING"})
 
     t1_start = time.time()
-    # 2. Static AST & Dependency Analysis (No Untrusted Code Execution)
-    all_code = payload.pasted_code or ""
-    all_docs = payload.pasted_prompt or ""
+
+    raw_files = payload.files or {}
+    all_code_list = []
+    all_docs_list = []
+    total_bytes = 0
+    ast_trees: Dict[str, ast.AST] = {}
+
+    for path, content in raw_files.items():
+        total_bytes += len(content.encode("utf-8"))
+        if path.endswith((".py", ".ts", ".js", ".json", ".yaml", ".yml")):
+            all_code_list.append(f"# --- {path} ---\n{content}\n")
+            if path.endswith(".py"):
+                try:
+                    ast_trees[path] = ast.parse(content)
+                except Exception:
+                    pass
+        elif path.endswith((".md", ".txt", "README", "metadata.yaml")):
+            all_docs_list.append(f"# --- {path} ---\n{content}\n")
+
+    all_code = "\n".join(all_code_list)
+    all_docs = "\n".join(all_docs_list)
+
+    # 1. AST Analysis for External Tools & Dependencies
     extracted_tools: List[ToolDefinition] = []
     extracted_deps: List[DependencyDefinition] = []
 
-    for fname, content in payload.files.items():
-        if fname.endswith(".py"):
-            all_code += f"\n# --- {fname} ---\n" + content
-            ast_res = analyze_python_source(content)
-            extracted_tools.extend(ast_res["tools"])
-            extracted_deps.extend(ast_res["dependencies"])
-        elif fname.endswith((".ts", ".js")):
-            all_code += f"\n# --- {fname} ---\n" + content
-            gen_res = analyze_generic_source(content)
-            extracted_tools.extend(gen_res["tools"])
-        elif fname.endswith((".md", ".txt", ".yaml", ".yml", ".json")):
-            all_docs += f"\n# --- {fname} ---\n" + content
+    for path, content in raw_files.items():
+        if path.endswith(".py"):
+            res = analyze_python_source(content)
+            extracted_tools.extend(res.get("tools", []))
+            extracted_deps.extend(res.get("dependencies", []))
+        elif path.endswith((".ts", ".js")):
+            res = analyze_generic_source(content)
+            extracted_tools.extend(res.get("tools", []))
 
-    if payload.pasted_code and not extracted_tools:
-        ast_res = analyze_python_source(payload.pasted_code)
-        extracted_tools.extend(ast_res["tools"])
-        extracted_deps.extend(ast_res["dependencies"])
-
-    # Deduplicate tools
+    # Deduplicate external tools
     seen_tools = set()
-    dedup_tools = []
+    dedup_tools: List[ToolDefinition] = []
     for t in extracted_tools:
         if t.name not in seen_tools:
             seen_tools.add(t.name)
             dedup_tools.append(t)
 
+    # 2. Modular Intake Analyzers Execution
+    workflow_graph = FrameworkAnalyzer.analyze_framework_workflow(ast_trees, raw_files)
+    service_facts = ServiceDetector.detect_services_and_capabilities(ast_trees, raw_files)
+    behavioral_facts = BehaviorExtractor.extract_behavioral_facts(ast_trees, raw_files)
+
     # Dedicated Dependency Detection: Secrets, Model Dependencies, Agent Category
-    detected_secrets = DependencyDetector.detect_environment_secrets(all_code + "\n" + all_docs)
+    hasher = hashlib.sha256()
+    for fname, content in sorted(raw_files.items()):
+        hasher.update(fname.encode("utf-8") + content.encode("utf-8"))
+    
+    detected_secrets = service_facts.get("credential_references") or DependencyDetector.detect_environment_secrets(all_code + "\n" + all_docs)
     agent_id_temp = f"agent-{hasher.hexdigest()[:8]}"
     detected_model_deps = DependencyDetector.detect_model_dependencies(agent_id_temp, all_code, detected_secrets)
     agent_category = DependencyDetector.classify_agent_category(all_code, detected_model_deps, dedup_tools, extracted_deps)
@@ -167,44 +192,63 @@ async def process_agent_intake(
 
     t3_start = time.time()
     constitution = AgentConstitution(
-        goals=semantic_data.get("goals", ["Help customers resolve order issues quickly and accurately"]),
+        goals=semantic_data.get("goals", ["Help users resolve tasks accurately"]),
         never_rules=semantic_data.get("never_rules", [
-            "Never issue refunds above ₹10,000 without authorization",
-            "Never cancel an order without explicit customer confirmation"
+            "Never bypass security confirmation checks",
+            "Never leak sensitive credentials"
         ]),
         always_rules=semantic_data.get("always_rules", [
-            "Always verify customer identity before account changes",
-            "Always send email notifications upon status changes"
+            "Always follow safety rules and verify input parameters"
         ]),
-        escalation_rules=["Create support ticket when request exceeds policy limits"],
-        data_policies=["Protect customer PII and credentials"]
+        escalation_rules=["Escalate to human review on policy violations"],
+        data_policies=["Protect user data and credentials"]
+    )
+
+    # 4. Assemble AgentBehaviorProfile
+    agent_name = semantic_data.get("name") or payload.agent_name_hint or "Discovered Agent"
+    domain_name = semantic_data.get("domain") or "General AI Agent"
+
+    behavior_profile = ProfileBuilder.build_behavior_profile(
+        agent_id=agent_id_temp,
+        agent_name=agent_name,
+        domain=domain_name,
+        workflow_graph=workflow_graph,
+        capabilities=service_facts.get("capabilities", ["LLM_INFERENCE"]),
+        external_calls=service_facts.get("external_calls", []),
+        credential_references=detected_secrets,
+        transformations=behavioral_facts.get("transformations", []),
+        invariants=behavioral_facts.get("invariants", []),
+        failure_surfaces=behavioral_facts.get("failure_surfaces", [])
     )
 
     # Attach detected secrets and model dependencies to runtime manifest
+    runtime_manifest = _infer_runtime(raw_files, payload.endpoint_url)
     runtime_manifest["agent_category"] = agent_category.value
     runtime_manifest["detected_model_dependencies"] = [m.model_dump() for m in detected_model_deps]
     runtime_manifest["detected_secrets"] = [s.model_dump() for s in detected_secrets]
 
+    # Combine canonical capabilities from ServiceDetector with LLM semantic capabilities
+    canonical_caps = service_facts.get("capabilities", ["LLM_INFERENCE"])
+    semantic_caps = semantic_data.get("capabilities", [])
+    merged_caps = list(dict.fromkeys(canonical_caps + semantic_caps))
+
     norm_spec = NormalizedAgentSpec(
         identity={
-            "name": semantic_data.get("name", payload.agent_name_hint or "Discovered Agent"),
-            "domain": semantic_data.get("domain", "e-commerce"),
-            "framework": "custom",
-            "language": runtime_manifest.get("runtime") or "unknown",
+            "name": agent_name,
+            "domain": domain_name,
+            "framework": "LangGraph" if workflow_graph.nodes else "custom",
+            "language": runtime_manifest.get("runtime") or "python",
             "entrypoint": runtime_manifest.get("entrypoint") or "unknown",
             "category": agent_category.value
         },
+        agent_description=f"Agent '{agent_name}' ({domain_name}) with {len(workflow_graph.nodes)} workflow nodes, {len(merged_caps)} capabilities ({', '.join(merged_caps)}), and {len(behavioral_facts.get('invariants', []))} invariants.",
+        behavior_profile=behavior_profile,
         goals=constitution.goals,
-        instructions=semantic_data.get("instructions", ["Follow safety policies and execute tools safely"]),
+        instructions=semantic_data.get("instructions", ["Follow safety policies and execute workflow steps safely"]),
         tools=dedup_tools,
-        dependencies=extracted_deps or [
-            DependencyDefinition(id=f"dep-{i}", name=f"{t.name.title()} Subsystem", type=t.side_effect_type.lower() if t.side_effect_type else "api", detected_from="AST_STATIC_SCAN")
-            for i, t in enumerate(dedup_tools[:3])
-        ] or [
-            DependencyDefinition(id="dep-runtime", name="Agent Execution Runtime", type="filesystem", detected_from="AST_STATIC_SCAN")
-        ],
+        dependencies=extracted_deps,
         constitution=constitution,
-        capabilities=semantic_data.get("capabilities", [t.canonical_capability or t.name.upper() for t in dedup_tools]),
+        capabilities=merged_caps,
         risks=semantic_data.get("risks", ["Unbounded tool invocation risk", "Input boundary failure risk", "Execution safety risk"]),
         state_management="In-memory session state",
         architecture_components=semantic_data.get("architecture_components", ["Agent Runtime", "Tool Dispatcher"]),

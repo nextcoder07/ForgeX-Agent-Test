@@ -44,6 +44,24 @@ class TrajectoryRecorder:
                 pass
             return step
 
+    def record_workflow_node_entered(self, node_id: str, input_state: Optional[Dict[str, Any]] = None) -> ExecutionStep:
+        return self.record_step("WORKFLOW_NODE_ENTERED", actor="workflow", input_data={"node_id": node_id, "state": input_state or {}})
+
+    def record_workflow_node_exited(self, node_id: str, output_state: Optional[Dict[str, Any]] = None) -> ExecutionStep:
+        return self.record_step("WORKFLOW_NODE_EXITED", actor="workflow", output_data={"node_id": node_id, "state": output_state or {}})
+
+    def record_tool_call(self, tool_name: str, arguments: Dict[str, Any], result: Dict[str, Any], status: str = "SUCCESS") -> ExecutionStep:
+        return self.record_step("TOOL_CALL_RESULT", actor="agent", input_data={"tool": tool_name, "args": arguments}, output_data=result, metadata={"status": status})
+
+    def record_llm_call(self, provider: str, model: str, prompt_summary: str, response: str) -> ExecutionStep:
+        return self.record_step("LLM_CALL_RESULT", actor="llm", input_data={"provider": provider, "model": model, "prompt": prompt_summary}, output_data={"response": response})
+
+    def record_sandbox_event(self, event_type: str, details: Dict[str, Any]) -> ExecutionStep:
+        return self.record_step(event_type, actor="sandbox", input_data=details)
+
+    def record_network_event(self, url: str, method: str, status_code: int, latency_ms: float) -> ExecutionStep:
+        return self.record_step("NETWORK_RESPONSE", actor="network", input_data={"url": url, "method": method}, output_data={"status_code": status_code, "latency_ms": latency_ms})
+
     def get_trajectory(self) -> List[ExecutionStep]:
         with self._lock:
             return list(self.steps)

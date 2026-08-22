@@ -41,12 +41,18 @@ class Scenario(BaseModel):
     category: ScenarioCategory
     title: str
     purpose: str
+    user_input: Optional[str] = None
     user_messages: List[str] = Field(default_factory=list)
     initial_state: Dict[str, Any] = Field(default_factory=dict)
     required_capabilities: List[str] = Field(default_factory=list)
+    required_services: List[str] = Field(default_factory=list)
     fault_injections: List[FaultInjection] = Field(default_factory=list)
+    environment_conditions: Dict[str, Any] = Field(default_factory=dict)
+    expected_behavior: Optional[str] = None
+    expected_state: Dict[str, Any] = Field(default_factory=dict)
     assertions: List[ScenarioAssertion] = Field(default_factory=list)
     safety_constraints: List[str] = Field(default_factory=list)
+    execution_limits: Dict[str, Any] = Field(default_factory=dict) # e.g. {"max_turns": 5, "timeout_seconds": 30}
     critic_passed: bool = True
     critic_notes: Optional[str] = None
     validation_status: str = "VALIDATED"  # "VALIDATED", "BLOCKED_DEPENDENCY", "REJECTED_CRITIC"

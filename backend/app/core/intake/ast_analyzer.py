@@ -51,22 +51,27 @@ def analyze_python_source(code: str) -> Dict[str, Any]:
                 params = [arg.arg for arg in node.args.args if arg.arg != "self"]
                 param_schema = {p: "string" if p != "amount" else "number" for p in params}
 
-                # Canonical capability classification
-                canonical = "GENERIC_TOOL"
-                if "customer" in fname_lower:
-                    canonical = "CUSTOMER_LOOKUP"
-                elif "order" in fname_lower and "refund" not in fname_lower and "cancel" not in fname_lower:
-                    canonical = "ORDER_LOOKUP"
-                elif "refund" in fname_lower or "payout" in fname_lower:
-                    canonical = "REFUND_TRANSACTION"
-                elif "cancel" in fname_lower:
-                    canonical = "ORDER_CANCELLATION"
-                elif "address" in fname_lower:
-                    canonical = "ADDRESS_UPDATE"
-                elif "email" in fname_lower or "send" in fname_lower:
-                    canonical = "EMAIL_NOTIFICATION"
-                elif "search" in fname_lower or "knowledge" in fname_lower:
-                    canonical = "KNOWLEDGE_SEARCH"
+                # Check if function is decorated with @tool or explicit tool definition
+                is_explicit_tool = False
+                for dec in node.decorator_list:
+                    dec_name = dec.id if isinstance(dec, ast.Name) else (dec.func.id if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name) else "")
+                    if dec_name == "tool":
+                        is_explicit_tool = True
+                        break
+
+                # Exclude internal workflow functions, nodes, and constructors unless explicitly decorated with @tool
+                is_workflow_fn = (
+                    not is_explicit_tool and (
+                        "state" in params or
+                        node.name in ["build_graph", "create_graph", "search_web", "synthesize_report", "process_node", "execute_step"] or
+                        "graph" in fname_lower or
+                        any(arg in ["state", "messages"] for arg in params)
+                    )
+                )
+
+                if is_workflow_fn:
+                    # Do not misclassify internal workflow functions as external tools
+                    continue
 
                 tools.append(
                     ToolDefinition(
