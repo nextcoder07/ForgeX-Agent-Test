@@ -26,7 +26,8 @@ class ExecutionController:
     async def run_session(
         agent: AgentRecord,
         scenario: Scenario,
-        evaluation_run_id: Optional[str] = None
+        evaluation_run_id: Optional[str] = None,
+        provided_secrets: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         session_id = f"exec-{uuid.uuid4().hex[:8]}"
         session = ExecutionSession(
@@ -46,7 +47,7 @@ class ExecutionController:
         state_tracker = StateTracker(initial_state=scenario.initial_state)
 
         # Run agent in controlled environment
-        res = await run_agent_in_environment(agent, scenario, recorder, action_tracker, state_tracker)
+        res = await run_agent_in_environment(agent, scenario, recorder, action_tracker, state_tracker, provided_secrets=provided_secrets)
         trace = res["trace"]
 
         # Finalize metrics

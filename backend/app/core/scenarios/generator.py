@@ -13,7 +13,6 @@ import asyncio
 
 from app.models.agent_test_spec import AgentTestSpecification, ScenarioDefinition
 from app.core.llm.gemini_provider import GeminiProvider
-from app.core.llm.fallback_mock import FallbackMockEngine
 
 logger = logging.getLogger(__name__)
 

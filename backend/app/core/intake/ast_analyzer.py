@@ -1,131 +1,145 @@
 """
-AST Static Code Analyzer for Python and TypeScript Agent Projects.
-Extracts classes, function signatures, parameters, decorators, docstrings, and imports.
+Pure Structural AST Code Analyzer for Agent Source Files.
+Extracts structural code facts (functions, classes, parameters, decorators, docstrings, imports, calls, constants)
+without making semantic capability or domain-specific risk decisions.
 """
 
 from __future__ import annotations
 
 import ast
-import re
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from app.models.agent import ToolDefinition, ToolRisk, DependencyDefinition
 
 logger = logging.getLogger(__name__)
 
 
-def analyze_python_source(code: str) -> Dict[str, Any]:
-    """Parse Python code using AST module to extract functions, classes, and tool definitions."""
-    classes: List[str] = []
-    functions: List[str] = []
+def analyze_python_source(code: str, filename: str = "agent.py") -> Dict[str, Any]:
+    """Parse Python code using AST module to extract pure structural code facts."""
+    classes: List[Dict[str, Any]] = []
+    functions: List[Dict[str, Any]] = []
     tools: List[ToolDefinition] = []
     dependencies: List[DependencyDefinition] = []
     docstrings: List[str] = []
+    imports: List[Dict[str, Any]] = []
+    constants: List[Dict[str, Any]] = []
 
     try:
         tree = ast.parse(code)
         for node in ast.walk(tree):
+            # 1. Class Definitions & State Models (TypedDict / BaseModel)
             if isinstance(node, ast.ClassDef):
-                classes.append(node.name)
+                base_names = []
+                for base in node.bases:
+                    if isinstance(base, ast.Name):
+                        base_names.append(base.id)
+                    elif isinstance(base, ast.Attribute):
+                        base_names.append(base.attr)
+
+                fields = []
+                for item in node.body:
+                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                        fields.append(item.target.id)
+
+                classes.append({
+                    "name": node.name,
+                    "base_classes": base_names,
+                    "fields": fields,
+                    "line": getattr(node, "lineno", 1)
+                })
+
+            # 2. Function Definitions
             elif isinstance(node, ast.FunctionDef):
-                functions.append(node.name)
                 doc = ast.get_docstring(node) or ""
                 if doc:
                     docstrings.append(f"{node.name}: {doc}")
 
-                if node.name.startswith("_") or node.name.lower() in ("main", "cli", "run", "setup", "teardown"):
-                    continue
-
-                fname_lower = node.name.lower()
-
-                is_destructive = any(k in fname_lower for k in ["refund", "cancel", "delete", "remove", "payout", "drop", "write"])
-                requires_auth = "refund" in fname_lower or "payout" in fname_lower or "pay" in fname_lower
-                requires_conf = "cancel" in fname_lower or "delete" in fname_lower or "drop" in fname_lower
-
-                risk = ToolRisk.LOW
-                if is_destructive or requires_auth:
-                    risk = ToolRisk.CRITICAL if requires_auth else ToolRisk.HIGH
-                elif any(k in fname_lower for k in ["update", "modify", "send", "write"]):
-                    risk = ToolRisk.MEDIUM
-
                 params = [arg.arg for arg in node.args.args if arg.arg != "self"]
-                param_schema = {p: "string" if p != "amount" else "number" for p in params}
+                param_schema = {p: "string" for p in params}
 
-                # Check if function is decorated with @tool or explicit tool definition
+                decorators = []
                 is_explicit_tool = False
                 for dec in node.decorator_list:
                     dec_name = dec.id if isinstance(dec, ast.Name) else (dec.func.id if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name) else "")
-                    if dec_name == "tool":
+                    if dec_name:
+                        decorators.append(dec_name)
+                    if dec_name in ["tool", "agent_tool", "command"]:
                         is_explicit_tool = True
-                        break
 
-                # Exclude internal workflow functions, nodes, and constructors unless explicitly decorated with @tool
-                is_workflow_fn = (
-                    not is_explicit_tool and (
-                        "state" in params or
-                        node.name in ["build_graph", "create_graph", "search_web", "synthesize_report", "process_node", "execute_step"] or
-                        "graph" in fname_lower or
-                        any(arg in ["state", "messages"] for arg in params)
+                # Extract calls made inside this function
+                calls_made = []
+                for sub in ast.walk(node):
+                    if isinstance(sub, ast.Call):
+                        if isinstance(sub.func, ast.Name):
+                            calls_made.append(sub.func.id)
+                        elif isinstance(sub.func, ast.Attribute):
+                            calls_made.append(sub.func.attr)
+
+                fn_info = {
+                    "name": node.name,
+                    "parameters": params,
+                    "decorators": decorators,
+                    "docstring": doc,
+                    "line": getattr(node, "lineno", 1),
+                    "is_explicit_tool": is_explicit_tool,
+                    "calls_made": calls_made
+                }
+                functions.append(fn_info)
+
+                # ONLY explicitly decorated functions or explicit tool classes are exposed as external tools
+                if is_explicit_tool:
+                    tools.append(
+                        ToolDefinition(
+                            name=node.name,
+                            description=doc or f"Executes {node.name}({', '.join(params)})",
+                            parameters_schema=param_schema,
+                            risk=ToolRisk.LOW,
+                            is_destructive=False,
+                            requires_confirmation=False,
+                            requires_authorization=False,
+                            canonical_capability="CUSTOM_TOOL",
+                            side_effect_type="READ"
+                        )
                     )
-                )
 
-                if is_workflow_fn:
-                    # Do not misclassify internal workflow functions as external tools
-                    continue
-
-                tools.append(
-                    ToolDefinition(
-                        name=node.name,
-                        description=doc or f"Executes {node.name}({', '.join(params)})",
-                        parameters_schema=param_schema,
-                        risk=risk,
-                        is_destructive=is_destructive,
-                        requires_confirmation=requires_conf,
-                        requires_authorization=requires_auth,
-                        max_amount=10000.0 if requires_auth else None,
-                        canonical_capability=canonical,
-                        side_effect_type="WRITE" if is_destructive else "READ"
-                    )
-                )
-
+            # 3. Imports
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 mod_name = getattr(node, "module", None)
-                if not mod_name and hasattr(node, "names") and node.names:
-                    mod_name = node.names[0].name
-                if mod_name:
-                    if any(k in mod_name for k in ["psycopg", "sqlalchemy", "sqlite", "postgres"]):
-                        dependencies.append(DependencyDefinition(id="dep-db", name="PostgreSQL Database", type="database", detected_from="AST_IMPORT"))
-                    elif any(k in mod_name for k in ["requests", "httpx", "urllib", "aiohttp"]):
-                        dependencies.append(DependencyDefinition(id="dep-http", name="External HTTP REST API", type="http", detected_from="AST_IMPORT"))
-                    elif any(k in mod_name for k in ["smtplib", "sendgrid"]):
-                        dependencies.append(DependencyDefinition(id="dep-email", name="SendGrid / SMTP Email Service", type="email", detected_from="AST_IMPORT"))
-                    elif any(k in mod_name for k in ["playwright", "selenium"]):
-                        dependencies.append(DependencyDefinition(id="dep-browser", name="Headless Browser Controller", type="browser", detected_from="AST_IMPORT"))
+                names = [n.name for n in getattr(node, "names", [])]
+                imports.append({
+                    "module": mod_name or (names[0] if names else ""),
+                    "names": names,
+                    "line": getattr(node, "lineno", 1)
+                })
+
+            # 4. Constants
+            elif isinstance(node, ast.Constant):
+                constants.append({
+                    "value": node.value,
+                    "type": type(node.value).__name__,
+                    "line": getattr(node, "lineno", 1)
+                })
 
     except Exception as e:
-        logger.warning(f"Python AST analysis error: {e}")
-
-    # Deduplicate dependencies
-    seen = set()
-    dedup_deps = []
-    for d in dependencies:
-        if d.name not in seen:
-            seen.add(d.name)
-            dedup_deps.append(d)
+        logger.warning(f"Python AST analysis error in {filename}: {e}")
 
     return {
         "classes": classes,
         "functions": functions,
         "tools": tools,
-        "dependencies": dedup_deps,
-        "docstrings": docstrings
+        "dependencies": dependencies,
+        "docstrings": docstrings,
+        "imports": imports,
+        "constants": constants
     }
 
 
-def analyze_generic_source(text: str) -> Dict[str, Any]:
-    """Regex fallback for TypeScript, JS, and plain text tool signatures."""
+def analyze_generic_source(text: str, filename: str = "agent.ts") -> Dict[str, Any]:
+    """Structural regex fallback for non-Python files with low confidence flag."""
     tools: List[ToolDefinition] = []
-    # Match JS/TS function or method definitions
+    functions: List[Dict[str, Any]] = []
+
+    # Match functions with low confidence flag
     pattern = r"(?:async\s+)?(?:function\s+|def\s+)?([a-zA-Z0-9_]+)\s*\(([^)]*)\)"
     matches = re.findall(pattern, text)
 
@@ -133,20 +147,21 @@ def analyze_generic_source(text: str) -> Dict[str, Any]:
         if fn_name in ["if", "for", "while", "catch", "switch", "__init__"]:
             continue
         params = [p.strip().split(":")[0] for p in params_str.split(",") if p.strip()]
-        is_destructive = any(k in fn_name.lower() for k in ["refund", "cancel", "delete", "payout"])
-        requires_auth = "refund" in fn_name.lower() or "payout" in fn_name.lower()
+        functions.append({
+            "name": fn_name,
+            "parameters": params,
+            "decorators": [],
+            "docstring": "",
+            "is_explicit_tool": False,
+            "calls_made": []
+        })
 
-        tools.append(
-            ToolDefinition(
-                name=fn_name,
-                description=f"Auto-extracted tool signature {fn_name}({', '.join(params)})",
-                parameters_schema={p: "string" for p in params},
-                risk=ToolRisk.CRITICAL if requires_auth else ToolRisk.LOW,
-                is_destructive=is_destructive,
-                requires_authorization=requires_auth,
-                max_amount=10000.0 if requires_auth else None,
-                canonical_capability="CUSTOM_CAPABILITY"
-            )
-        )
-
-    return {"tools": tools, "dependencies": []}
+    return {
+        "classes": [],
+        "functions": functions,
+        "tools": tools, # Do not invent external tools without explicit tool decorator
+        "dependencies": [],
+        "docstrings": [],
+        "imports": [],
+        "constants": []
+    }

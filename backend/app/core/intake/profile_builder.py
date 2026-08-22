@@ -1,7 +1,8 @@
 """
-Profile Builder Module.
+Pure Assembler Profile Builder Module.
 Assembles structural facts, framework workflows, capability mappings, code invariants,
 data transformations, and failure surfaces into a versioned AgentBehaviorProfile.
+Never hardcodes default domain inputs, outputs, or state assumptions.
 """
 
 from __future__ import annotations
@@ -38,23 +39,29 @@ class ProfileBuilder:
         transformations: List[DataTransformation],
         invariants: List[CodeInvariant],
         failure_surfaces: List[FailureSurface],
+        state_model: Optional[Dict[str, Any]] = None,
+        inputs: Optional[List[Dict[str, Any]]] = None,
+        outputs: Optional[List[Dict[str, Any]]] = None,
+        security_surfaces: Optional[List[Dict[str, Any]]] = None,
         conflicts: Optional[List[DeclaredVsImplementedConflict]] = None,
         agent_version_id: Optional[str] = None,
         analysis_run_id: Optional[str] = None
     ) -> AgentBehaviorProfile:
-        """Assembles comprehensive AgentBehaviorProfile facts container."""
+        """Pure assembler: aggregates extracted facts into versioned AgentBehaviorProfile."""
 
-        # Evaluate readiness breakdown
-        has_creds = len(credential_references) == 0 or all(c.masked_sample != "KEY_*****" for c in credential_references)
-        
+        # Lifecycle readiness during Intake Analysis:
+        # Sandbox has not been built yet -> sandbox_ready = False
+        # Execution is blocked until sandbox and credentials are valid -> execution_ready = False
+        has_creds = len(credential_references) == 0
+
         readiness = ReadinessBreakdown(
             analysis_ready=True,
             runtime_ready=True,
             dependencies_ready=True,
             credentials_ready=has_creds,
-            sandbox_ready=True,
-            execution_ready=has_creds,
-            blocked_reasons=[] if has_creds else [f"Missing required API credentials: {[c.name for c in credential_references]}"]
+            sandbox_ready=False,
+            execution_ready=False,
+            blocked_reasons=[f"Missing required API credentials: {[c.name for c in credential_references]}"] if not has_creds else ["Sandbox environment not yet built"]
         )
 
         profile_id = f"abp-{uuid.uuid4().hex[:8]}"
@@ -71,23 +78,21 @@ class ProfileBuilder:
             },
             goal=f"Execute {domain} tasks using discovered workflow nodes and external capabilities.",
             workflow_graph=workflow_graph,
-            inputs=[{"name": "query", "type": "string", "description": "User search query or instructions"}],
-            outputs=[{"name": "report", "type": "string", "description": "Synthesized research report"}],
-            state_model={"type": "TypedDict/dict", "fields": ["query", "messages", "search_results", "report"]},
+            inputs=inputs or [],
+            outputs=outputs or [],
+            state_model=state_model or {},
             external_calls=external_calls,
             capabilities=capabilities,
             data_transformations=transformations,
             invariants=invariants,
             failure_surfaces=failure_surfaces,
-            security_surfaces=[
-                {"surface": "EXTERNAL_CONTENT_INJECTION", "risk": "Prompt injection payload in retrieved web content", "severity": "high"}
-            ],
-            side_effects=["External HTTP calls to web search and LLM inference providers"],
-            declared_behaviors=["Perform web search", "Synthesize research report"],
+            security_surfaces=security_surfaces or [],
+            side_effects=[f"External service call to {c.get('capability', 'API')}" for c in external_calls],
+            declared_behaviors=[f"Capability: {cap}" for cap in capabilities],
             observed_behaviors=[f"Workflow graph with {len(workflow_graph.nodes)} nodes"],
             conflicts=conflicts or [],
             readiness=readiness,
-            confidence_score=0.98,
+            confidence_score=0.98 if capabilities or workflow_graph.nodes else 0.5,
             analysis_run_id=analysis_run_id or f"run-{uuid.uuid4().hex[:6]}",
             created_at=_now()
         )

@@ -1,5 +1,5 @@
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.models.agent import AgentRecord
 from app.models.scenario import Scenario
 from app.core.execution.trajectory_recorder import TrajectoryRecorder
@@ -12,7 +12,8 @@ async def run_agent_in_environment(
     scenario: Scenario,
     recorder: TrajectoryRecorder,
     action_tracker: ActionTracker,
-    state_tracker: StateTracker
+    state_tracker: StateTracker,
+    provided_secrets: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """Runs the agent inside the controlled sandbox environment while logging trajectory steps."""
     
@@ -25,8 +26,8 @@ async def run_agent_in_environment(
         )
 
     start_t = time.time()
-    # 2. Execute scenario via sandboxed runner
-    trace = run_scenario_in_sandbox(agent, scenario)
+    # 2. Execute scenario via sandboxed runner with provided secrets
+    trace = run_scenario_in_sandbox(agent, scenario, provided_secrets=provided_secrets)
     dur_ms = (time.time() - start_t) * 1000.0
 
     # 3. Log actions & state changes into trajectory recorder

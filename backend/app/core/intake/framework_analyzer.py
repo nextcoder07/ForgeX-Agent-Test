@@ -1,41 +1,41 @@
 """
 Framework Analyzer Module.
-Extracts structured WorkflowGraph (nodes, edges, entrypoint, terminal nodes, state dependencies)
-dynamically across frameworks (LangGraph, AutoGen, CrewAI, generic scripts) without hardcoding agent function names.
+Extracts structured WorkflowGraph and Framework Identity strictly based on code evidence
+(e.g., LangGraph StateGraph, CrewAI Agent/Crew, AutoGen ConversableAgent, or generic script).
+Never invents sequential edges when no framework workflow is proven.
 """
 
 from __future__ import annotations
 
 import ast
 from typing import Dict, List, Any, Optional
-from app.models.agent_behavior import WorkflowGraph, WorkflowNode, FunctionClassification
+from app.models.agent_behavior import WorkflowGraph, WorkflowNode
 
 
 class FrameworkAnalyzer:
     @staticmethod
-    def analyze_framework_workflow(ast_trees: Dict[str, ast.AST], raw_files: Dict[str, str]) -> WorkflowGraph:
-        """Dynamically inspects AST trees across files to extract structured workflow graph."""
+    def analyze_framework_workflow(ast_trees: Dict[str, ast.AST], raw_files: Dict[str, str]) -> Dict[str, Any]:
+        """Dynamically inspects AST trees to extract framework identity and structured workflow graph."""
         nodes: List[WorkflowNode] = []
         edges: List[Dict[str, str]] = []
         entrypoint = "START"
         terminal_nodes: List[str] = []
+        framework_name = "unknown"
+        framework_confidence = 0.1
+        evidence: List[str] = []
 
-        # 1. Inspect for LangGraph workflow constructs
-        langgraph_found = False
+        # 1. LangGraph Framework Detection
         for fname, tree in ast_trees.items():
             for node in ast.walk(tree):
-                # Detect StateGraph instantiation
+                # Detect StateGraph or MessageGraph instantiation
                 if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-                    func_name = ""
-                    if isinstance(node.value.func, ast.Name):
-                        func_name = node.value.func.id
-                    elif isinstance(node.value.func, ast.Attribute):
-                        func_name = node.value.func.attr
-
+                    func_name = FrameworkAnalyzer._extract_callable_name(node.value.func)
                     if "StateGraph" in func_name or "MessageGraph" in func_name:
-                        langgraph_found = True
+                        framework_name = "LangGraph"
+                        framework_confidence = 0.99
+                        evidence.append(f"StateGraph instantiated in {fname}")
 
-                # Detect add_node calls: builder.add_node("search", search_web)
+                # Detect builder.add_node("node_name", function_reference)
                 if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
                     call = node.value
                     if isinstance(call.func, ast.Attribute) and call.func.attr == "add_node":
@@ -51,17 +51,20 @@ class FrameworkAnalyzer:
                                         node_type="node"
                                     )
                                 )
+                                evidence.append(f"add_node('{node_id}', {impl_func})")
 
-                    # Detect set_entry_point: builder.set_entry_point("search")
+                    # Detect set_entry_point / set_finish_point
                     elif isinstance(call.func, ast.Attribute) and call.func.attr in ["set_entry_point", "set_finish_point"]:
                         if len(call.args) >= 1:
                             target_id = FrameworkAnalyzer._extract_string(call.args[0])
                             if target_id and call.func.attr == "set_entry_point":
                                 entrypoint = target_id
                                 edges.append({"source": "START", "target": target_id})
+                                evidence.append(f"set_entry_point('{target_id}')")
                             elif target_id and call.func.attr == "set_finish_point":
                                 terminal_nodes.append(target_id)
                                 edges.append({"source": target_id, "target": "END"})
+                                evidence.append(f"set_finish_point('{target_id}')")
 
                     # Detect add_edge: builder.add_edge("search", "synthesize")
                     elif isinstance(call.func, ast.Attribute) and call.func.attr == "add_edge":
@@ -70,55 +73,67 @@ class FrameworkAnalyzer:
                             tgt = FrameworkAnalyzer._extract_string(call.args[1])
                             if src and tgt:
                                 edges.append({"source": src, "target": tgt})
+                                evidence.append(f"add_edge('{src}', '{tgt}')")
 
-                    # Detect add_conditional_edges: builder.add_conditional_edges(...)
+                    # Detect add_conditional_edges
                     elif isinstance(call.func, ast.Attribute) and call.func.attr == "add_conditional_edges":
                         if len(call.args) >= 1:
                             src = FrameworkAnalyzer._extract_string(call.args[0])
                             if src:
                                 edges.append({"source": src, "target": "CONDITIONAL_BRANCH"})
+                                evidence.append(f"add_conditional_edges('{src}')")
 
-        # Fallback to function definitions if no explicit LangGraph add_node was parsed
-        if not nodes:
+        # 2. CrewAI Framework Detection
+        if framework_name == "unknown":
+            all_text = " ".join(raw_files.values())
+            if "from crewai" in all_text or "import Crew" in all_text or "Agent(" in all_text:
+                framework_name = "CrewAI"
+                framework_confidence = 0.95
+                evidence.append("CrewAI SDK imported/instantiated")
+
+        # 3. AutoGen Framework Detection
+        if framework_name == "unknown":
+            all_text = " ".join(raw_files.values())
+            if "autogen" in all_text or "ConversableAgent" in all_text or "UserProxyAgent" in all_text:
+                framework_name = "AutoGen"
+                framework_confidence = 0.95
+                evidence.append("AutoGen SDK imported/instantiated")
+
+        # 4. Fallback for Generic / Script (No framework):
+        # Do NOT invent sequential edges! Only report verified functions as nodes with low framework confidence.
+        if framework_name == "unknown" and not nodes:
             for fname, tree in ast_trees.items():
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
-                        # Skip main or builder constructors
-                        if node.name in ["main", "build_graph", "create_agent", "setup"]:
-                            continue
-                        
-                        # Infer node if function takes state or returns state dict
-                        is_workflow_node = any(arg.arg in ["state", "messages", "inputs"] for arg in node.args.args)
-                        if is_workflow_node or "search" in node.name or "synthesize" in node.name or "process" in node.name:
+                        if node.name not in ["main", "setup", "teardown", "__init__"]:
                             nodes.append(
                                 WorkflowNode(
                                     id=node.name,
                                     name=node.name,
                                     implementation=node.name,
-                                    node_type="node"
+                                    node_type="function"
                                 )
                             )
 
-            if len(nodes) >= 2:
-                entrypoint = nodes[0].id
-                edges.append({"source": "START", "target": nodes[0].id})
-                for i in range(len(nodes) - 1):
-                    edges.append({"source": nodes[i].id, "target": nodes[i+1].id})
-                edges.append({"source": nodes[-1].id, "target": "END"})
-                terminal_nodes.append(nodes[-1].id)
-
-        if "END" not in terminal_nodes and edges:
+        # Normalize terminal nodes if edges exist
+        if edges and "END" not in terminal_nodes:
             last_target = edges[-1].get("target")
             if last_target and last_target != "END":
-                edges.append({"source": last_target, "target": "END"})
                 terminal_nodes.append(last_target)
 
-        return WorkflowGraph(
+        workflow_graph = WorkflowGraph(
             nodes=nodes,
             edges=edges,
             entrypoint=entrypoint,
             terminal_nodes=terminal_nodes
         )
+
+        return {
+            "framework": framework_name,
+            "confidence": framework_confidence,
+            "evidence": evidence,
+            "workflow_graph": workflow_graph
+        }
 
     @staticmethod
     def _extract_string(node: ast.AST) -> str:
@@ -132,6 +147,14 @@ class FrameworkAnalyzer:
 
     @staticmethod
     def _extract_name(node: ast.AST) -> str:
+        if isinstance(node, ast.Name):
+            return node.id
+        elif isinstance(node, ast.Attribute):
+            return node.attr
+        return ""
+
+    @staticmethod
+    def _extract_callable_name(node: ast.AST) -> str:
         if isinstance(node, ast.Name):
             return node.id
         elif isinstance(node, ast.Attribute):

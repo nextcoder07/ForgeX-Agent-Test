@@ -1,8 +1,8 @@
 """
 Service & Capability Detector Module.
 Generic SDK/client and credential detector that maps external integrations to capabilities
-(e.g., TavilySearch -> WEB_SEARCH, ChatOpenAI -> LLM_INFERENCE) and extracts credential references
-without hardcoding agent-specific function rules.
+strictly based on AST evidence and environment variable declarations.
+Never fabricates default capabilities (e.g. LLM_INFERENCE) when not present in source code.
 """
 
 from __future__ import annotations
@@ -36,15 +36,16 @@ class ServiceDetector:
 
     @staticmethod
     def detect_services_and_capabilities(ast_trees: Dict[str, ast.AST], raw_files: Dict[str, str]) -> Dict[str, Any]:
-        """Detects external service calls, capabilities, and required credential references."""
+        """Detects external service calls, capabilities, and credential references strictly from code evidence."""
         external_calls: List[Dict[str, Any]] = []
         capabilities: List[str] = []
         credential_refs: List[DetectedSecret] = []
         discovered_secrets_set = set()
 
-        # 1. Parse raw env files (.env, .env.example) for credentials
+        # 1. Parse declared credentials from env template files (.env.example, .env.sample)
         for fname, content in raw_files.items():
             if ".env" in fname.lower():
+                is_example = "example" in fname.lower() or "sample" in fname.lower()
                 for line in content.splitlines():
                     line = line.strip()
                     if line and not line.startswith("#") and "=" in line:
@@ -54,16 +55,16 @@ class ServiceDetector:
                             credential_refs.append(
                                 DetectedSecret(
                                     name=key_name,
-                                    type="credential",
+                                    type="declared_in_template" if is_example else "configured_in_env",
                                     required=True,
-                                    masked_sample="KEY_*****"
+                                    masked_sample=f"[{'TEMPLATE' if is_example else 'CONFIGURED'}]"
                                 )
                             )
 
-        # 2. Parse AST trees for SDK class instantiations, imports, and os.getenv calls
+        # 2. Parse AST trees for SDK class instantiations, imports, and os.getenv references
         for fname, tree in ast_trees.items():
             for node in ast.walk(tree):
-                # Detect Class Instantiation (e.g., TavilySearch(), ChatOpenAI())
+                # Detect Class Instantiations (e.g. TavilySearch(), ChatOpenAI())
                 if isinstance(node, ast.Call):
                     class_name = ServiceDetector._get_callable_name(node.func)
                     if class_name:
@@ -75,10 +76,11 @@ class ServiceDetector:
                                     "class_name": class_name,
                                     "capability": cap,
                                     "file": fname,
-                                    "line": getattr(node, "lineno", 1)
+                                    "line": getattr(node, "lineno", 1),
+                                    "evidence": f"Instantiated {class_name}() in {fname}"
                                 })
 
-                # Detect Imports (e.g. from langchain_tavily import TavilySearch)
+                # Detect Imports (e.g. from langchain_openai import ChatOpenAI)
                 elif isinstance(node, ast.ImportFrom):
                     mod = node.module or ""
                     for alias in node.names:
@@ -88,7 +90,7 @@ class ServiceDetector:
                                 if cap not in capabilities:
                                     capabilities.append(cap)
 
-                # Detect os.getenv / os.environ credential references
+                # Detect os.getenv / os.environ references in code
                 elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                     if node.func.attr in ["getenv", "get"] and len(node.args) >= 1:
                         if isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
@@ -99,16 +101,13 @@ class ServiceDetector:
                                     credential_refs.append(
                                         DetectedSecret(
                                             name=sec_name,
-                                            type="credential",
+                                            type="referenced_in_code",
                                             required=True,
-                                            masked_sample="KEY_*****"
+                                            masked_sample="[REFERENCED_IN_CODE]"
                                         )
                                     )
 
-        # Fallback default capabilities if none discovered
-        if not capabilities:
-            capabilities.append("LLM_INFERENCE")
-
+        # Pure evidence: do NOT fabricate default LLM_INFERENCE if none discovered
         return {
             "external_calls": external_calls,
             "capabilities": capabilities,

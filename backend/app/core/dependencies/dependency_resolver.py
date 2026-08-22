@@ -1,9 +1,10 @@
 """
-DependencyResolver Module.
-Resolves agent execution mode (Faithful, Compatible, Simulation) based on detected model dependencies
-and available system credentials or local servers.
-Enforces the critical principle:
-NEVER silently replace LLM model, API provider, tool, dependency, or environment without recording it!
+Evidence-Based DependencyResolver Module.
+Resolves execution bindings across 4 distinct layers:
+1. Requirement Extractor: Pure facts from AgentBehaviorProfile & AST (never fabricates gpt-5 or fake models).
+2. Binding Resolver: Maps requirements against platform vault and user credentials.
+3. Execution Mode Resolver: Enforces strict non-degrading modes (FAITHFUL, COMPATIBLE, SIMULATION).
+4. Credential Gatekeeper: Mode-specific credential demand evaluator (never forces Gemini on Faithful mode).
 """
 
 from __future__ import annotations
@@ -19,10 +20,14 @@ from app.models.dependency_model import (
     EvaluationFidelity,
     AgentModelDependency,
     ExecutionModelBinding,
+    DependencyRequirement,
+    ServiceBindingItem,
+    ExecutionDependencyBinding,
     DependencyResolverResult,
     SystemCredentialItem,
     CredentialRequirement,
     SessionCredentialPrompt,
+    DetectedSecret,
 )
 
 
@@ -31,6 +36,109 @@ def _now() -> str:
 
 
 class DependencyResolver:
+    # -------------------------------------------------------------------------
+    # LAYER 1: Requirement Extractor
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def extract_requirements(agent: AgentRecord) -> List[DependencyRequirement]:
+        """Extracts normalized dependency requirements strictly from AST evidence and manifest facts."""
+        requirements: List[DependencyRequirement] = []
+        raw_manifest = agent.runtime_manifest or {}
+
+        # 1. Runtime requirement
+        runtime_name = raw_manifest.get("runtime", "python")
+        runtime_version = raw_manifest.get("version", "3.12")
+        requirements.append(
+            DependencyRequirement(
+                id=f"req-rt-{agent.id}",
+                type="runtime",
+                provider=runtime_name,
+                model=runtime_version,
+                required=True,
+                source="runtime_manifest",
+                binding_status="FULFILLED"
+            )
+        )
+
+        # 2. Package / Framework dependencies
+        for dep in agent.dependencies:
+            dep_type = str(dep.type).lower() if hasattr(dep.type, "value") else str(dep.type).lower()
+            if dep_type in ["package", "framework"]:
+                requirements.append(
+                    DependencyRequirement(
+                        id=f"req-pkg-{dep.name.lower()}",
+                        type="package",
+                        provider=dep.name,
+                        required=dep.required,
+                        source=dep.detected_from or "requirements_txt",
+                        binding_status="FULFILLED"
+                    )
+                )
+
+        # 3. Model / LLM dependencies
+        raw_model_deps = raw_manifest.get("detected_model_dependencies", [])
+        if raw_model_deps:
+            for idx, d in enumerate(raw_model_deps):
+                prov = d.get("provider", "UNKNOWN") if isinstance(d, dict) else getattr(d, "provider", "UNKNOWN")
+                mname = d.get("model_name", "UNKNOWN") if isinstance(d, dict) else getattr(d, "model_name", "UNKNOWN")
+                cred = f"{prov.upper()}_API_KEY" if prov.lower() in ["openai", "anthropic", "google", "gemini"] else None
+                requirements.append(
+                    DependencyRequirement(
+                        id=f"req-llm-{agent.id}-{idx+1}",
+                        type="llm",
+                        provider=prov,
+                        capability="LLM_INFERENCE",
+                        model=mname,
+                        credential=cred,
+                        required=True,
+                        source="ast_code_scan",
+                        binding_status="MISSING"
+                    )
+                )
+        else:
+            # Check agent category
+            cat = raw_manifest.get("agent_category", AgentCategory.RULE_BASED.value)
+            if cat not in [AgentCategory.RULE_BASED.value, AgentCategory.LOCAL_MODEL.value]:
+                # Unknown model
+                requirements.append(
+                    DependencyRequirement(
+                        id=f"req-llm-{agent.id}-unk",
+                        type="llm",
+                        provider="UNKNOWN",
+                        capability="LLM_INFERENCE",
+                        model="UNKNOWN",
+                        required=False,
+                        source="ast_code_scan",
+                        binding_status="MISSING"
+                    )
+                )
+
+        # 4. External Services & Tool Credentials from detected secrets
+        detected_secrets = raw_manifest.get("detected_secrets", [])
+        for sec in detected_secrets:
+            s_name = sec.get("name") if isinstance(sec, dict) else getattr(sec, "name", "")
+            if s_name and not any(r.credential == s_name for r in requirements):
+                # Infer provider from credential name (e.g. TAVILY_API_KEY -> Tavily)
+                prov_inferred = s_name.split("_")[0].title()
+                cap_inferred = "WEB_SEARCH" if "TAVILY" in s_name or "SERPER" in s_name else "EXTERNAL_SERVICE"
+                requirements.append(
+                    DependencyRequirement(
+                        id=f"req-cred-{s_name.lower()}",
+                        type="service",
+                        provider=prov_inferred,
+                        capability=cap_inferred,
+                        credential=s_name,
+                        required=True,
+                        source="env_template_or_ast",
+                        binding_status="MISSING"
+                    )
+                )
+
+        return requirements
+
+    # -------------------------------------------------------------------------
+    # LAYER 2 & 3: Binding Resolver & Mode Resolver
+    # -------------------------------------------------------------------------
     @staticmethod
     def resolve_mode(
         agent: AgentRecord,
@@ -41,7 +149,6 @@ class DependencyResolver:
         secrets = provided_secrets or {}
         exec_id = execution_id or f"run-{uuid.uuid4().hex[:8]}"
 
-        # Extract detected model dependencies from runtime manifest or build defaults
         raw_manifest = agent.runtime_manifest or {}
         raw_category = raw_manifest.get("agent_category", AgentCategory.LLM_POWERED.value)
         try:
@@ -49,172 +156,291 @@ class DependencyResolver:
         except Exception:
             agent_category = AgentCategory.LLM_POWERED
 
-        raw_deps = raw_manifest.get("detected_model_dependencies", [])
-        model_deps: List[AgentModelDependency] = []
-        for d in raw_deps:
-            if isinstance(d, dict):
-                model_deps.append(AgentModelDependency(**d))
-            elif isinstance(d, AgentModelDependency):
-                model_deps.append(d)
+        # Extract strict requirements
+        requirements = DependencyResolver.extract_requirements(agent)
 
-        # Fallback default model dependency if none detected
-        if not model_deps:
-            model_deps.append(
-                AgentModelDependency(
-                    id=f"dep-def-{agent.id}",
-                    agent_id=agent.id,
-                    provider="openai",
-                    model_name="gpt-5",
-                    dependency_type="llm",
-                    required=True,
-                    original_provider="openai",
-                    original_endpoint="https://api.openai.com/v1",
-                    detected_from="system_default",
-                    created_at=_now()
+        # Separate requirements by type
+        llm_req = next((r for r in requirements if r.type == "llm"), None)
+        service_reqs = [r for r in requirements if r.type == "service"]
+
+        orig_provider = llm_req.provider if llm_req else "UNKNOWN"
+        orig_model = llm_req.model if llm_req else "UNKNOWN"
+
+        # Check Original Provider availability
+        has_orig_llm_key = True
+        if llm_req and llm_req.credential:
+            has_orig_llm_key = bool(secrets.get(llm_req.credential) or os.getenv(llm_req.credential))
+        elif agent_category in [AgentCategory.LOCAL_MODEL, AgentCategory.RULE_BASED]:
+            has_orig_llm_key = True
+
+        has_all_service_keys = True
+        for s in service_reqs:
+            if s.credential:
+                is_full = bool(secrets.get(s.credential) or os.getenv(s.credential))
+                s.binding_status = "FULFILLED" if is_full else "MISSING"
+                if not is_full:
+                    has_all_service_keys = False
+
+        faithful_available = has_orig_llm_key and has_all_service_keys
+
+        # Check Compatible Provider availability (requires real Gemini key for test agents if LLM substitution needed)
+        has_test_gemini_key = bool(secrets.get("TEST_AGENT_GEMINI_API_KEY") or os.getenv("TEST_AGENT_GEMINI_API_KEY"))
+        compatible_available = has_test_gemini_key or (agent_category == AgentCategory.RULE_BASED)
+        simulation_available = True  # Always available via MockLLM
+
+        # Default recommended mode based on availability
+        if requested_mode:
+            target_mode = requested_mode
+        else:
+            if faithful_available:
+                target_mode = ExecutionMode.FAITHFUL
+            elif compatible_available:
+                target_mode = ExecutionMode.COMPATIBLE
+            else:
+                target_mode = ExecutionMode.SIMULATION
+
+        # Build Service Bindings for the target mode
+        service_bindings: List[ServiceBindingItem] = []
+        is_mode_all_fulfilled = True
+
+        if target_mode == ExecutionMode.FAITHFUL:
+            # Faithful: Original provider and models ONLY. NEVER downgrade silently!
+            if llm_req and llm_req.provider != "UNKNOWN":
+                llm_bound = bool(secrets.get(llm_req.credential) or os.getenv(llm_req.credential)) if llm_req.credential else True
+                service_bindings.append(
+                    ServiceBindingItem(
+                        capability="LLM_INFERENCE",
+                        original_provider=orig_provider,
+                        original_model=orig_model,
+                        executed_provider=orig_provider,
+                        executed_model=orig_model,
+                        substituted=False,
+                        credential_bound=llm_req.credential if llm_bound else None,
+                        status="BOUND" if llm_bound else "MISSING"
+                    )
                 )
+                if not llm_bound:
+                    is_mode_all_fulfilled = False
+
+            for s in service_reqs:
+                s_bound = bool(secrets.get(s.credential) or os.getenv(s.credential)) if s.credential else True
+                service_bindings.append(
+                    ServiceBindingItem(
+                        capability=s.capability or "EXTERNAL_SERVICE",
+                        original_provider=s.provider,
+                        original_model=None,
+                        executed_provider=s.provider,
+                        executed_model=None,
+                        substituted=False,
+                        credential_bound=s.credential if s_bound else None,
+                        status="BOUND" if s_bound else "MISSING"
+                    )
+                )
+                if not s_bound:
+                    is_mode_all_fulfilled = False
+
+            exec_dep_binding = ExecutionDependencyBinding(
+                id=f"bind-{exec_id}",
+                execution_id=exec_id,
+                mode=ExecutionMode.FAITHFUL,
+                service_bindings=service_bindings,
+                all_fulfilled=is_mode_all_fulfilled,
+                fidelity=EvaluationFidelity.HIGH,
+                reason="Faithful execution with original model and service dependencies" if is_mode_all_fulfilled else "Faithful execution blocked: missing required credentials",
+                created_at=_now()
             )
 
-        orig_dep = model_deps[0]
-        orig_provider = orig_dep.original_provider or orig_dep.provider
-        orig_model = f"{orig_provider}/{orig_dep.model_name}"
+        elif target_mode == ExecutionMode.COMPATIBLE:
+            # Compatible: Explicit substitution to Gemini
+            executed_prov = "google"
+            executed_mod = "gemini-3.7-flash"
+            llm_sub = orig_provider.lower() not in ["google", "gemini"]
 
-        # 1. Check if original credential / provider is available
-        has_openai_key = bool(secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY"))
-        has_anthropic_key = bool(secrets.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY"))
-        has_gemini_key = bool(secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY"))
+            service_bindings.append(
+                ServiceBindingItem(
+                    capability="LLM_INFERENCE",
+                    original_provider=orig_provider,
+                    original_model=orig_model,
+                    executed_provider=executed_prov,
+                    executed_model=executed_mod,
+                    substituted=llm_sub,
+                    credential_bound="TEST_AGENT_GEMINI_API_KEY" if has_test_gemini_key else None,
+                    status="SUBSTITUTED" if has_test_gemini_key else "MISSING"
+                )
+            )
+            if not has_test_gemini_key:
+                is_mode_all_fulfilled = False
 
-        original_available = False
-        if orig_provider == "openai" and has_openai_key:
-            original_available = True
-        elif orig_provider in ["google", "gemini"] and has_gemini_key:
-            original_available = True
-        elif orig_provider == "anthropic" and has_anthropic_key:
-            original_available = True
-        elif orig_provider in ["ollama", "huggingface", "vllm"] or agent_category in [AgentCategory.LOCAL_MODEL, AgentCategory.RULE_BASED]:
-            # Local model or rule-based agent does not require cloud API key
-            original_available = True
+            for s in service_reqs:
+                s_bound = bool(secrets.get(s.credential) or os.getenv(s.credential)) if s.credential else True
+                service_bindings.append(
+                    ServiceBindingItem(
+                        capability=s.capability or "EXTERNAL_SERVICE",
+                        original_provider=s.provider,
+                        original_model=None,
+                        executed_provider=s.provider,
+                        executed_model=None,
+                        substituted=False,
+                        credential_bound=s.credential if s_bound else None,
+                        status="BOUND" if s_bound else "MISSING"
+                    )
+                )
+                if not s_bound:
+                    is_mode_all_fulfilled = False
 
-        # 2. Check if platform substitute (Gemini) is available
-        substitute_available = has_gemini_key or True # Platform supports MockLLM as substitute if key missing
-
-        # Determine active execution mode
-        if requested_mode == ExecutionMode.SIMULATION:
-            mode = ExecutionMode.SIMULATION
-            executed_provider = "mock"
-            executed_model = "mock/deterministic-llm"
-            model_sub = False
-            reason = "User requested deterministic simulation mode via MockLLM."
-            confidence = "test-specific"
-            fidelity = EvaluationFidelity.TEST_SPECIFIC
-
-        elif requested_mode == ExecutionMode.FAITHFUL and original_available:
-            mode = ExecutionMode.FAITHFUL
-            executed_provider = orig_provider
-            executed_model = orig_model
-            model_sub = False
-            reason = "Original credentials and model configuration available."
-            confidence = "high"
-            fidelity = EvaluationFidelity.HIGH
-
-        elif requested_mode == ExecutionMode.FAITHFUL and not original_available:
-            # Fallback to Compatible because original key is missing
-            mode = ExecutionMode.COMPATIBLE
-            executed_provider = "google"
-            executed_model = "google/gemini-2.5-flash"
-            model_sub = True
-            reason = f"Original {orig_provider.upper()} API credential unavailable. Auto-routed to Compatible mode."
-            confidence = "medium"
-            fidelity = EvaluationFidelity.MEDIUM
-
-        elif original_available and (not requested_mode or requested_mode == ExecutionMode.FAITHFUL):
-            mode = ExecutionMode.FAITHFUL
-            executed_provider = orig_provider
-            executed_model = orig_model
-            model_sub = False
-            reason = f"Executed using original {orig_provider.upper()} configuration."
-            confidence = "high"
-            fidelity = EvaluationFidelity.HIGH
+            exec_dep_binding = ExecutionDependencyBinding(
+                id=f"bind-{exec_id}",
+                execution_id=exec_id,
+                mode=ExecutionMode.COMPATIBLE,
+                service_bindings=service_bindings,
+                all_fulfilled=is_mode_all_fulfilled,
+                fidelity=EvaluationFidelity.MEDIUM,
+                reason=f"Compatible execution: model substituted with {executed_mod}" if is_mode_all_fulfilled else "Compatible execution blocked: missing required credentials",
+                created_at=_now()
+            )
 
         else:
-            # Compatible mode with substitution
-            mode = ExecutionMode.COMPATIBLE
-            executed_provider = "google"
-            executed_model = "google/gemini-2.5-flash"
-            model_sub = True
-            reason = f"Original {orig_provider.upper()} credential unavailable. Executing in Compatible mode using Google Gemini."
-            confidence = "medium"
-            fidelity = EvaluationFidelity.MEDIUM
+            # Simulation: All external services and models mocked deterministically
+            service_bindings.append(
+                ServiceBindingItem(
+                    capability="LLM_INFERENCE",
+                    original_provider=orig_provider,
+                    original_model=orig_model,
+                    executed_provider="platform_mock",
+                    executed_model="MockLLM",
+                    substituted=True,
+                    credential_bound=None,
+                    status="SIMULATED"
+                )
+            )
+            for s in service_reqs:
+                service_bindings.append(
+                    ServiceBindingItem(
+                        capability=s.capability or "EXTERNAL_SERVICE",
+                        original_provider=s.provider,
+                        original_model=None,
+                        executed_provider="platform_tool_gateway",
+                        executed_model=None,
+                        substituted=True,
+                        credential_bound=None,
+                        status="SIMULATED"
+                    )
+                )
 
-        binding = ExecutionModelBinding(
-            id=f"bind-{exec_id}",
-            execution_id=exec_id,
-            original_model=orig_model,
-            executed_model=executed_model,
-            original_provider=orig_provider,
-            executed_provider=executed_provider,
-            mode=mode,
-            model_substitution=model_sub,
-            reason=reason,
-            confidence=confidence,
-            fidelity=fidelity,
-            created_at=_now()
-        )
+            exec_dep_binding = ExecutionDependencyBinding(
+                id=f"bind-{exec_id}",
+                execution_id=exec_id,
+                mode=ExecutionMode.SIMULATION,
+                service_bindings=service_bindings,
+                all_fulfilled=True,
+                fidelity=EvaluationFidelity.TEST_SPECIFIC,
+                reason="Simulation execution: deterministic offline mock LLM and tool gateway",
+                created_at=_now()
+            )
 
+        # Mode options for UI display
+        missing_faithful_keys = [s.credential for s in requirements if s.credential and not bool(secrets.get(s.credential) or os.getenv(s.credential))]
         mode_options = [
             {
                 "mode": ExecutionMode.FAITHFUL.value,
                 "title": "MODE 1 — FAITHFUL",
-                "available": original_available,
-                "description": f"Execute using original {orig_provider.upper()} ({orig_dep.model_name}). Requires original API key.",
+                "available": faithful_available,
+                "description": f"Execute using original {orig_provider.upper()} ({orig_model}). Highest fidelity.",
                 "fidelity": "HIGH (100%)",
-                "requires_secret": f"{orig_provider.upper()}_API_KEY" if orig_provider != "ollama" else None
+                "missing_credentials": missing_faithful_keys if not faithful_available else []
             },
             {
                 "mode": ExecutionMode.COMPATIBLE.value,
                 "title": "MODE 2 — COMPATIBLE",
-                "available": substitute_available,
-                "description": "Test workflow, tool-use, safety, and failure recovery under Google Gemini substitute.",
+                "available": compatible_available,
+                "description": "Execute using Google Gemini model substitution. Tests workflow and tool safety.",
                 "fidelity": "MEDIUM (70%)",
-                "requires_secret": None
+                "missing_credentials": ["TEST_AGENT_GEMINI_API_KEY"] if not has_test_gemini_key else []
             },
             {
                 "mode": ExecutionMode.SIMULATION.value,
                 "title": "MODE 3 — SIMULATION",
-                "available": True,
-                "description": "Deterministic offline execution using MockLLM for controlled tool & fault testing.",
+                "available": simulation_available,
+                "description": "Deterministic offline execution using MockLLM and tool gateway. 0 keys needed.",
                 "fidelity": "TEST-SPECIFIC",
-                "requires_secret": None
+                "missing_credentials": []
             }
+        ]
+
+        # Backward compatibility ExecutionModelBinding
+        active_binding = ExecutionModelBinding(
+            id=f"bind-{exec_id}",
+            execution_id=exec_id,
+            original_model=f"{orig_provider}/{orig_model}",
+            executed_model=service_bindings[0].executed_model or "MockLLM" if service_bindings else "MockLLM",
+            original_provider=orig_provider,
+            executed_provider=service_bindings[0].executed_provider if service_bindings else "platform_mock",
+            mode=target_mode,
+            model_substitution=service_bindings[0].substituted if service_bindings else False,
+            reason=exec_dep_binding.reason,
+            confidence="high" if faithful_available else "medium",
+            fidelity=exec_dep_binding.fidelity,
+            created_at=_now()
+        )
+
+        detected_model_deps = []
+        if llm_req and llm_req.provider != "UNKNOWN":
+            detected_model_deps.append(
+                AgentModelDependency(
+                    id=f"dep-model-{agent.id}",
+                    agent_id=agent.id,
+                    provider=llm_req.provider,
+                    model_name=llm_req.model or "UNKNOWN",
+                    dependency_type="llm",
+                    required=True,
+                    original_provider=llm_req.provider,
+                    original_endpoint=None,
+                    detected_from="ast_analysis",
+                    created_at=_now()
+                )
+            )
+
+        detected_secrets_list = [
+            DetectedSecret(name=r.credential, type="credential", required=r.required)
+            for r in requirements if r.credential
         ]
 
         return DependencyResolverResult(
             agent_id=agent.id,
             agent_category=agent_category,
-            detected_model_dependencies=model_deps,
-            recommended_mode=mode,
+            detected_model_dependencies=detected_model_deps,
+            dependency_requirements=requirements,
+            detected_secrets=detected_secrets_list,
+            recommended_mode=target_mode,
             mode_options=mode_options,
-            active_binding=binding
+            active_binding=active_binding,
+            execution_dependency_binding=exec_dep_binding
         )
 
+    # -------------------------------------------------------------------------
+    # LAYER 4: Platform Vault & Mode-Specific Credential Gatekeeper
+    # -------------------------------------------------------------------------
     @staticmethod
     def get_system_credentials(user_overrides: Optional[Dict[str, str]] = None) -> List[SystemCredentialItem]:
-        """Returns default platform system API keys and their active configuration status."""
+        """Returns platform credential vault status without leaking raw secret strings."""
         overrides = user_overrides or {}
         known_keys = [
-            ("GEMINI_API_KEY", "Google Gemini AI", "Primary LLM engine for multi-stage analysis & judge"),
-            ("OPENAI_API_KEY", "OpenAI", "Alternative LLM engine for Faithful execution mode"),
-            ("ANTHROPIC_API_KEY", "Anthropic Claude", "Alternative LLM engine for Claude model testing"),
-            ("SERPER_API_KEY", "Google Serper Search", "Default search API key for web search tools"),
-            ("WEATHER_API_KEY", "OpenWeatherMap", "Default weather API key for location/environment tools"),
-            ("DATABASE_URL", "PostgreSQL / Supabase", "Primary relational database connection URL"),
-            ("STRIPE_TEST_KEY", "Stripe Simulator", "Default payment gateway test key for transaction tools"),
+            ("GEMINI_API_KEY", "Google Gemini AI", "Primary platform AI engine for analysis & judge"),
+            ("TEST_AGENT_GEMINI_API_KEY", "Google Gemini AI (Test Agent)", "Gemini API key used for compatible execution of test agents"),
+            ("OPENAI_API_KEY", "OpenAI", "Platform API key for OpenAI model execution"),
+            ("ANTHROPIC_API_KEY", "Anthropic Claude", "Platform API key for Claude model execution"),
+            ("TAVILY_API_KEY", "Tavily Search", "Default search API key for web research agents"),
+            ("SERPER_API_KEY", "Google Serper Search", "Alternative search API key for web search tools"),
+            ("WEATHER_API_KEY", "OpenWeatherMap", "Default weather API key for location tools"),
+            ("DATABASE_URL", "PostgreSQL / Supabase", "Relational database connection string"),
+            ("STRIPE_TEST_KEY", "Stripe Simulator", "Default payment gateway test key"),
         ]
 
         items: List[SystemCredentialItem] = []
         for key_name, provider, desc in known_keys:
             val = overrides.get(key_name) or os.getenv(key_name, "")
             is_cfg = bool(val and not val.startswith("your_") and not val.endswith("_here"))
-            
+
             if overrides.get(key_name):
                 source = "user_custom"
             elif os.getenv(key_name):
@@ -222,7 +448,7 @@ class DependencyResolver:
             else:
                 source = "missing"
 
-            masked = f"{val[:6]}...{val[-4:]}" if (is_cfg and len(val) > 10) else ("********" if is_cfg else None)
+            masked = f"{val[:4]}...{val[-3:]}" if (is_cfg and len(val) > 7) else ("********" if is_cfg else None)
 
             items.append(
                 SystemCredentialItem(
@@ -241,73 +467,94 @@ class DependencyResolver:
     def evaluate_execution_credential_demands(
         agent: AgentRecord,
         provided_secrets: Optional[Dict[str, str]] = None,
-        session_id: str = ""
+        session_id: str = "",
+        mode: ExecutionMode = ExecutionMode.FAITHFUL
     ) -> SessionCredentialPrompt:
-        """Evaluates whether all required API keys are fulfilled before execution can proceed."""
+        """
+        Evaluates mode-specific credential demands.
+        - FAITHFUL: requires original agent keys (e.g. OPENAI_API_KEY, TAVILY_API_KEY). Never demands GEMINI_API_KEY.
+        - COMPATIBLE: requires GEMINI_API_KEY + tool keys.
+        - SIMULATION: requires 0 keys (status = CLEARED).
+        """
         secrets = provided_secrets or {}
         system_items = {item.key_name: item for item in DependencyResolver.get_system_credentials(secrets)}
 
+        # Simulation mode needs zero keys
+        if mode == ExecutionMode.SIMULATION:
+            return SessionCredentialPrompt(
+                session_id=session_id or f"sess-{uuid.uuid4().hex[:8]}",
+                agent_id=agent.id,
+                mode=ExecutionMode.SIMULATION,
+                all_fulfilled=True,
+                status="CLEARED",
+                requirements=[],
+                message="Simulation execution requires zero real API credentials. Deterministic MockLLM active."
+            )
+
         requirements: List[CredentialRequirement] = []
+        agent_reqs = DependencyResolver.extract_requirements(agent)
 
-        # 1. Model LLM Key Demand
-        model_req = CredentialRequirement(
-            key_name="GEMINI_API_KEY",
-            provider="Google Gemini",
-            description="Required for AI analysis, scenario generation, and execution evaluation",
-            is_fulfilled=bool(secrets.get("GEMINI_API_KEY") or system_items.get("GEMINI_API_KEY", {}).is_configured),
-            provided_by_system=bool(os.getenv("GEMINI_API_KEY")),
-            masked_value=system_items.get("GEMINI_API_KEY", {}).masked_value
-        )
-        requirements.append(model_req)
-
-        # 2. Tool Credential Demands (ONLY for external API keys / secrets, NEVER packages or frameworks)
-        for dep in agent.dependencies:
-            dep_type_str = str(dep.type).lower() if hasattr(dep.type, "value") else str(dep.type).lower()
-            if dep_type_str in ["credential", "api_key", "secret", "environment_variable"]:
-                key_name = dep.name.upper()
-                is_full = bool(secrets.get(key_name) or os.getenv(key_name))
-                requirements.append(
-                    CredentialRequirement(
-                        key_name=key_name,
-                        provider=dep.name,
-                        description=f"Tool dependency required by {agent.name}",
-                        is_fulfilled=is_full,
-                        is_optional=not dep.required,
-                        provided_by_system=bool(os.getenv(key_name)),
-                        masked_value=f"{secrets.get(key_name, '')[:4]}***" if is_full else None
-                    )
-                )
-
-        # Also check tools for explicit required credentials
-        for t in agent.tools:
-            if "database" in t.name.lower() or "db" in t.name.lower():
-                if not any(r.key_name == "DB_API_KEY" for r in requirements):
-                    is_full = bool(secrets.get("DB_API_KEY") or os.getenv("DB_API_KEY"))
+        if mode == ExecutionMode.FAITHFUL:
+            # Faithful: Demand ONLY original credentials
+            for r in agent_reqs:
+                if r.credential:
+                    is_full = bool(secrets.get(r.credential) or system_items.get(r.credential, {}).is_configured)
+                    sys_masked = system_items.get(r.credential, {}).masked_value
                     requirements.append(
                         CredentialRequirement(
-                            key_name="DB_API_KEY",
-                            provider="Database Service",
-                            description="API key for database inventory/customer tool access",
+                            key_name=r.credential,
+                            provider=r.provider,
+                            description=f"Original {r.capability or r.type} credential required by {agent.name}",
                             is_fulfilled=is_full,
-                            provided_by_system=bool(os.getenv("DB_API_KEY")),
-                            masked_value="DB_***" if is_full else None
+                            is_optional=not r.required,
+                            provided_by_system=bool(os.getenv(r.credential)),
+                            masked_value=sys_masked if is_full else None
                         )
                     )
 
-        # Determine overall fulfillment
+        elif mode == ExecutionMode.COMPATIBLE:
+            # Compatible: Demand TEST_AGENT_GEMINI_API_KEY + external tool keys
+            gemini_full = bool(secrets.get("TEST_AGENT_GEMINI_API_KEY") or system_items.get("TEST_AGENT_GEMINI_API_KEY", {}).is_configured)
+            requirements.append(
+                CredentialRequirement(
+                    key_name="TEST_AGENT_GEMINI_API_KEY",
+                    provider="Google Gemini",
+                    description="Required for Compatible mode model substitution",
+                    is_fulfilled=gemini_full,
+                    provided_by_system=bool(os.getenv("TEST_AGENT_GEMINI_API_KEY")),
+                    masked_value=system_items.get("TEST_AGENT_GEMINI_API_KEY", {}).masked_value if hasattr(system_items.get("TEST_AGENT_GEMINI_API_KEY", {}), "masked_value") else None
+                )
+            )
+            # Add external service tool credentials (excluding LLM keys)
+            for r in agent_reqs:
+                if r.type == "service" and r.credential and r.credential not in ["GEMINI_API_KEY", "TEST_AGENT_GEMINI_API_KEY"]:
+                    is_full = bool(secrets.get(r.credential) or system_items.get(r.credential, {}).is_configured)
+                    requirements.append(
+                        CredentialRequirement(
+                            key_name=r.credential,
+                            provider=r.provider,
+                            description=f"External tool credential for {r.provider}",
+                            is_fulfilled=is_full,
+                            is_optional=not r.required,
+                            provided_by_system=bool(os.getenv(r.credential)),
+                            masked_value=system_items.get(r.credential, {}).masked_value if is_full else None
+                        )
+                    )
+
         unfulfilled = [r for r in requirements if not r.is_fulfilled and not r.is_optional]
         all_fulfilled = len(unfulfilled) == 0
 
         status = "CLEARED" if all_fulfilled else "CREDS_REQUIRED"
         if all_fulfilled:
-            msg = "All required system and tool API keys are satisfied. Ready for execution."
+            msg = f"All required credentials for {mode.value.upper()} execution are fulfilled. Ready for execution."
         else:
             missing_names = ", ".join([r.key_name for r in unfulfilled])
-            msg = f"Execution blocked. Missing required API keys: {missing_names}. Please provide them to proceed."
+            msg = f"{mode.value.upper()} execution blocked. Missing required API keys: {missing_names}."
 
         return SessionCredentialPrompt(
             session_id=session_id or f"sess-{uuid.uuid4().hex[:8]}",
             agent_id=agent.id,
+            mode=mode,
             all_fulfilled=all_fulfilled,
             status=status,
             requirements=requirements,

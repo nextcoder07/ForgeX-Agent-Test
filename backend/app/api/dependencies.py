@@ -6,8 +6,8 @@ and resolving execution bindings before launching sandbox runs.
 
 from __future__ import annotations
 
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException
+from typing import Dict, List, Optional
+from fastapi import APIRouter, HTTPException, Query
 from app.models.dependency_model import (
     DependencyResolverRequest,
     DependencyResolverResult,
@@ -16,6 +16,7 @@ from app.models.dependency_model import (
     SystemCredentialItem,
     SessionCredentialPrompt,
     ProvideCredentialsRequest,
+    ExecutionMode,
 )
 from app.services.store import store
 from app.core.dependencies.dependency_resolver import DependencyResolver
@@ -42,15 +43,19 @@ def update_platform_system_credentials(payload: ProvideCredentialsRequest):
 
 
 @router.get("/agents/{agent_id}/required-credentials", response_model=SessionCredentialPrompt)
-def get_agent_required_credentials(agent_id: str):
-    """Retrieve all required API key demands for an agent before execution."""
+def get_agent_required_credentials(
+    agent_id: str,
+    mode: Optional[ExecutionMode] = Query(default=ExecutionMode.FAITHFUL)
+):
+    """Retrieve mode-specific required API key demands for an agent before execution."""
     agent = store.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     return DependencyResolver.evaluate_execution_credential_demands(
         agent=agent,
-        provided_secrets=_USER_SYSTEM_CREDENTIALS
+        provided_secrets=_USER_SYSTEM_CREDENTIALS,
+        mode=mode or ExecutionMode.FAITHFUL
     )
 
 

@@ -2,12 +2,8 @@
 Dedicated Dependency Detector Module.
 Statically analyzes agent source code, configuration files, and manifests to detect:
 - Agent Category (LLM-powered, Local model, Rule-based, Tool-heavy)
-- LLM Providers (OpenAI, Gemini, Anthropic, Ollama, HuggingFace, vLLM)
-- External Services (Databases, REST APIs, Search, Email, Storage, Browser)
-- Environment Variables & Secrets (e.g. os.getenv("OPENAI_API_KEY"))
-- Runtime Requirements (Python, Node.js, Packages)
-
-NEVER executes untrusted code during analysis.
+- Model Dependencies without invented model names
+- Runtime Requirements & Packages dynamically from requirements.txt and imports
 """
 
 from __future__ import annotations
@@ -43,7 +39,6 @@ class DependencyDetector:
         detected: List[DetectedSecret] = []
         seen = set()
 
-        # Python patterns: os.getenv("KEY"), os.environ["KEY"], os.environ.get("KEY")
         py_patterns = [
             r'os\.(?:getenv|environ\.get)\s*\(\s*["\']([A-Z0-9_]+)["\']',
             r'os\.environ\s*\[\s*["\']([A-Z0-9_]+)["\']\s*\]',
@@ -63,7 +58,6 @@ class DependencyDetector:
                         )
                     )
 
-        # JS/TS patterns: process.env.KEY
         js_patterns = [
             r'process\.env\.([A-Z0-9_]+)',
             r'process\.env\[["\']([A-Z0-9_]+)["\']\]',
@@ -86,15 +80,15 @@ class DependencyDetector:
 
     @staticmethod
     def detect_model_dependencies(agent_id: str, code_text: str, env_vars: List[DetectedSecret]) -> List[AgentModelDependency]:
-        """Detect LLM and local model SDK usage and specific model names."""
+        """Detect LLM and local model SDK usage and specific model names without inventing fake defaults."""
         deps: List[AgentModelDependency] = []
         code_lower = code_text.lower()
         idx = 1
 
         # 1. OpenAI Detection
-        if "openai" in code_lower or any("openai" in sec.name.lower() for sec in env_vars):
+        if "openai" in code_lower:
             model_match = re.search(r'model\s*=\s*["\']([a-zA-Z0-9_\-\.]+)', code_text)
-            detected_model = model_match.group(1) if model_match else "gpt-5"
+            detected_model = model_match.group(1) if model_match else "UNKNOWN"
             deps.append(
                 AgentModelDependency(
                     id=f"dep-model-{agent_id}-{idx}",
@@ -112,9 +106,9 @@ class DependencyDetector:
             idx += 1
 
         # 2. Google Gemini Detection
-        if "google.genai" in code_lower or "gemini" in code_lower or any("gemini" in sec.name.lower() for sec in env_vars):
+        if "google.genai" in code_lower or "google.generativeai" in code_lower:
             model_match = re.search(r'model\s*=\s*["\']([a-zA-Z0-9_\-\.]+)', code_text)
-            detected_model = model_match.group(1) if model_match else "gemini-2.5-flash"
+            detected_model = model_match.group(1) if model_match else "UNKNOWN"
             deps.append(
                 AgentModelDependency(
                     id=f"dep-model-{agent_id}-{idx}",
@@ -132,13 +126,15 @@ class DependencyDetector:
             idx += 1
 
         # 3. Anthropic Detection
-        if "anthropic" in code_lower or "claude" in code_lower or any("anthropic" in sec.name.lower() for sec in env_vars):
+        if "anthropic" in code_lower:
+            model_match = re.search(r'model\s*=\s*["\']([a-zA-Z0-9_\-\.]+)', code_text)
+            detected_model = model_match.group(1) if model_match else "UNKNOWN"
             deps.append(
                 AgentModelDependency(
                     id=f"dep-model-{agent_id}-{idx}",
                     agent_id=agent_id,
                     provider="anthropic",
-                    model_name="claude-3-5-sonnet",
+                    model_name=detected_model,
                     dependency_type="llm",
                     required=True,
                     original_provider="anthropic",
@@ -149,10 +145,10 @@ class DependencyDetector:
             )
             idx += 1
 
-        # 4. Ollama Detection (Local Model — NO API KEY ASSUMED!)
+        # 4. Ollama Detection (Local Model)
         if "ollama" in code_lower:
             model_match = re.search(r'model\s*=\s*["\']([a-zA-Z0-9_\-\.]+)', code_text)
-            detected_model = model_match.group(1) if model_match else "llama3"
+            detected_model = model_match.group(1) if model_match else "UNKNOWN"
             deps.append(
                 AgentModelDependency(
                     id=f"dep-model-{agent_id}-{idx}",
@@ -169,60 +165,48 @@ class DependencyDetector:
             )
             idx += 1
 
-        # 5. HuggingFace / vLLM Detection (Local Model)
-        if "vllm" in code_lower or "huggingface" in code_lower or "transformers" in code_lower:
-            deps.append(
-                AgentModelDependency(
-                    id=f"dep-model-{agent_id}-{idx}",
-                    agent_id=agent_id,
-                    provider="huggingface",
-                    model_name="local-huggingface-model",
-                    dependency_type="local_model",
-                    required=False,
-                    original_provider="huggingface",
-                    original_endpoint="http://localhost:8000",
-                    detected_from="ast_code_scan",
-                    created_at=_now()
-                )
-            )
-            idx += 1
-
         return deps
 
     @staticmethod
     def detect_runtime_packages(code_text: str, raw_files: Dict[str, str]) -> List[DependencyDefinition]:
-        """Statically detects runtime packages (langgraph, python-dotenv, argparse, etc.) that do NOT require credentials."""
+        """Dynamically detects packages from requirements.txt, pyproject.toml, and imports without hardcoding."""
         deps: List[DependencyDefinition] = []
         seen = set()
 
-        code_lower = code_text.lower()
+        # 1. Parse requirements.txt / requirements.in
+        for fname, content in raw_files.items():
+            if "requirements" in fname.lower() or fname.endswith(".txt"):
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#") and not line.startswith("-"):
+                        pkg_raw = re.split(r'[=><~]', line)[0].strip()
+                        if pkg_raw and pkg_raw.lower() not in seen:
+                            seen.add(pkg_raw.lower())
+                            is_fw = any(fw in pkg_raw.lower() for fw in ["langgraph", "crewai", "autogen", "langchain", "llamaindex", "fastapi"])
+                            deps.append(
+                                DependencyDefinition(
+                                    id=f"dep-pkg-{pkg_raw.lower()}",
+                                    name=line,
+                                    type="framework" if is_fw else "package",
+                                    detected_from=fname
+                                )
+                            )
 
-        # Check requirements.txt or raw files
-        req_text = raw_files.get("requirements.txt", "") + "\n" + raw_files.get("requirements.in", "")
-
-        package_rules = [
-            ("langgraph", "LangGraph Framework", "framework"),
-            ("langchain", "LangChain Core", "framework"),
-            ("tavily", "Tavily Search Client", "package"),
-            ("dotenv", "Python DotEnv", "package"),
-            ("argparse", "CLI Parameter Parser", "package"),
-            ("requests", "Requests HTTP Library", "package"),
-            ("httpx", "HTTPX REST Client", "package"),
-            ("pydantic", "Pydantic Data Validation", "package"),
-        ]
-
-        for pkg_kw, pkg_name, pkg_type in package_rules:
-            if pkg_kw in code_lower or pkg_kw in req_text.lower():
-                if pkg_name not in seen:
-                    seen.add(pkg_name)
-                    deps.append(
-                        DependencyDefinition(
-                            id=f"dep-{pkg_kw}",
-                            name=pkg_name,
-                            type=pkg_type,
-                            detected_from="REQUIREMENTS_AND_IMPORT_SCAN"
-                        )
+        # 2. Parse top-level Python import statements from code
+        import_matches = re.findall(r'(?:from|import)\s+([a-zA-Z0-9_]+)', code_text)
+        std_libs = {"os", "sys", "re", "json", "time", "typing", "datetime", "math", "uuid", "ast", "logging", "argparse", "asyncio", "collections", "pathlib"}
+        for imp in import_matches:
+            imp_clean = imp.strip().lower()
+            if imp_clean not in std_libs and imp_clean not in seen:
+                seen.add(imp_clean)
+                deps.append(
+                    DependencyDefinition(
+                        id=f"dep-import-{imp_clean}",
+                        name=imp_clean,
+                        type="package",
+                        detected_from="IMPORT_STATEMENT"
                     )
+                )
 
         return deps
 
@@ -237,18 +221,18 @@ class DependencyDetector:
         code_lower = code_text.lower()
 
         # Check for local models first
-        has_local_model = any(m.dependency_type == "local_model" for m in model_deps) or "ollama" in code_lower or "vllm" in code_lower
+        has_local_model = any(m.dependency_type == "local_model" for m in model_deps) or "ollama" in code_lower
         if has_local_model:
             return AgentCategory.LOCAL_MODEL
 
         # Check for external LLM API dependency
-        has_llm_api = len(model_deps) > 0 or any(kw in code_lower for kw in ["openai", "gemini", "anthropic", "chat.completions", "responses.create"])
+        has_llm_api = len(model_deps) > 0 or any(kw in code_lower for kw in ["openai", "gemini", "anthropic", "chat.completions"])
 
         # Check for tool count & external services
-        has_heavy_tools = len(tools) >= 3 or len([d for d in ext_deps if d.type in ["external_service", "database", "http", "email"]]) >= 2 or any(kw in code_lower for kw in ["database", "sendgrid", "playwright", "stripe", "postgres", "redis", "elasticsearch"])
+        has_heavy_tools = len(tools) >= 3 or len([d for d in ext_deps if d.type in ["external_service", "database", "http", "email"]]) >= 2
 
         if not has_llm_api:
-            # Type 3: Rule-based agent (e.g. pure if/else, dictionary lookups)
+            # Type 3: Rule-based agent
             return AgentCategory.RULE_BASED
 
         if has_heavy_tools:

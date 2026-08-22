@@ -25,6 +25,9 @@ from app.core.intake.behavior_extractor import BehaviorExtractor
 from app.core.intake.profile_builder import ProfileBuilder
 from app.core.llm.base import LLMProvider
 import ast
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -110,18 +113,24 @@ async def process_agent_intake(
 
     t0_dur = (time.time() - t0_start) * 1000.0
     if tracker:
-        tracker.complete_stage(0, duration_ms=round(t0_dur, 2), input_tokens=total_bytes // 4, output_tokens=0)
+        tracker.complete_stage(0, duration_ms=round(t0_dur, 2), input_tokens=0, output_tokens=0)
         tracker.start_stage(1, {"mode": "AST_PARSING"})
 
     t1_start = time.time()
 
-    raw_files = payload.files or {}
+    raw_files = dict(payload.files or {})
+    if payload.pasted_code:
+        raw_files["pasted_source.py"] = payload.pasted_code
+    if payload.pasted_prompt:
+        raw_files["system_prompt.txt"] = payload.pasted_prompt
+
+    analysis_files = raw_files
     all_code_list = []
     all_docs_list = []
     total_bytes = 0
     ast_trees: Dict[str, ast.AST] = {}
 
-    for path, content in raw_files.items():
+    for path, content in analysis_files.items():
         total_bytes += len(content.encode("utf-8"))
         if path.endswith((".py", ".ts", ".js", ".json", ".yaml", ".yml")):
             all_code_list.append(f"# --- {path} ---\n{content}\n")
@@ -140,13 +149,13 @@ async def process_agent_intake(
     extracted_tools: List[ToolDefinition] = []
     extracted_deps: List[DependencyDefinition] = []
 
-    for path, content in raw_files.items():
+    for path, content in analysis_files.items():
         if path.endswith(".py"):
-            res = analyze_python_source(content)
+            res = analyze_python_source(content, filename=path)
             extracted_tools.extend(res.get("tools", []))
             extracted_deps.extend(res.get("dependencies", []))
         elif path.endswith((".ts", ".js")):
-            res = analyze_generic_source(content)
+            res = analyze_generic_source(content, filename=path)
             extracted_tools.extend(res.get("tools", []))
 
     # Deduplicate external tools
@@ -158,19 +167,22 @@ async def process_agent_intake(
             dedup_tools.append(t)
 
     # 2. Modular Intake Analyzers Execution
-    workflow_graph = FrameworkAnalyzer.analyze_framework_workflow(ast_trees, raw_files)
-    service_facts = ServiceDetector.detect_services_and_capabilities(ast_trees, raw_files)
-    behavioral_facts = BehaviorExtractor.extract_behavioral_facts(ast_trees, raw_files)
+    fw_result = FrameworkAnalyzer.analyze_framework_workflow(ast_trees, analysis_files)
+    workflow_graph = fw_result["workflow_graph"]
+    framework_name = fw_result["framework"]
+    
+    service_facts = ServiceDetector.detect_services_and_capabilities(ast_trees, analysis_files)
+    behavioral_facts = BehaviorExtractor.extract_behavioral_facts(ast_trees, analysis_files)
 
-    # Detect package & framework dependencies (langgraph, dotenv, argparse, etc.)
-    package_deps = DependencyDetector.detect_runtime_packages(all_code, raw_files)
+    # Detect package & framework dependencies
+    package_deps = DependencyDetector.detect_runtime_packages(all_code, analysis_files)
     for pd in package_deps:
         if not any(d.name == pd.name for d in extracted_deps):
             extracted_deps.append(pd)
 
     # Dedicated Dependency Detection: Secrets, Model Dependencies, Agent Category
     hasher = hashlib.sha256()
-    for fname, content in sorted(raw_files.items()):
+    for fname, content in sorted(analysis_files.items()):
         hasher.update(fname.encode("utf-8") + content.encode("utf-8"))
     
     detected_secrets = service_facts.get("credential_references") or DependencyDetector.detect_environment_secrets(all_code + "\n" + all_docs)
@@ -180,38 +192,46 @@ async def process_agent_intake(
 
     t1_dur = (time.time() - t1_start) * 1000.0
     if tracker:
-        tracker.complete_stage(1, duration_ms=round(t1_dur, 2), input_tokens=total_bytes // 4, output_tokens=0)
+        tracker.complete_stage(1, duration_ms=round(t1_dur, 2), input_tokens=0, output_tokens=0)
         tracker.start_stage(2, {"model": getattr(llm, "model_name", "gemini-3.6-flash")})
 
     t2_start = time.time()
     # 3. LLM Semantic Understanding
-    semantic_data = await llm.analyze(all_code, all_docs)
+    try:
+        semantic_data = await llm.analyze(all_code, all_docs)
+        semantic_status = "AI_ANALYSIS_COMPLETED"
+    except Exception as e:
+        logger.warning(f"LLM semantic analysis unavailable: {e}")
+        semantic_data = {
+            "name": payload.agent_name_hint or "Discovered Agent",
+            "domain": "General AI Agent",
+            "goals": [],
+            "instructions": [],
+            "status": "AI_ANALYSIS_FAILED"
+        }
+        semantic_status = "AI_ANALYSIS_FAILED"
+
     t2_dur = (time.time() - t2_start) * 1000.0
     if tracker:
         tracker.complete_stage(
             2,
             duration_ms=round(t2_dur, 2),
-            input_tokens=len(all_code + all_docs) // 4,
-            output_tokens=len(str(semantic_data)) // 4
+            input_tokens=getattr(llm, "last_input_tokens", 0),
+            output_tokens=getattr(llm, "last_output_tokens", 0)
         )
         tracker.start_stage(3, {"tools_extracted": len(dedup_tools)})
 
     t3_start = time.time()
     constitution = AgentConstitution(
-        goals=semantic_data.get("goals", ["Help users resolve tasks accurately"]),
-        never_rules=semantic_data.get("never_rules", [
-            "Never bypass security confirmation checks",
-            "Never leak sensitive credentials"
-        ]),
-        always_rules=semantic_data.get("always_rules", [
-            "Always follow safety rules and verify input parameters"
-        ]),
-        escalation_rules=["Escalate to human review on policy violations"],
-        data_policies=["Protect user data and credentials"]
+        goals=semantic_data.get("goals", []),
+        never_rules=semantic_data.get("never_rules", []),
+        always_rules=semantic_data.get("always_rules", []),
+        escalation_rules=semantic_data.get("escalation_rules", []),
+        data_policies=semantic_data.get("data_policies", [])
     )
 
     # 4. Assemble AgentBehaviorProfile
-    agent_name = semantic_data.get("name") or payload.agent_name_hint or "Web Research Agent"
+    agent_name = semantic_data.get("name") or payload.agent_name_hint or "Discovered Agent"
     domain_name = semantic_data.get("domain") or "General AI Agent"
 
     behavior_profile = ProfileBuilder.build_behavior_profile(
@@ -219,12 +239,16 @@ async def process_agent_intake(
         agent_name=agent_name,
         domain=domain_name,
         workflow_graph=workflow_graph,
-        capabilities=service_facts.get("capabilities", ["LLM_INFERENCE"]),
+        capabilities=service_facts.get("capabilities", []),
         external_calls=service_facts.get("external_calls", []),
         credential_references=detected_secrets,
         transformations=behavioral_facts.get("transformations", []),
         invariants=behavioral_facts.get("invariants", []),
         failure_surfaces=behavioral_facts.get("failure_surfaces", []),
+        state_model=behavioral_facts.get("state_model", {}),
+        inputs=behavioral_facts.get("inputs", []),
+        outputs=behavioral_facts.get("outputs", []),
+        security_surfaces=behavioral_facts.get("security_surfaces", []),
         conflicts=behavioral_facts.get("conflicts", [])
     )
 
@@ -232,14 +256,14 @@ async def process_agent_intake(
     derived_exec_status = "EXECUTION_READY" if behavior_profile.readiness.execution_ready else "EXECUTION_BLOCKED"
 
     # Attach detected secrets and model dependencies to runtime manifest
-    runtime_manifest = _infer_runtime(raw_files, payload.endpoint_url)
+    runtime_manifest = _infer_runtime(analysis_files, payload.endpoint_url)
     runtime_manifest["agent_category"] = agent_category.value
     runtime_manifest["detected_model_dependencies"] = [m.model_dump() for m in detected_model_deps]
     runtime_manifest["detected_secrets"] = [s.model_dump() for s in detected_secrets]
     runtime_manifest["execution_status"] = derived_exec_status
 
     # Combine canonical capabilities from ServiceDetector with LLM semantic capabilities
-    canonical_caps = service_facts.get("capabilities", ["LLM_INFERENCE"])
+    canonical_caps = service_facts.get("capabilities", [])
     semantic_caps = semantic_data.get("capabilities", [])
     merged_caps = list(dict.fromkeys(canonical_caps + semantic_caps))
 
@@ -247,7 +271,7 @@ async def process_agent_intake(
         identity={
             "name": agent_name,
             "domain": domain_name,
-            "framework": "LangGraph" if workflow_graph.nodes else "custom",
+            "framework": framework_name,
             "language": runtime_manifest.get("runtime") or "python",
             "entrypoint": runtime_manifest.get("entrypoint") or "unknown",
             "category": agent_category.value
@@ -255,14 +279,14 @@ async def process_agent_intake(
         agent_description=f"Agent '{agent_name}' ({domain_name}) with {len(workflow_graph.nodes)} workflow nodes, {len(merged_caps)} capabilities ({', '.join(merged_caps)}), and {len(behavioral_facts.get('invariants', []))} invariants.",
         behavior_profile=behavior_profile,
         goals=constitution.goals,
-        instructions=semantic_data.get("instructions", ["Follow safety policies and execute workflow steps safely"]),
+        instructions=semantic_data.get("instructions", []),
         tools=dedup_tools,
         dependencies=extracted_deps,
         constitution=constitution,
         capabilities=merged_caps,
-        risks=semantic_data.get("risks", ["Unbounded tool invocation risk", "Input boundary failure risk", "Execution safety risk"]),
-        state_management="In-memory session state",
-        architecture_components=semantic_data.get("architecture_components", ["Agent Runtime", "Tool Dispatcher"]),
+        risks=semantic_data.get("risks", []),
+        state_management="In-memory session state" if behavioral_facts.get("state_model") else "Stateless",
+        architecture_components=semantic_data.get("architecture_components", [n.name for n in workflow_graph.nodes] if workflow_graph.nodes else []),
         runtime_manifest=runtime_manifest,
         execution_status=derived_exec_status,
     )
@@ -274,7 +298,7 @@ async def process_agent_intake(
 
     t4_start = time.time()
     # 4. Specification Conflict & Ambiguity Validation
-    conflicts = detect_specification_conflicts(all_docs, payload.pasted_prompt or "", dedup_tools)
+    conflicts = detect_specification_conflicts(constitution, dedup_tools, all_code, all_docs)
 
     # 5. Visual Architecture Map Graph Generation
     nodes: List[GraphNode] = [

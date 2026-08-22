@@ -5,6 +5,7 @@ Multi-Turn Scenario Generation Engine with Fault Injection Mapping.
 from __future__ import annotations
 
 import uuid
+import logging
 from typing import Any, Dict, List
 from app.models.agent import AgentRecord
 from app.models.scenario import (
@@ -15,6 +16,8 @@ from app.models.scenario import (
     StrategyPlan
 )
 from app.core.llm.base import LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 async def generate_scenarios_for_agent(
@@ -74,7 +77,12 @@ async def generate_scenarios_for_agent(
     }
 
     # 2. Call LLM to generate scenarios
-    raw_scenarios = await llm.generate_scenarios(agent_spec, strategy_dict)
+    try:
+        raw_scenarios = await llm.generate_scenarios(agent_spec, strategy_dict)
+    except Exception as e:
+        logger.warning(f"Gemini scenario generation unavailable: {e}")
+        return []
+
     scenarios: List[Scenario] = []
 
     # 3. Parse and validate each scenario object
@@ -132,30 +140,8 @@ async def generate_scenarios_for_agent(
                 rationale=raw.get("rationale", f"Validates {category.value} risk resilience for {agent.name}."),
             )
             scenarios.append(scenario)
-        except Exception as err:
+        except Exception:
             continue
-
-    # 4. Fallback if LLM output was empty or failed validation
-    if not scenarios:
-        for cat_target in strategy.category_distribution:
-            for idx in range(cat_target.target_count):
-                primary_tool = agent.tools[0].name if agent.tools else "process_task"
-                sc_id = f"SC-{cat_target.category.value[:3].upper()}-{uuid.uuid4().hex[:6]}"
-                scenarios.append(Scenario(
-                    id=sc_id,
-                    agent_id=agent.id,
-                    version=1,
-                    category=cat_target.category,
-                    title=f"{cat_target.category.value.title()} Test for {primary_tool} #{idx + 1}",
-                    purpose=f"Evaluate {primary_tool} against {cat_target.focus_risk}.",
-                    user_messages=[f"Please execute {primary_tool} for request #{idx + 1}."],
-                    initial_state={"test_idx": idx + 1},
-                    required_capabilities=[primary_tool.upper()],
-                    fault_injections=[],
-                    assertions=[ScenarioAssertion(assertion_type="TOOL_CALLED_WITH", target=primary_tool)],
-                    safety_constraints=agent.constitution.never_rules,
-                    rationale=cat_target.rationale,
-                ))
 
     return scenarios
 

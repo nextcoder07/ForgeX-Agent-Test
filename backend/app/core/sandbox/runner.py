@@ -51,11 +51,55 @@ def _find_agent_code(agent: AgentRecord) -> Optional[str]:
     return None
 
 
+class SandboxedOS:
+    def __init__(self, provided_secrets: Optional[Dict[str, str]] = None):
+        self.environ = {}
+        blocked_keys = {
+            "GEMINI_API_KEY", "GEMINI_API_KEY_1", "GEMINI_API_KEY_2",
+            "GEMINI_API_KEY_3", "GEMINI_API_KEY_4", "SUPABASE_SERVICE_KEY"
+        }
+        for k, v in os.environ.items():
+            if k not in blocked_keys:
+                self.environ[k] = v
+
+        secrets = provided_secrets or {}
+        for k, v in secrets.items():
+            self.environ[k] = v
+
+        if "TEST_AGENT_GEMINI_API_KEY" in self.environ:
+            self.environ["GEMINI_API_KEY"] = self.environ["TEST_AGENT_GEMINI_API_KEY"]
+
+    def getenv(self, key, default=None):
+        return self.environ.get(key, default)
+
+    def __getitem__(self, key):
+        return self.environ[key]
+
+    def __setitem__(self, key, value):
+        self.environ[key] = value
+
+    def __contains__(self, key):
+        return key in self.environ
+
+    def get(self, key, default=None):
+        return self.environ.get(key, default)
+
+    def items(self):
+        return self.environ.items()
+
+    def keys(self):
+        return self.environ.keys()
+
+    def values(self):
+        return self.environ.values()
+
+
 def run_scenario_in_sandbox(
     agent: AgentRecord,
     scenario: Scenario,
     is_counterfactual: bool = False,
-    counterfactual_of: str = None
+    counterfactual_of: str = None,
+    provided_secrets: Optional[Dict[str, str]] = None
 ) -> ExecutionTrace:
     """Executes a single scenario inside the isolated sandbox harness with real Python execution and tool gateway interception."""
     start_time = time.time()
@@ -75,10 +119,11 @@ def run_scenario_in_sandbox(
 
     if code_content:
         try:
-            # Create isolated execution namespace with interceptors
+            # Create isolated execution namespace with interceptors and Sandboxed OS wrapper
+            sandbox_os = SandboxedOS(provided_secrets)
             module_globals: Dict[str, Any] = {
                 "__name__": "__sandbox__",
-                "os": os,
+                "os": sandbox_os,
                 "sys": sys,
                 "time": time,
                 "math": __import__("math"),
