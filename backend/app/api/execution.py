@@ -14,6 +14,9 @@ from app.core.execution.replay_engine import ReplayEngine
 from app.core.evaluation.trajectory_evaluator import TrajectoryEvaluator
 from app.services.activity_log import activity_log
 
+from app.models.dependency_model import ProvideCredentialsRequest
+from app.core.dependencies.dependency_resolver import DependencyResolver
+
 router = APIRouter(prefix="/execution", tags=["Execution"])
 
 
@@ -21,11 +24,12 @@ class StartExecutionRequest(BaseModel):
     agent_id: str
     scenario_id: str
     evaluation_run_id: Optional[str] = None
+    provided_secrets: Dict[str, str] = {}
 
 
 @router.post("/sessions/start")
 async def start_execution_session(payload: StartExecutionRequest):
-    """Launches a sandboxed execution session for an agent and scenario, logging full interaction trajectories."""
+    """Launches a sandboxed execution session for an agent and scenario after verifying API key credential demands."""
     agent = store.get_agent(payload.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
@@ -34,6 +38,26 @@ async def start_execution_session(payload: StartExecutionRequest):
     scenario = next((s for s in scenarios if s.id == payload.scenario_id), None)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Scenario '{payload.scenario_id}' not found")
+
+    # 1. Gatekeeper Check: Evaluate Credential Demands
+    prompt = DependencyResolver.evaluate_execution_credential_demands(
+        agent=agent,
+        provided_secrets=payload.provided_secrets
+    )
+
+    if not prompt.all_fulfilled:
+        activity_log.emit(
+            category="SANDBOX",
+            action="CREDS_REQUIRED",
+            detail=f"Execution blocked for agent {agent.name}: {prompt.message}",
+            status="warning"
+        )
+        return {
+            "session_id": prompt.session_id,
+            "status": "CREDS_REQUIRED",
+            "message": prompt.message,
+            "credential_prompt": prompt.dict()
+        }
 
     activity_log.emit(
         category="SANDBOX",
@@ -51,6 +75,37 @@ async def start_execution_session(payload: StartExecutionRequest):
         status="success"
     )
 
+    return result
+
+
+@router.post("/sessions/{session_id}/provide-credentials")
+async def provide_credentials_and_resume_execution(session_id: str, payload: ProvideCredentialsRequest, agent_id: str, scenario_id: str):
+    """Submits user API keys interactively to fulfill missing credential demands and start execution."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    scenarios = store.list_scenarios()
+    scenario = next((s for s in scenarios if s.id == scenario_id), None)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found")
+
+    # Re-evaluate credential demands with newly submitted keys
+    prompt = DependencyResolver.evaluate_execution_credential_demands(
+        agent=agent,
+        provided_secrets=payload.credentials,
+        session_id=session_id
+    )
+
+    if not prompt.all_fulfilled:
+        return {
+            "session_id": session_id,
+            "status": "CREDS_REQUIRED",
+            "message": prompt.message,
+            "credential_prompt": prompt.dict()
+        }
+
+    result = await ExecutionController.run_session(agent, scenario)
     return result
 
 

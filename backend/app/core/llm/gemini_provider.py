@@ -192,14 +192,14 @@ class GeminiProvider(LLMProvider):
 
                 if is_rotation_eligible(error_type):
                     GeminiKeyManager().mark_key_failed(key_id, error_type, error_msg)
-                    # Log rotation
-                    _, next_key_id = self._get_client_for_request()
-                    activity_log.emit(
-                        category="LLM",
-                        action="REQUEST",
-                        detail=f"Switching to {next_key_id}...",
-                        status="warning"
-                    )
+                    next_key_id = GeminiKeyManager().peek_next_key_id()
+                    if next_key_id:
+                        activity_log.emit(
+                            category="LLM",
+                            action="REQUEST",
+                            detail=f"Switching to {next_key_id}...",
+                            status="warning"
+                        )
                 else:
                     # Non-retryable error
                     break

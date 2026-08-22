@@ -78,3 +78,36 @@ class DependencyResolverResult(BaseModel):
     recommended_mode: ExecutionMode
     mode_options: List[Dict[str, Any]] = Field(default_factory=list) # Options for UI selection
     active_binding: Optional[ExecutionModelBinding] = None
+
+
+class SystemCredentialItem(BaseModel):
+    key_name: str                        # e.g., "GEMINI_API_KEY", "OPENAI_API_KEY", "DATABASE_URL"
+    provider: str                        # "google", "openai", "database", "serper", etc.
+    description: str
+    is_configured: bool
+    source: str                          # "system_env" | "user_custom" | "missing"
+    masked_value: Optional[str] = None   # e.g., "AIzaSy...4xQ"
+
+
+class CredentialRequirement(BaseModel):
+    key_name: str                        # e.g., "DB_API_KEY", "OPENAI_API_KEY"
+    provider: str
+    description: str
+    is_fulfilled: bool
+    is_optional: bool = False
+    provided_by_system: bool = False
+    masked_value: Optional[str] = None
+
+
+class SessionCredentialPrompt(BaseModel):
+    session_id: str
+    agent_id: str
+    all_fulfilled: bool
+    status: str                          # "CREDS_REQUIRED" | "CLEARED"
+    requirements: List[CredentialRequirement] = Field(default_factory=list)
+    message: str
+
+
+class ProvideCredentialsRequest(BaseModel):
+    credentials: Dict[str, str] = Field(default_factory=dict) # e.g. {"DB_API_KEY": "secret_val"}
+    save_to_system_default: bool = False

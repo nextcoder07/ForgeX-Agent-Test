@@ -108,6 +108,17 @@ class GeminiKeyManager:
             selected.last_used_at = time.time()
             return selected
 
+    def peek_next_key_id(self) -> Optional[str]:
+        """Returns the next eligible key without consuming a rotation slot."""
+        with self._lock:
+            self._check_cooldowns_unlocked()
+            eligible = [k for k in self.keys if k.status == "AVAILABLE"]
+            if not eligible:
+                eligible = [k for k in self.keys if k.status == "COOLDOWN"]
+            if not eligible:
+                return None
+            return min(eligible, key=lambda x: x.last_used_at).key_id
+
     def mark_key_failed(self, key_id: str, error_type: str, error_msg: str):
         """Transition key to COOLDOWN or STOPPED based on error severity."""
         with self._lock:

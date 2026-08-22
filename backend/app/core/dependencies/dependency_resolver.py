@@ -20,6 +20,9 @@ from app.models.dependency_model import (
     AgentModelDependency,
     ExecutionModelBinding,
     DependencyResolverResult,
+    SystemCredentialItem,
+    CredentialRequirement,
+    SessionCredentialPrompt,
 )
 
 
@@ -191,4 +194,122 @@ class DependencyResolver:
             recommended_mode=mode,
             mode_options=mode_options,
             active_binding=binding
+        )
+
+    @staticmethod
+    def get_system_credentials(user_overrides: Optional[Dict[str, str]] = None) -> List[SystemCredentialItem]:
+        """Returns default platform system API keys and their active configuration status."""
+        overrides = user_overrides or {}
+        known_keys = [
+            ("GEMINI_API_KEY", "Google Gemini AI", "Primary LLM engine for multi-stage analysis & judge"),
+            ("OPENAI_API_KEY", "OpenAI", "Alternative LLM engine for Faithful execution mode"),
+            ("ANTHROPIC_API_KEY", "Anthropic Claude", "Alternative LLM engine for Claude model testing"),
+            ("SERPER_API_KEY", "Google Serper Search", "Default search API key for web search tools"),
+            ("WEATHER_API_KEY", "OpenWeatherMap", "Default weather API key for location/environment tools"),
+            ("DATABASE_URL", "PostgreSQL / Supabase", "Primary relational database connection URL"),
+            ("STRIPE_TEST_KEY", "Stripe Simulator", "Default payment gateway test key for transaction tools"),
+        ]
+
+        items: List[SystemCredentialItem] = []
+        for key_name, provider, desc in known_keys:
+            val = overrides.get(key_name) or os.getenv(key_name, "")
+            is_cfg = bool(val and not val.startswith("your_") and not val.endswith("_here"))
+            
+            if overrides.get(key_name):
+                source = "user_custom"
+            elif os.getenv(key_name):
+                source = "system_env"
+            else:
+                source = "missing"
+
+            masked = f"{val[:6]}...{val[-4:]}" if (is_cfg and len(val) > 10) else ("********" if is_cfg else None)
+
+            items.append(
+                SystemCredentialItem(
+                    key_name=key_name,
+                    provider=provider,
+                    description=desc,
+                    is_configured=is_cfg,
+                    source=source,
+                    masked_value=masked
+                )
+            )
+
+        return items
+
+    @staticmethod
+    def evaluate_execution_credential_demands(
+        agent: AgentRecord,
+        provided_secrets: Optional[Dict[str, str]] = None,
+        session_id: str = ""
+    ) -> SessionCredentialPrompt:
+        """Evaluates whether all required API keys are fulfilled before execution can proceed."""
+        secrets = provided_secrets or {}
+        system_items = {item.key_name: item for item in DependencyResolver.get_system_credentials(secrets)}
+
+        requirements: List[CredentialRequirement] = []
+
+        # 1. Model LLM Key Demand
+        model_req = CredentialRequirement(
+            key_name="GEMINI_API_KEY",
+            provider="Google Gemini",
+            description="Required for AI analysis, scenario generation, and execution evaluation",
+            is_fulfilled=bool(secrets.get("GEMINI_API_KEY") or system_items.get("GEMINI_API_KEY", {}).is_configured),
+            provided_by_system=bool(os.getenv("GEMINI_API_KEY")),
+            masked_value=system_items.get("GEMINI_API_KEY", {}).masked_value
+        )
+        requirements.append(model_req)
+
+        # 2. Tool Credential Demands (e.g. DB_API_KEY, NEWS_API_KEY, etc.)
+        for dep in agent.dependencies:
+            dep_type_str = str(dep.type).lower() if hasattr(dep.type, "value") else str(dep.type).lower()
+            if dep_type_str in ["credential", "api_key", "secret", "environment_variable"]:
+                key_name = dep.name.upper()
+                is_full = bool(secrets.get(key_name) or os.getenv(key_name))
+                requirements.append(
+                    CredentialRequirement(
+                        key_name=key_name,
+                        provider=dep.name,
+                        description=f"Tool dependency required by {agent.name}",
+                        is_fulfilled=is_full,
+                        is_optional=not dep.required,
+                        provided_by_system=bool(os.getenv(key_name)),
+                        masked_value=f"{secrets.get(key_name, '')[:4]}***" if is_full else None
+                    )
+                )
+
+        # Also check tools for explicit required credentials
+        for t in agent.tools:
+            if "database" in t.name.lower() or "db" in t.name.lower():
+                if not any(r.key_name == "DB_API_KEY" for r in requirements):
+                    is_full = bool(secrets.get("DB_API_KEY") or os.getenv("DB_API_KEY"))
+                    requirements.append(
+                        CredentialRequirement(
+                            key_name="DB_API_KEY",
+                            provider="Database Service",
+                            description="API key for database inventory/customer tool access",
+                            is_fulfilled=is_full,
+                            provided_by_system=bool(os.getenv("DB_API_KEY")),
+                            masked_value="DB_***" if is_full else None
+                        )
+                    )
+
+        # Determine overall fulfillment
+        unfulfilled = [r for r in requirements if not r.is_fulfilled and not r.is_optional]
+        all_fulfilled = len(unfulfilled) == 0
+
+        status = "CLEARED" if all_fulfilled else "CREDS_REQUIRED"
+        if all_fulfilled:
+            msg = "All required system and tool API keys are satisfied. Ready for execution."
+        else:
+            missing_names = ", ".join([r.key_name for r in unfulfilled])
+            msg = f"Execution blocked. Missing required API keys: {missing_names}. Please provide them to proceed."
+
+        return SessionCredentialPrompt(
+            session_id=session_id or f"sess-{uuid.uuid4().hex[:8]}",
+            agent_id=agent.id,
+            all_fulfilled=all_fulfilled,
+            status=status,
+            requirements=requirements,
+            message=msg
         )

@@ -13,11 +13,45 @@ from app.models.dependency_model import (
     DependencyResolverResult,
     AgentModelDependency,
     ExecutionModelBinding,
+    SystemCredentialItem,
+    SessionCredentialPrompt,
+    ProvideCredentialsRequest,
 )
 from app.services.store import store
 from app.core.dependencies.dependency_resolver import DependencyResolver
 
 router = APIRouter(prefix="/dependencies", tags=["Dependencies & Resolution"])
+
+# In-memory custom user system credentials override cache
+_USER_SYSTEM_CREDENTIALS: Dict[str, str] = {}
+
+
+@router.get("/system-credentials", response_model=List[SystemCredentialItem])
+def get_platform_system_credentials():
+    """Retrieve default platform system API keys and their active configuration status."""
+    return DependencyResolver.get_system_credentials(_USER_SYSTEM_CREDENTIALS)
+
+
+@router.post("/system-credentials", response_model=List[SystemCredentialItem])
+def update_platform_system_credentials(payload: ProvideCredentialsRequest):
+    """Update or override custom platform system API keys."""
+    for k, v in payload.credentials.items():
+        if v:
+            _USER_SYSTEM_CREDENTIALS[k.upper()] = v
+    return DependencyResolver.get_system_credentials(_USER_SYSTEM_CREDENTIALS)
+
+
+@router.get("/agents/{agent_id}/required-credentials", response_model=SessionCredentialPrompt)
+def get_agent_required_credentials(agent_id: str):
+    """Retrieve all required API key demands for an agent before execution."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    return DependencyResolver.evaluate_execution_credential_demands(
+        agent=agent,
+        provided_secrets=_USER_SYSTEM_CREDENTIALS
+    )
 
 
 @router.post("/resolve", response_model=DependencyResolverResult)
@@ -27,10 +61,12 @@ def resolve_agent_dependencies(payload: DependencyResolverRequest):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
+    combined_secrets = {**_USER_SYSTEM_CREDENTIALS, **payload.provided_secrets}
+
     result = DependencyResolver.resolve_mode(
         agent=agent,
         requested_mode=payload.requested_mode,
-        provided_secrets=payload.provided_secrets
+        provided_secrets=combined_secrets
     )
 
     # Persist detected dependencies & binding in store
@@ -50,5 +86,5 @@ def get_agent_model_dependencies(agent_id: str):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    result = DependencyResolver.resolve_mode(agent=agent)
+    result = DependencyResolver.resolve_mode(agent=agent, provided_secrets=_USER_SYSTEM_CREDENTIALS)
     return result.detected_model_dependencies
