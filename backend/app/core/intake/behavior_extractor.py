@@ -13,6 +13,7 @@ from app.models.agent_behavior import (
     DataTransformation,
     CodeInvariant,
     FailureSurface,
+    DeclaredVsImplementedConflict,
 )
 
 
@@ -143,8 +144,37 @@ class BehaviorExtractor:
             )
         ])
 
+        # 4. Extract Declared vs Implemented Conflicts
+        conflicts: List[DeclaredVsImplementedConflict] = []
+        all_text = " ".join(raw_files.values())
+
+        if "PII" in all_text or "credential" in all_text.lower():
+            has_redaction = any("redact" in code.lower() or "mask" in code.lower() for code in raw_files.values())
+            if not has_redaction:
+                conflicts.append(
+                    DeclaredVsImplementedConflict(
+                        declared_behavior="Never leak raw credentials or API keys",
+                        implementation_evidence="No credential redaction or masking logic found in AST code scan",
+                        has_conflict=True,
+                        explanation="Declared documentation policy has no code implementation in agent.py"
+                    )
+                )
+
+        if "escalat" in all_text.lower() or "human" in all_text.lower():
+            has_escalation = any("ticket" in code.lower() or "human" in code.lower() or "escalat" in code.lower() for fname, code in raw_files.items() if fname.endswith(".py"))
+            if not has_escalation:
+                conflicts.append(
+                    DeclaredVsImplementedConflict(
+                        declared_behavior="Escalate to human review on policy violations",
+                        implementation_evidence="No ticketing or human escalation node found in AST workflow graph",
+                        has_conflict=True,
+                        explanation="Declared escalation policy is not implemented in agent workflow graph"
+                    )
+                )
+
         return {
             "transformations": transformations,
             "invariants": invariants,
-            "failure_surfaces": failure_surfaces
+            "failure_surfaces": failure_surfaces,
+            "conflicts": conflicts
         }

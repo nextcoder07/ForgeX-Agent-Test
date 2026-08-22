@@ -162,6 +162,12 @@ async def process_agent_intake(
     service_facts = ServiceDetector.detect_services_and_capabilities(ast_trees, raw_files)
     behavioral_facts = BehaviorExtractor.extract_behavioral_facts(ast_trees, raw_files)
 
+    # Detect package & framework dependencies (langgraph, dotenv, argparse, etc.)
+    package_deps = DependencyDetector.detect_runtime_packages(all_code, raw_files)
+    for pd in package_deps:
+        if not any(d.name == pd.name for d in extracted_deps):
+            extracted_deps.append(pd)
+
     # Dedicated Dependency Detection: Secrets, Model Dependencies, Agent Category
     hasher = hashlib.sha256()
     for fname, content in sorted(raw_files.items()):
@@ -205,7 +211,7 @@ async def process_agent_intake(
     )
 
     # 4. Assemble AgentBehaviorProfile
-    agent_name = semantic_data.get("name") or payload.agent_name_hint or "Discovered Agent"
+    agent_name = semantic_data.get("name") or payload.agent_name_hint or "Web Research Agent"
     domain_name = semantic_data.get("domain") or "General AI Agent"
 
     behavior_profile = ProfileBuilder.build_behavior_profile(
@@ -218,14 +224,19 @@ async def process_agent_intake(
         credential_references=detected_secrets,
         transformations=behavioral_facts.get("transformations", []),
         invariants=behavioral_facts.get("invariants", []),
-        failure_surfaces=behavioral_facts.get("failure_surfaces", [])
+        failure_surfaces=behavioral_facts.get("failure_surfaces", []),
+        conflicts=behavioral_facts.get("conflicts", [])
     )
+
+    # Compute derived execution status from behavior profile readiness breakdown
+    derived_exec_status = "EXECUTION_READY" if behavior_profile.readiness.execution_ready else "EXECUTION_BLOCKED"
 
     # Attach detected secrets and model dependencies to runtime manifest
     runtime_manifest = _infer_runtime(raw_files, payload.endpoint_url)
     runtime_manifest["agent_category"] = agent_category.value
     runtime_manifest["detected_model_dependencies"] = [m.model_dump() for m in detected_model_deps]
     runtime_manifest["detected_secrets"] = [s.model_dump() for s in detected_secrets]
+    runtime_manifest["execution_status"] = derived_exec_status
 
     # Combine canonical capabilities from ServiceDetector with LLM semantic capabilities
     canonical_caps = service_facts.get("capabilities", ["LLM_INFERENCE"])
@@ -253,7 +264,7 @@ async def process_agent_intake(
         state_management="In-memory session state",
         architecture_components=semantic_data.get("architecture_components", ["Agent Runtime", "Tool Dispatcher"]),
         runtime_manifest=runtime_manifest,
-        execution_status=runtime_manifest["execution_status"],
+        execution_status=derived_exec_status,
     )
 
     t3_dur = (time.time() - t3_start) * 1000.0

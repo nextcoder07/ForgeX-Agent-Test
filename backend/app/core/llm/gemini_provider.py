@@ -31,6 +31,17 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", LLMConfig.MODEL)
 
 
+def _response_token_counts(response: Any) -> tuple[int, int]:
+    """Return provider-reported prompt and generated token counts."""
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return 0, 0
+    return (
+        int(getattr(usage, "prompt_token_count", 0) or 0),
+        int(getattr(usage, "candidates_token_count", 0) or 0),
+    )
+
+
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str = "", model_name: str = ""):
         self._is_custom_key = bool(api_key)
@@ -110,8 +121,8 @@ class GeminiProvider(LLMProvider):
                 provider="gemini",
                 model=self.model_name,
                 status="FALLBACK",
-                input_tokens=len(system + user) // 4,
-                output_tokens=len(fallback_res) // 4,
+                input_tokens=0,
+                output_tokens=0,
                 prompt_version="v1",
                 input_reference={"system": system, "user": user[:500]},
                 output_reference={"response": fallback_res[:500]}
@@ -157,6 +168,7 @@ class GeminiProvider(LLMProvider):
                 )
                 if res and res.text:
                     res_text = res.text
+                    input_tokens, output_tokens = _response_token_counts(res)
                     session.add_message("model", res.text)
                     session.last_active_key_id = key_id
                     
@@ -211,8 +223,8 @@ class GeminiProvider(LLMProvider):
             provider="gemini",
             model=self.model_name,
             status="SUCCESS" if res_text else "FAILED",
-            input_tokens=len(system + user) // 4,
-            output_tokens=len(res_text) // 4 if res_text else 0,
+            input_tokens=input_tokens if res_text else 0,
+            output_tokens=output_tokens if res_text else 0,
             error_message=str(last_exception) if last_exception else None,
             prompt_version="v1",
             input_reference={"system": system, "user": user[:500]},

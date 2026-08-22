@@ -260,7 +260,7 @@ class DependencyResolver:
         )
         requirements.append(model_req)
 
-        # 2. Tool Credential Demands (e.g. DB_API_KEY, NEWS_API_KEY, etc.)
+        # 2. Tool Credential Demands (ONLY for external API keys / secrets, NEVER packages or frameworks)
         for dep in agent.dependencies:
             dep_type_str = str(dep.type).lower() if hasattr(dep.type, "value") else str(dep.type).lower()
             if dep_type_str in ["credential", "api_key", "secret", "environment_variable"]:

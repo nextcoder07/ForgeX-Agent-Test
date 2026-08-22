@@ -190,6 +190,43 @@ class DependencyDetector:
         return deps
 
     @staticmethod
+    def detect_runtime_packages(code_text: str, raw_files: Dict[str, str]) -> List[DependencyDefinition]:
+        """Statically detects runtime packages (langgraph, python-dotenv, argparse, etc.) that do NOT require credentials."""
+        deps: List[DependencyDefinition] = []
+        seen = set()
+
+        code_lower = code_text.lower()
+
+        # Check requirements.txt or raw files
+        req_text = raw_files.get("requirements.txt", "") + "\n" + raw_files.get("requirements.in", "")
+
+        package_rules = [
+            ("langgraph", "LangGraph Framework", "framework"),
+            ("langchain", "LangChain Core", "framework"),
+            ("tavily", "Tavily Search Client", "package"),
+            ("dotenv", "Python DotEnv", "package"),
+            ("argparse", "CLI Parameter Parser", "package"),
+            ("requests", "Requests HTTP Library", "package"),
+            ("httpx", "HTTPX REST Client", "package"),
+            ("pydantic", "Pydantic Data Validation", "package"),
+        ]
+
+        for pkg_kw, pkg_name, pkg_type in package_rules:
+            if pkg_kw in code_lower or pkg_kw in req_text.lower():
+                if pkg_name not in seen:
+                    seen.add(pkg_name)
+                    deps.append(
+                        DependencyDefinition(
+                            id=f"dep-{pkg_kw}",
+                            name=pkg_name,
+                            type=pkg_type,
+                            detected_from="REQUIREMENTS_AND_IMPORT_SCAN"
+                        )
+                    )
+
+        return deps
+
+    @staticmethod
     def classify_agent_category(
         code_text: str,
         model_deps: List[AgentModelDependency],
@@ -208,7 +245,7 @@ class DependencyDetector:
         has_llm_api = len(model_deps) > 0 or any(kw in code_lower for kw in ["openai", "gemini", "anthropic", "chat.completions", "responses.create"])
 
         # Check for tool count & external services
-        has_heavy_tools = len(tools) >= 3 or len(ext_deps) >= 2 or any(kw in code_lower for kw in ["database", "sendgrid", "playwright", "stripe", "postgres", "redis", "elasticsearch"])
+        has_heavy_tools = len(tools) >= 3 or len([d for d in ext_deps if d.type in ["external_service", "database", "http", "email"]]) >= 2 or any(kw in code_lower for kw in ["database", "sendgrid", "playwright", "stripe", "postgres", "redis", "elasticsearch"])
 
         if not has_llm_api:
             # Type 3: Rule-based agent (e.g. pure if/else, dictionary lookups)
