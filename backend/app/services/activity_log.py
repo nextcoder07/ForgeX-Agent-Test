@@ -70,21 +70,25 @@ class ActivityLog:
         
         # Format string
         dur_str = f" | {event.duration_ms:.1f}ms" if event.duration_ms is not None else ""
-        status_symbol = "✓"
+        status_symbol = "[OK]"
         if event.status == "warning":
-            status_symbol = "⚠️ "
+            status_symbol = "[WARN]"
         elif event.status == "error":
-            status_symbol = "❌"
+            status_symbol = "[ERR]"
         elif event.status == "security_alert":
-            status_symbol = "🚨"
+            status_symbol = "[SEC]"
 
-        print(
-            f"{cat_color}{bold}[{event.category}:{event.action}]{reset} "
-            f"{event.detail}{dur_str} ({status_symbol} {event.status}){reset}"
-        )
-        if event.request_summary:
-            print(f"   {cat_color}→ Req Summary:{reset} {event.request_summary[:160]}")
-        if event.response_summary:
-            print(f"   {cat_color}← Res Summary:{reset} {event.response_summary[:160]}")
+        try:
+            print(
+                f"{cat_color}{bold}[{event.category}:{event.action}]{reset} "
+                f"{event.detail}{dur_str} ({status_symbol} {event.status}){reset}"
+            )
+            if event.request_summary:
+                print(f"   {cat_color}-> Req Summary:{reset} {event.request_summary[:160]}")
+            if event.response_summary:
+                print(f"   {cat_color}<- Res Summary:{reset} {event.response_summary[:160]}")
+        except Exception:
+            # Fallback if terminal completely chokes on colors
+            print(f"[{event.category}:{event.action}] {event.detail}{dur_str} ({status_symbol} {event.status})")
 
 activity_log = ActivityLog()
