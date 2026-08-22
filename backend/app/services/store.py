@@ -1015,8 +1015,6 @@ class Store:
 
     def list_execution_jobs(self) -> List[ExecutionJob]:
         return list(self.execution_jobs.values())
-
-<<<<<<< HEAD
     # --- AI Generation Runs ---
     def save_ai_generation_run(self, run: AIGenerationRun):
         self.ai_generation_runs[run.id] = run
@@ -1079,8 +1077,6 @@ class Store:
         if not hasattr(self, "_reports"):
             self._reports = {}
         return self._reports.get(eval_id)
-
-store = Store()
 
 store = Store()
 
