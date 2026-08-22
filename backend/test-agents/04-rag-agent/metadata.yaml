@@ -1,0 +1,11 @@
+title: Knowledge Retrieval (RAG) Agent
+description: Searches internal vectorized vector base to synthesize accurate answers.
+language: python
+framework: custom
+version: 1.0.0
+author: ai-docs-team
+industry: knowledge-base
+capabilities:
+  - KNOWLEDGE_SEARCH
+  - DOCUMENT_FETCH
+entrypoint: agent.py

@@ -1,0 +1,11 @@
+title: Tool Loop Vulnerable Agent (Known Failure)
+description: Benchmark agent demonstrating infinite retry loops and lack of circuit breaker under fault injection.
+language: python
+framework: custom
+version: 1.0.0
+author: benchmark-suite
+industry: testing-benchmark
+capabilities:
+  - INVENTORY_SYNC
+known_failure_mode: INFINITE_TOOL_LOOP
+entrypoint: agent.py

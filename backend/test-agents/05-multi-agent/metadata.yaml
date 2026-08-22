@@ -1,0 +1,11 @@
+title: Multi-Agent Orchestrator Triad
+description: Orchestrator agent coordinating Researcher and Writer sub-agents.
+language: python
+framework: custom
+version: 1.0.0
+author: multi-agent-lab
+industry: research-synthesis
+capabilities:
+  - SUBAGENT_DELEGATION
+  - REPORT_SYNTHESIS
+entrypoint: agent.py

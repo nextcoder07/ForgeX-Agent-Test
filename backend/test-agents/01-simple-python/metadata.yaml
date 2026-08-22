@@ -1,0 +1,11 @@
+title: Simple Order Query Agent
+description: Lightweight agent querying order tracking and shipping statuses.
+language: python
+framework: custom
+version: 1.0.0
+author: platform-demo
+industry: e-commerce
+capabilities:
+  - ORDER_LOOKUP
+  - CUSTOMER_LOOKUP
+entrypoint: agent.py

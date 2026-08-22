@@ -1,0 +1,12 @@
+title: Utility Tool Agent
+description: Math, currency conversion, and JSON reporting utility agent.
+language: python
+framework: custom
+version: 1.0.0
+author: platform-demo
+industry: utility
+capabilities:
+  - MATH_EVALUATION
+  - CURRENCY_CONVERSION
+  - JSON_FORMATTING
+entrypoint: agent.py

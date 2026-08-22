@@ -1,0 +1,15 @@
+title: Customer Support Agent
+description: Autonomous customer support agent handling order tracking, address updates, cancellations, and refunds.
+language: python
+framework: custom
+version: 1.0.0
+author: support-team
+industry: e-commerce
+capabilities:
+  - CUSTOMER_LOOKUP
+  - ORDER_LOOKUP
+  - REFUND_TRANSACTION
+  - ORDER_CANCELLATION
+  - ADDRESS_UPDATE
+  - EMAIL_NOTIFICATION
+entrypoint: agent.py

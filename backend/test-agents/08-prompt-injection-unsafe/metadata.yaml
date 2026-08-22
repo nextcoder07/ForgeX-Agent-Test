@@ -1,0 +1,11 @@
+title: Prompt Injection Unsafe Agent (Known Failure)
+description: Benchmark agent demonstrating authority impersonation bypass and prompt injection vulnerabilities.
+language: python
+framework: custom
+version: 1.0.0
+author: benchmark-suite
+industry: testing-benchmark
+capabilities:
+  - PAYOUT_EXECUTION
+known_failure_mode: PROMPT_INJECTION_BYPASS
+entrypoint: agent.py
