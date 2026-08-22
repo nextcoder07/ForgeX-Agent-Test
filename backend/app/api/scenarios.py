@@ -14,7 +14,10 @@ from app.core.scenarios.scenario_generator import generate_scenarios_for_agent
 from app.core.scenarios.scenario_critic import critique_scenarios
 from app.core.scenarios.scenario_validator import validate_scenarios_deterministically
 from app.core.scenarios.coverage_engine import compute_coverage_gaps
-from app.core.llm.gemini_provider import GeminiProvider
+import logging
+from app.core.llm.gemini_provider import GeminiProvider, LLMGenerationError, LLMQuotaExhaustedError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scenarios", tags=["Scenarios"])
 
@@ -46,31 +49,56 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
     strategy = build_test_strategy(agent, desired_count=target_count)
     llm = GeminiProvider()
 
+    # Step 1: Generate Scenarios
     try:
-        # 1. Generate
-        generated = await generate_scenarios_for_agent(agent, strategy, llm)
-        # 2. Critic
-        critiqued = await critique_scenarios(generated, agent, llm)
+        scenarios = await generate_scenarios_for_agent(agent, strategy, llm)
+    except LLMQuotaExhaustedError as e:
+        logger.warning(f"Scenario generation aborted due to Gemini quota exhaustion: {e}")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Gemini API quota exhausted (429 RESOURCE_EXHAUSTED). Please try again later."
+        )
     except Exception as e:
+        logger.error(f"Scenario generation failed due to LLM provider error: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Scenario generation failed due to LLM provider error: {str(e)}"
         )
-        
-    # 3. Deterministic Validation
-    validated = validate_scenarios_deterministically(critiqued, agent)
 
-    # 4. Filter by scenario_type if specified
+    if not scenarios:
+        raise HTTPException(status_code=500, detail="Failed to generate any valid test scenarios.")
+
+    for sc in scenarios:
+        sc.agent_id = agent.id
+
+    # Step 2: IMMEDIATELY save valid scenarios to store & Supabase
+    # Ensures scenarios are never lost even if subsequent critic/validation LLM calls fail.
+    for sc in scenarios:
+        store.save_scenario(sc)
+
+    # Step 3: Run Critic Evaluation
+    try:
+        scenarios = await critique_scenarios(scenarios, agent, llm)
+    except (LLMQuotaExhaustedError, LLMGenerationError) as quota_err:
+        logger.warning(f"Critic review phase skipped/truncated due to LLM quota limit: {quota_err}")
+        for sc in scenarios:
+            if not sc.critic_notes or sc.critic_notes == "Scenario validated as relevant and executable.":
+                sc.critic_notes = "Critic review skipped due to Gemini API quota limit."
+                sc.validation_status = "UNREVIEWED_QUOTA_EXHAUSTED"
+    except Exception as critic_err:
+        logger.warning(f"Critic review phase error: {critic_err}")
+
+    # Step 4: Deterministic Validation
+    validated = validate_scenarios_deterministically(scenarios, agent)
+
+    # Step 5: Filter by scenario_type if specified
     if payload.scenario_type and payload.scenario_type.lower() != "all":
         stype = payload.scenario_type.lower().replace("-", "_").replace(" ", "_")
         filtered = [sc for sc in validated if sc.category.value.lower() == stype or stype in sc.category.value.lower()]
         if filtered:
             validated = filtered
 
-    for scenario in validated:
-        scenario.agent_id = agent.id
-
-    # Save to persistent store
+    # Step 6: Persist updated scenario records (with final critic/validation status)
     for sc in validated:
         store.save_scenario(sc)
 

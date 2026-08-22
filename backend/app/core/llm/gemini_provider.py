@@ -27,6 +27,10 @@ class LLMGenerationError(Exception):
     """Raised when all Gemini API keys fail or an unrecoverable Gemini error occurs."""
     pass
 
+class LLMQuotaExhaustedError(LLMGenerationError):
+    """Raised specifically when Gemini API quota or rate limit is exhausted across all available keys."""
+    pass
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", LLMConfig.MODEL)
 
@@ -131,6 +135,11 @@ class GeminiProvider(LLMProvider):
             attempt += 1
             client, key_id = self._get_client_for_request()
 
+            if not client or key_id == "No Key Configured":
+                last_exception = Exception("No AVAILABLE Gemini API key configured or all keys are in cooldown.")
+                logger.error("No eligible Gemini key available for LLM generation.")
+                break
+
             activity_log.emit(
                 category="LLM",
                 action="REQUEST",
@@ -138,11 +147,6 @@ class GeminiProvider(LLMProvider):
                 request_summary=req_summary,
                 status="success"
             )
-
-            if not client:
-                last_exception = Exception(f"Gemini client could not be initialized for {key_id}")
-                logger.error(f"Gemini client could not be initialized for {key_id}")
-                continue
 
             try:
                 from google.genai import types
@@ -192,7 +196,9 @@ class GeminiProvider(LLMProvider):
 
                 if is_rotation_eligible(error_type):
                     GeminiKeyManager().mark_key_failed(key_id, error_type, error_msg)
-                    # Log rotation
+                    if not GeminiKeyManager().has_available_keys():
+                        logger.warning("All registered Gemini API keys are now exhausted or in cooldown. Aborting retries.")
+                        break
                     _, next_key_id = self._get_client_for_request()
                     activity_log.emit(
                         category="LLM",
@@ -225,6 +231,10 @@ class GeminiProvider(LLMProvider):
 
         if res_text:
             return res_text
+
+        # Raise specific LLMQuotaExhaustedError if error is quota exhaustion
+        if last_exception and classify_error(last_exception) == "QUOTA_EXHAUSTED":
+            raise LLMQuotaExhaustedError(f"Gemini API quota exhausted (429 RESOURCE_EXHAUSTED). Last error: {last_exception}")
 
         # If keys are configured but we failed to generate, raise LLMGenerationError
         raise LLMGenerationError(f"All Gemini API keys failed or error non-retryable. Last error: {last_exception}")
