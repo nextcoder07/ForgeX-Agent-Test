@@ -1,7 +1,7 @@
 -- =============================================================================
--- Agent Evaluation & Reliability Platform — V1 Schema (Robust String-ID Version)
+-- Agent Evaluation & Reliability Platform — Unified Database Schema
 -- Two-layer architecture: permanent (public schema) + runtime (runtime schema)
--- Run this once against your Supabase project via the SQL editor.
+-- Run this unified script in the Supabase SQL Editor.
 -- =============================================================================
 
 -- Enable extension for uuid helper functions just in case
@@ -11,23 +11,19 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- PERMANENT SCHEMA (public)
 -- =============================================================================
 
--- ---------------------------------------------------------------------------
--- agents — logical identity of an agent project
--- ---------------------------------------------------------------------------
+-- 1. agents — logical identity of an agent project
 CREATE TABLE IF NOT EXISTS agents (
-    id              TEXT PRIMARY KEY,  -- e.g. "agent-cust-v1" or uuid
-    name            TEXT NOT NULL,
-    description     TEXT,
-    status          TEXT NOT NULL DEFAULT 'active',
-    agent_spec      JSONB, -- normalized spec used by the current control-plane store
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    description        TEXT,
+    status             TEXT NOT NULL DEFAULT 'active',
+    agent_spec         JSONB,
     current_version_id TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- agent_versions — immutable snapshots of an agent build
--- ---------------------------------------------------------------------------
+-- 2. agent_versions — immutable snapshots of an agent build
 CREATE TABLE IF NOT EXISTS agent_versions (
     id              TEXT PRIMARY KEY,
     agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -38,15 +34,13 @@ CREATE TABLE IF NOT EXISTS agent_versions (
     framework       TEXT,
     language        TEXT,
     entrypoint      TEXT,
-    agent_spec      JSONB, -- contains full metadata
+    agent_spec      JSONB,
     analysis_status TEXT NOT NULL DEFAULT 'pending',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(agent_id, version)
 );
 
--- ---------------------------------------------------------------------------
--- agent_components — files / modules that make up a version
--- ---------------------------------------------------------------------------
+-- 3. agent_components — files / modules that make up a version
 CREATE TABLE IF NOT EXISTS agent_components (
     id                  TEXT PRIMARY KEY,
     agent_version_id    TEXT NOT NULL REFERENCES agent_versions(id) ON DELETE CASCADE,
@@ -58,12 +52,10 @@ CREATE TABLE IF NOT EXISTS agent_components (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- agent_artifacts / agent_files — immutable uploaded source manifests
--- ---------------------------------------------------------------------------
+-- 4. agent_artifacts — immutable uploaded source manifests
 CREATE TABLE IF NOT EXISTS agent_artifacts (
     id                  TEXT PRIMARY KEY,
-    agent_id            TEXT NOT NULL,
+    agent_id            TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     artifact_type       TEXT NOT NULL DEFAULT 'package',
     storage_provider    TEXT NOT NULL DEFAULT 'supabase_database',
     storage_path        TEXT NOT NULL,
@@ -77,9 +69,10 @@ CREATE TABLE IF NOT EXISTS agent_artifacts (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 5. agent_files — source file contents linked to artifacts
 CREATE TABLE IF NOT EXISTS agent_files (
     id                  TEXT PRIMARY KEY,
-    agent_artifact_id   TEXT NOT NULL,
+    agent_artifact_id   TEXT NOT NULL REFERENCES agent_artifacts(id) ON DELETE CASCADE,
     path                TEXT NOT NULL,
     file_type           TEXT,
     language            TEXT,
@@ -89,15 +82,13 @@ CREATE TABLE IF NOT EXISTS agent_files (
     is_entrypoint       BOOLEAN NOT NULL DEFAULT false,
     is_config           BOOLEAN NOT NULL DEFAULT false,
     is_prompt           BOOLEAN NOT NULL DEFAULT false,
-    is_tool_definition   BOOLEAN NOT NULL DEFAULT false,
+    is_tool_definition  BOOLEAN NOT NULL DEFAULT false,
     content             TEXT,
-    metadata             JSONB,
+    metadata            JSONB,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- capabilities — platform canonical capability registry
--- ---------------------------------------------------------------------------
+-- 6. capabilities — platform canonical capability registry
 CREATE TABLE IF NOT EXISTS capabilities (
     id                       TEXT PRIMARY KEY,
     name                     TEXT NOT NULL UNIQUE,
@@ -124,9 +115,7 @@ INSERT INTO capabilities (id, name, category, description, default_risk_level, d
     ('cap-14', 'CODE_EXECUTION',     'compute',  'Execute arbitrary code',              'critical', 'destructive')
 ON CONFLICT (name) DO NOTHING;
 
--- ---------------------------------------------------------------------------
--- tools
--- ---------------------------------------------------------------------------
+-- 7. tools
 CREATE TABLE IF NOT EXISTS tools (
     id                   TEXT PRIMARY KEY,
     agent_version_id     TEXT NOT NULL REFERENCES agent_versions(id) ON DELETE CASCADE,
@@ -145,9 +134,7 @@ CREATE TABLE IF NOT EXISTS tools (
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- dependencies
--- ---------------------------------------------------------------------------
+-- 8. dependencies
 CREATE TABLE IF NOT EXISTS dependencies (
     id                TEXT PRIMARY KEY,
     agent_version_id  TEXT NOT NULL REFERENCES agent_versions(id) ON DELETE CASCADE,
@@ -160,9 +147,7 @@ CREATE TABLE IF NOT EXISTS dependencies (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- scenario_sets
--- ---------------------------------------------------------------------------
+-- 9. scenario_sets
 CREATE TABLE IF NOT EXISTS scenario_sets (
     id                TEXT PRIMARY KEY,
     agent_id          TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -172,29 +157,25 @@ CREATE TABLE IF NOT EXISTS scenario_sets (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- scenarios — flexible to support stand-alone or group scenarios
--- ---------------------------------------------------------------------------
+-- 10. scenarios
 CREATE TABLE IF NOT EXISTS scenarios (
     id                 TEXT PRIMARY KEY,
-    agent_id           TEXT,
+    agent_id           TEXT REFERENCES agents(id) ON DELETE CASCADE,
     scenario_set_id    TEXT REFERENCES scenario_sets(id) ON DELETE CASCADE,
     category           TEXT NOT NULL,
     title              TEXT NOT NULL,
     purpose            TEXT,
     current_version_id TEXT,
     status             TEXT NOT NULL DEFAULT 'draft',
-    scenario_spec      JSONB, -- Full deserialization backup
+    scenario_spec      JSONB,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- evaluation_runs
--- ---------------------------------------------------------------------------
+-- 11. evaluation_runs (Evaluation Jobs)
 CREATE TABLE IF NOT EXISTS evaluation_runs (
     id                       TEXT PRIMARY KEY,
-    agent_version_id         TEXT REFERENCES agent_versions(id) ON DELETE SET NULL,
+    agent_version_id         TEXT REFERENCES agent_versions(id) ON DELETE CASCADE,
     name                     TEXT,
     mode                     TEXT NOT NULL,
     status                   TEXT NOT NULL DEFAULT 'queued',
@@ -208,9 +189,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- evaluation_results
--- ---------------------------------------------------------------------------
+-- 12. evaluation_results
 CREATE TABLE IF NOT EXISTS evaluation_results (
     id                  TEXT PRIMARY KEY,
     evaluation_run_id   TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
@@ -229,33 +208,29 @@ CREATE TABLE IF NOT EXISTS evaluation_results (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- scorecards — stores evaluation aggregate scorecards
--- ---------------------------------------------------------------------------
+-- 13. scorecards — evaluation scorecard summaries
 CREATE TABLE IF NOT EXISTS scorecards (
-    evaluation_id           TEXT PRIMARY KEY,
-    agent_id                TEXT,
-    agent_name              TEXT,
-    agent_version           TEXT,
-    correctness             NUMERIC,
-    safety                  NUMERIC,
-    robustness              NUMERIC,
-    tool_discipline         NUMERIC,
-    goal_adherence          NUMERIC,
-    composite               NUMERIC,
-    safety_axis             NUMERIC,
-    capability_axis         NUMERIC,
-    total_scenarios         INTEGER,
-    passed                  INTEGER,
-    failed                  INTEGER,
-    critical_failures       INTEGER,
-    judge_agreement_rate    NUMERIC,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+    evaluation_id        TEXT PRIMARY KEY,
+    agent_id             TEXT REFERENCES agents(id) ON DELETE CASCADE,
+    agent_name           TEXT,
+    agent_version        TEXT,
+    correctness          NUMERIC,
+    safety               NUMERIC,
+    robustness           NUMERIC,
+    tool_discipline      NUMERIC,
+    goal_adherence       NUMERIC,
+    composite            NUMERIC,
+    safety_axis          NUMERIC,
+    capability_axis      NUMERIC,
+    total_scenarios      INTEGER,
+    passed               INTEGER,
+    failed               INTEGER,
+    critical_failures    INTEGER,
+    judge_agreement_rate NUMERIC,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- failure_clusters
--- ---------------------------------------------------------------------------
+-- 14. failure_clusters
 CREATE TABLE IF NOT EXISTS failure_clusters (
     id                      TEXT PRIMARY KEY,
     evaluation_id           TEXT NOT NULL,
@@ -269,134 +244,97 @@ CREATE TABLE IF NOT EXISTS failure_clusters (
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------------------------------------------------------------------------
--- reports
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS reports (
-    id                TEXT PRIMARY KEY,
-    evaluation_run_id TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-    report_type       TEXT NOT NULL,
-    title             TEXT,
-    summary           TEXT,
-    report_data       JSONB,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- ---------------------------------------------------------------------------
--- pipeline_runs / pipeline_stages / pipeline_events
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS pipeline_runs (
-    id               TEXT PRIMARY KEY,
-    agent_version_id TEXT REFERENCES agent_versions(id) ON DELETE SET NULL,
-    pipeline_type    TEXT NOT NULL,
-    status           TEXT NOT NULL DEFAULT 'queued',
-    started_at       TIMESTAMPTZ,
-    completed_at     TIMESTAMPTZ,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS pipeline_stages (
+-- 15. agent_dependencies
+CREATE TABLE IF NOT EXISTS agent_dependencies (
     id              TEXT PRIMARY KEY,
-    pipeline_run_id TEXT NOT NULL REFERENCES pipeline_runs(id) ON DELETE CASCADE,
-    stage_name      TEXT NOT NULL,
-    stage_order     INTEGER NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'queued',
-    model_provider  TEXT,
-    model_name      TEXT,
-    input_count     INTEGER,
-    output_count    INTEGER,
-    input_tokens    INTEGER,
-    output_tokens   INTEGER,
-    retry_count     INTEGER DEFAULT 0,
-    duration_ms     INTEGER,
-    error_message   TEXT,
-    started_at      TIMESTAMPTZ,
-    completed_at    TIMESTAMPTZ
+    agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    dependency_name TEXT NOT NULL,
+    dependency_type TEXT NOT NULL,
+    required        BOOLEAN NOT NULL DEFAULT true,
+    detected_from   TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS pipeline_events (
-    id                TEXT PRIMARY KEY,
-    pipeline_stage_id TEXT NOT NULL REFERENCES pipeline_stages(id) ON DELETE CASCADE,
-    event_type        TEXT NOT NULL,
-    message           TEXT,
-    metadata          JSONB,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+-- 16. platform_resources
+CREATE TABLE IF NOT EXISTS platform_resources (
+    id         TEXT PRIMARY KEY,
+    capability TEXT NOT NULL,
+    provider   TEXT NOT NULL,
+    mode       TEXT NOT NULL DEFAULT 'sandbox',
+    status     TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 17. dependency_bindings
+CREATE TABLE IF NOT EXISTS dependency_bindings (
+    id              TEXT PRIMARY KEY,
+    agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    dependency_name TEXT NOT NULL,
+    resolution_type TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    user_value      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 18. execution_jobs
+CREATE TABLE IF NOT EXISTS execution_jobs (
+    id                  TEXT PRIMARY KEY,
+    agent_id            TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    agent_name          TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'pending',
+    total_scenarios     INTEGER NOT NULL DEFAULT 0,
+    completed_scenarios INTEGER NOT NULL DEFAULT 0,
+    scenario_ids        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at         TIMESTAMPTZ
+);
 
 -- =============================================================================
--- RUNTIME SCHEMA — temporary / disposable execution data
+-- RUNTIME SCHEMA (runtime) — For isolated sandbox runs
 -- =============================================================================
-
 CREATE SCHEMA IF NOT EXISTS runtime;
 
-CREATE TABLE IF NOT EXISTS runtime.sandboxes (
+CREATE TABLE IF NOT EXISTS runtime.sessions (
     id                   TEXT PRIMARY KEY,
-    evaluation_run_id    TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-    scenario_instance_id TEXT,
-    runtime_type         TEXT NOT NULL,
-    container_reference  TEXT,
-    image_reference      TEXT,
-    cpu_limit            NUMERIC,
-    memory_limit_mb      INTEGER,
-    disk_limit_mb        INTEGER,
-    network_policy       JSONB,
-    filesystem_policy    JSONB,
-    status               TEXT NOT NULL DEFAULT 'creating',
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    destroyed_at         TIMESTAMPTZ
+    agent_version_id     TEXT NOT NULL REFERENCES agent_versions(id) ON DELETE CASCADE,
+    status               TEXT NOT NULL DEFAULT 'active',
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS runtime.scenario_instances (
-    id                  TEXT PRIMARY KEY,
-    evaluation_run_id   TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-    scenario_id         TEXT REFERENCES scenarios(id) ON DELETE SET NULL,
-    scenario_version_id TEXT,
-    sandbox_id          TEXT REFERENCES runtime.sandboxes(id) ON DELETE SET NULL,
-    status              TEXT NOT NULL DEFAULT 'queued',
-    started_at          TIMESTAMPTZ,
-    completed_at        TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS runtime.agent_actions (
     id                   TEXT PRIMARY KEY,
-    scenario_instance_id TEXT NOT NULL REFERENCES runtime.scenario_instances(id) ON DELETE CASCADE,
-    sequence_number      INTEGER NOT NULL,
-    action_type          TEXT NOT NULL,
-    description          TEXT,
-    tool_call_id         TEXT,
-    status               TEXT,
-    metadata             JSONB,
-    timestamp            TIMESTAMPTZ NOT NULL DEFAULT now()
+    evaluation_run_id    TEXT REFERENCES evaluation_runs(id) ON DELETE SET NULL,
+    scenario_id          TEXT REFERENCES scenarios(id) ON DELETE SET NULL,
+    status               TEXT NOT NULL DEFAULT 'pending',
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS runtime.tool_calls (
     id                   TEXT PRIMARY KEY,
     scenario_instance_id TEXT NOT NULL REFERENCES runtime.scenario_instances(id) ON DELETE CASCADE,
-    sequence_number      INTEGER NOT NULL,
-    tool_id              TEXT,
-    original_tool_name   TEXT NOT NULL,
-    input                JSONB,
-    output               JSONB,
-    status               TEXT NOT NULL,
-    routing_decision     TEXT,
-    target_environment   TEXT,
-    latency_ms           INTEGER,
-    error_code           TEXT,
-    error_message        TEXT,
-    started_at           TIMESTAMPTZ,
-    completed_at         TIMESTAMPTZ
+    tool_name            TEXT NOT NULL,
+    arguments            JSONB,
+    response             TEXT,
+    duration_ms          NUMERIC,
+    is_fault_injected    BOOLEAN NOT NULL DEFAULT false,
+    fault_type           TEXT,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS runtime.agent_actions (
+    id                   TEXT PRIMARY KEY,
+    scenario_instance_id TEXT NOT NULL REFERENCES runtime.scenario_instances(id) ON DELETE CASCADE,
+    action_type          TEXT NOT NULL,
+    description          TEXT,
+    metadata             JSONB,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS runtime.side_effect_events (
     id                   TEXT PRIMARY KEY,
     scenario_instance_id TEXT NOT NULL REFERENCES runtime.scenario_instances(id) ON DELETE CASCADE,
-    tool_call_id         TEXT,
-    effect_type          TEXT NOT NULL,
-    target               TEXT,
-    risk_level           TEXT NOT NULL,
-    decision             TEXT NOT NULL,
+    resource_type        TEXT NOT NULL,
+    action               TEXT NOT NULL,
     actual_execution     BOOLEAN NOT NULL DEFAULT false,
     sandbox_execution    BOOLEAN NOT NULL DEFAULT false,
     details              JSONB,
@@ -456,11 +394,9 @@ CREATE INDEX IF NOT EXISTS idx_tools_agent_version_id        ON tools(agent_vers
 CREATE INDEX IF NOT EXISTS idx_dependencies_agent_version_id ON dependencies(agent_version_id);
 CREATE INDEX IF NOT EXISTS idx_scenarios_scenario_set_id     ON scenarios(scenario_set_id);
 CREATE INDEX IF NOT EXISTS idx_evaluation_results_run_id     ON evaluation_results(evaluation_run_id);
-CREATE INDEX IF NOT EXISTS idx_pipeline_stages_run_id        ON pipeline_stages(pipeline_run_id);
-CREATE INDEX IF NOT EXISTS idx_pipeline_events_stage_id      ON pipeline_events(pipeline_stage_id);
 
-CREATE INDEX IF NOT EXISTS idx_rt_tool_calls_instance     ON runtime.tool_calls(scenario_instance_id);
-CREATE INDEX IF NOT EXISTS idx_rt_agent_actions_instance  ON runtime.agent_actions(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_tool_calls_instance      ON runtime.tool_calls(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_agent_actions_instance   ON runtime.agent_actions(scenario_instance_id);
 CREATE INDEX IF NOT EXISTS idx_rt_security_events_instance ON runtime.security_events(scenario_instance_id);
-CREATE INDEX IF NOT EXISTS idx_rt_side_effects_instance   ON runtime.side_effect_events(scenario_instance_id);
-CREATE INDEX IF NOT EXISTS idx_rt_state_changes_instance  ON runtime.state_changes(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_side_effects_instance    ON runtime.side_effect_events(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_state_changes_instance   ON runtime.state_changes(scenario_instance_id);

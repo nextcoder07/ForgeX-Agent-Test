@@ -51,11 +51,16 @@ class GeminiProvider(LLMProvider):
             status="success"
         )
         
+        actual_model = self.model_name
+        if "3.6" in actual_model:
+            # Map simulated version tag to standard model for real API call
+            actual_model = "gemini-1.5-flash"
+        
         if self._client:
             try:
                 from google.genai import types
                 res = self._client.models.generate_content(
-                    model=self.model_name,
+                    model=actual_model,
                     contents=user,
                     config=types.GenerateContentConfig(
                         system_instruction=system,
