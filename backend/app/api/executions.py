@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import uuid
 import datetime as dt
-from typing import Dict, List, Optional
-from pydantic import BaseModel
+from typing import Dict, List, Optional, Any
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from app.models.execution import ExecutionJob, ExecutionTrace
 from app.models.dependency_model import ExecutionMode, ExecutionModelBinding
@@ -31,18 +31,21 @@ class RunExecutionRequest(BaseModel):
     scenario_ids: List[str]
     requested_mode: Optional[str] = "faithful"  # "faithful", "compatible", "simulation"
     include_counterfactuals: bool = True
-    secrets: Dict[str, str] = {}
+    run_sync: bool = False
+    secrets: Dict[str, str] = Field(default_factory=dict)
 
 
 def _run_sandbox_scenarios_task(
     job_id: str,
     agent_id: str,
     scenario_ids: List[str],
-    binding: ExecutionModelBinding,
-    include_counterfactuals: bool,
-    secrets: Dict[str, str]
+    binding: Optional[Any] = None,
+    include_counterfactuals: bool = True,
+    secrets: Dict[str, str] = None
 ):
-    """Background task to execute scenarios inside SandboxManager and save traces."""
+    """Background or sync task to execute scenarios inside SandboxManager and save traces."""
+    if secrets is None:
+        secrets = {}
     agent = store.get_agent(agent_id)
     job = store.get_execution_job(job_id)
     if not agent or not job:
@@ -54,16 +57,20 @@ def _run_sandbox_scenarios_task(
     manager = SandboxManager()
     traces: List[ExecutionTrace] = []
 
+    mode_val = getattr(getattr(binding, "mode", None), "value", "subprocess")
+    model_name = getattr(binding, "executed_model", "default")
+    substitution_flag = "YES" if getattr(binding, "model_substitution", False) else "NO"
+
     activity_log.emit(
         category="SANDBOX",
         action="BATCH_RUN_START",
-        detail=f"Executing {len(scenario_ids)} scenarios under mode '{binding.mode.value}' (Model: {binding.executed_model}) for agent {agent.name}",
-        request_summary=f"Job ID: {job_id} | Substitution: {'YES' if binding.model_substitution else 'NO'} | Fidelity: {binding.fidelity.value}",
+        detail=f"Executing {len(scenario_ids)} scenarios under mode '{mode_val}' (Model: {model_name}) for agent {agent.name}",
+        request_summary=f"Job ID: {job_id} | Substitution: {substitution_flag}",
         status="success"
     )
 
     for idx, sc_id in enumerate(scenario_ids):
-        sc = store.scenarios.get(sc_id)
+        sc = store.get_scenario(sc_id)
         if not sc:
             continue
         # Skip scenarios that failed generation — they are placeholder entries
@@ -73,7 +80,7 @@ def _run_sandbox_scenarios_task(
         activity_log.emit(
             category="SANDBOX",
             action="RUN_SCENARIO",
-            detail=f"[{idx+1}/{len(scenario_ids)}] Sandbox running scenario: {sc.title} ({sc.category.value})",
+            detail=f"[{idx+1}/{len(scenario_ids)}] Sandbox running scenario: {sc.title} ({sc.category.value if hasattr(sc.category, 'value') else str(sc.category)})",
             status="success"
         )
 
@@ -81,7 +88,7 @@ def _run_sandbox_scenarios_task(
             # 1. Create unique ephemeral sandbox
             sb_instance = manager.create_sandbox(agent_id=agent.id, scenario_id=sc.id)
             manager.install_dependencies(sb_instance, agent)
-            manager.inject_allowed_environment(sb_instance, allowed_env={"MODE": binding.mode.value}, secrets=secrets)
+            manager.inject_allowed_environment(sb_instance, allowed_env={"MODE": mode_val}, secrets=secrets)
 
             # 2. Run primary trace inside sandbox
             t_primary = manager.run_agent(sb_instance, agent, sc, binding)
@@ -91,7 +98,8 @@ def _run_sandbox_scenarios_task(
             manager.destroy_sandbox(sb_instance.sandbox_id)
 
             # 4. Run counterfactual control if enabled
-            if include_counterfactuals and (sc.category.value in ["adversarial", "security", "safety"]):
+            cat_val = sc.category.value if hasattr(sc.category, "value") else str(sc.category)
+            if include_counterfactuals and (cat_val in ["adversarial", "security", "safety"]):
                 activity_log.emit(
                     category="SANDBOX",
                     action="COUNTERFACTUAL_RUN",
@@ -137,6 +145,11 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
     if not payload.scenario_ids:
         raise HTTPException(status_code=422, detail="No scenarios selected for execution")
 
+    # Verify that scenarios exist in persistent storage
+    missing_ids = [sc_id for sc_id in payload.scenario_ids if not store.get_scenario(sc_id)]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"Scenarios not found in storage: {missing_ids}")
+
     job_id = f"exec-{uuid.uuid4().hex[:8]}"
 
     # Resolve execution mode & bind model
@@ -172,18 +185,27 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
     )
     store.save_execution_job(job)
 
-    # Queue background task for non-blocking execution
-    background_tasks.add_task(
-        _run_sandbox_scenarios_task,
-        job_id,
-        payload.agent_id,
-        payload.scenario_ids,
-        binding,
-        payload.include_counterfactuals,
-        payload.secrets
-    )
-
-    return job
+    if payload.run_sync:
+        _run_sandbox_scenarios_task(
+            job_id,
+            payload.agent_id,
+            payload.scenario_ids,
+            binding,
+            payload.include_counterfactuals,
+            payload.secrets
+        )
+        return store.get_execution_job(job_id) or job
+    else:
+        background_tasks.add_task(
+            _run_sandbox_scenarios_task,
+            job_id,
+            payload.agent_id,
+            payload.scenario_ids,
+            binding,
+            payload.include_counterfactuals,
+            payload.secrets
+        )
+        return job
 
 
 @router.get("/jobs", response_model=List[ExecutionJob])

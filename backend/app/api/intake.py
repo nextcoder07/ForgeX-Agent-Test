@@ -384,24 +384,32 @@ async def register_normalized_spec(payload: RegisterSpecRequest):
     # --- Auto-extract dependencies and resolve bindings ---
     _resolve_dependencies_for_agent(rec.id, spec)
 
-    # --- Auto-generate Sandbox Specification ---
+    # --- Auto-build and persist SandboxSpecification ---
     try:
-        from app.core.intake.sandbox_analyzer import analyze_sandbox_requirements
-        sandbox_spec = await analyze_sandbox_requirements(rec.id, payload.source_files or {}, GeminiProvider())
-        store.save_sandbox_spec(sandbox_spec)
-        logger.info(f"Auto-generated sandbox specification for agent {chosen_name}")
+        from app.core.sandbox.sandbox_manager import build_sandbox_specification_for_agent
+        build_sandbox_specification_for_agent(rec)
     except Exception as e:
-        logger.error(f"Failed to auto-generate sandbox specification during registration: {e}")
+        logger.warning(f"Error auto-building sandbox specification: {e}")
 
     activity_log.emit(
         category="INTAKE",
         action="REGISTER",
-        detail=f"Registered agent spec: {chosen_name}",
+        detail=f"Registered agent spec & created SandboxSpecification: {chosen_name}",
         response_summary=f"Agent ID: {agent_id} | Domain: {rec.domain} | Tools: {len(rec.tools)}",
         status="success"
     )
 
     return rec
+
+
+@router.get("/agents/{agent_id}/sandbox-spec", response_model=SandboxSpecification)
+def get_agent_sandbox_specification(agent_id: str):
+    """Retrieve or build the sandbox specification for a specific agent."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    from app.core.sandbox.sandbox_manager import get_or_create_sandbox_spec
+    return get_or_create_sandbox_spec(agent)
 
 
 @router.get("/test-specs", response_model=List[AgentTestSpecification])

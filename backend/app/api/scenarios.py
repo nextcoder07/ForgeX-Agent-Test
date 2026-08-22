@@ -4,17 +4,20 @@ Scenario Intelligence, Planning, Generation, Critic, and Coverage Gap API Router
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from app.models.scenario import Scenario, StrategyPlan, CoverageGapReport
+from pydantic import BaseModel, Field
+from app.models.scenario import Scenario, ScenarioCategory, StrategyPlan, CoverageGapReport
 from app.services.store import store
 from app.core.scenarios.strategy_planner import build_test_strategy
 from app.core.scenarios.scenario_generator import generate_scenarios_for_agent
 from app.core.scenarios.scenario_critic import critique_scenarios
 from app.core.scenarios.scenario_validator import validate_scenarios_deterministically
 from app.core.scenarios.coverage_engine import compute_coverage_gaps
-from app.core.llm.gemini_provider import GeminiProvider
+import logging
+from app.core.llm.gemini_provider import GeminiProvider, LLMGenerationError, LLMQuotaExhaustedError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scenarios", tags=["Scenarios"])
 
@@ -22,6 +25,10 @@ router = APIRouter(prefix="/scenarios", tags=["Scenarios"])
 class GenerateScenariosRequest(BaseModel):
     agent_id: str
     target_count: int = 25
+    scenario_type: Optional[str] = None  # e.g. "normal", "adversarial", "security", "tool_misuse"
+    count: Optional[int] = None           # Alias for target_count
+    difficulty: Optional[str] = None      # "easy", "medium", "hard"
+    configuration: Optional[Dict[str, Any]] = None
 
 
 @router.get("/strategy/{agent_id}", response_model=StrategyPlan)
@@ -38,10 +45,12 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
-    strategy = build_test_strategy(agent, desired_count=payload.target_count)
+    target_count = payload.count if payload.count is not None else payload.target_count
+    strategy = build_test_strategy(agent, desired_count=target_count)
     llm = GeminiProvider()
     validated: List[Scenario] = []
 
+    # Step 1: Generate Scenarios
     try:
         # 1. Generate
         generated = await generate_scenarios_for_agent(agent, strategy, llm)
@@ -53,8 +62,8 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
         import logging
         logging.getLogger(__name__).warning(f"Scenario generation failed, filling up with blocked items: {e}")
 
-    for scenario in validated:
-        scenario.agent_id = agent.id
+    if not scenarios:
+        raise HTTPException(status_code=500, detail="Failed to generate any valid test scenarios.")
 
     # 4. Fill up any missing scenarios to meet the requested target_count
     total_target = payload.target_count

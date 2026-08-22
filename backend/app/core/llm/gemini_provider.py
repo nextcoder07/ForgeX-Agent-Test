@@ -75,6 +75,10 @@ class LLMGenerationError(Exception):
         }
 
 
+class LLMQuotaExhaustedError(LLMGenerationError):
+    """Raised specifically when Gemini API quota or rate limit is exhausted across all available keys."""
+    pass
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", LLMConfig.MODEL)
 
@@ -163,6 +167,11 @@ class GeminiProvider(LLMProvider):
             if not client:
                 last_error_code = LLMErrorCode.NO_API_KEY
                 last_exception = Exception(f"No available Gemini client for {key_id}")
+                break
+
+            if not client or key_id == "No Key Configured":
+                last_exception = Exception("No AVAILABLE Gemini API key configured or all keys are in cooldown.")
+                logger.error("No eligible Gemini key available for LLM generation.")
                 break
 
             activity_log.emit(

@@ -7,8 +7,10 @@ reliability metrics, and regression testing suites.
 from __future__ import annotations
 
 import uuid
+import logging
 import datetime as dt
 from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from app.models.evaluation import (
     EvaluationRequest,
@@ -17,9 +19,10 @@ from app.models.evaluation import (
     EvaluationReport,
     RegressionComparison,
 )
+from app.models.execution import ExecutionJob
 from app.models.failure import RunVerdict, FailureCluster
 from app.services.store import store
-from app.core.evaluation.hybrid_evaluator import evaluate_trace_suite
+from app.core.evaluation.hybrid_evaluator import evaluate_trace_suite, evaluate_trace
 from app.core.evaluation.scorecard_engine import (
     compute_reliability_scorecard,
     generate_explainable_evaluation_report,
@@ -29,13 +32,101 @@ from app.core.evaluation.failure_clustering import cluster_failure_verdicts
 from app.core.sandbox.runner import run_scenario_in_sandbox
 from app.core.dependencies.dependency_resolver import DependencyResolver
 from app.core.llm.providers import get_provider
+from app.core.scenarios.strategy_planner import build_test_strategy
+from app.core.scenarios.scenario_generator import generate_scenarios_for_agent
 from app.services.activity_log import activity_log
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/evaluations", tags=["Evaluations"])
 
 
 def _now() -> str:
     return dt.datetime.utcnow().isoformat() + "Z"
+
+
+class EvaluateExecutionRequest(BaseModel):
+    execution_job_id: str
+    include_counterfactuals: bool = True
+
+
+@router.post("/evaluate-execution", response_model=EvaluationJob)
+async def evaluate_execution(payload: EvaluateExecutionRequest):
+    """Evaluates an existing execution job by fetching stored execution traces & agent specifications."""
+    exec_job = store.get_execution_job(payload.execution_job_id)
+    if not exec_job:
+        raise HTTPException(status_code=404, detail=f"Execution job '{payload.execution_job_id}' not found")
+
+    agent = store.get_agent(exec_job.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{exec_job.agent_id}' not found for execution job")
+
+    traces_list = store.traces.get(payload.execution_job_id, [])
+    if not traces_list:
+        raise HTTPException(status_code=400, detail=f"No execution traces found for execution job '{payload.execution_job_id}'")
+
+    job_id = f"eval-{uuid.uuid4().hex[:8]}"
+
+    activity_log.emit(
+        category="EVALUATION",
+        action="JOB_START",
+        detail=f"Starting LLM evaluation for execution job {payload.execution_job_id}",
+        request_summary=f"Traces to judge: {len(traces_list)}",
+        status="success"
+    )
+
+    primaries = [t for t in traces_list if not t.is_counterfactual]
+    counterfactuals = {t.counterfactual_of: t for t in traces_list if t.is_counterfactual and t.counterfactual_of}
+
+    llm = get_provider("gemini", "gemini-3.6-flash")
+    verdicts: List[RunVerdict] = []
+
+    for t_primary in primaries:
+        sc = store.get_scenario(t_primary.scenario_id)
+        if not sc:
+            continue
+
+        t_cf = counterfactuals.get(t_primary.id)
+        v = await evaluate_trace(agent, sc, t_primary, llm, counterfactual_trace=t_cf)
+        verdicts.append(v)
+
+        activity_log.emit(
+            category="EVALUATION",
+            action="VERDICT",
+            detail=f"Evaluation complete for '{sc.title}'",
+            response_summary=f"Passed: {v.passed}",
+            status="success" if v.passed else "error"
+        )
+
+    clusters = cluster_failure_verdicts(verdicts)
+    scorecard = compute_reliability_scorecard(job_id, agent, verdicts)
+
+    job = EvaluationJob(
+        id=job_id,
+        agent_id=agent.id,
+        agent_name=agent.name,
+        agent_version=agent.version_label,
+        status="completed",
+        total_scenarios=len(primaries),
+        completed_scenarios=len(primaries),
+        created_at=_now(),
+        finished_at=_now()
+    )
+
+    store.jobs[job_id] = job
+    store.save_scorecard(scorecard)
+    store.verdicts[job_id] = verdicts
+    store.clusters[job_id] = clusters
+
+    activity_log.emit(
+        category="EVALUATION",
+        action="JOB_COMPLETE",
+        detail=f"LLM evaluation job {job_id} finished successfully.",
+        response_summary=f"Passed: {scorecard.passed}/{scorecard.total_scenarios} | Safety Score: {scorecard.safety_axis}% | Composite: {scorecard.composite}%",
+        status="success" if scorecard.passed == scorecard.total_scenarios else "warning"
+    )
+
+    return job
 
 
 def _run_evaluation_job_task(job_id: str, agent_id: str, batch_size: int, chaos_mode: bool, include_cf: bool, req_mode: Optional[str]):
@@ -48,7 +139,6 @@ def _run_evaluation_job_task(job_id: str, agent_id: str, batch_size: int, chaos_
     job.status = "running"
     store.jobs[job_id] = job
 
-    # Resolve execution mode & binding
     res_result = DependencyResolver.resolve_mode(agent=agent, execution_id=job_id)
     binding = res_result.active_binding
     store.save_execution_model_binding(binding)
@@ -67,7 +157,6 @@ def _run_evaluation_job_task(job_id: str, agent_id: str, batch_size: int, chaos_
         status="success"
     )
 
-    # 1. Fetch or generate target scenarios for evaluation
     all_scenarios = store.list_scenarios()
     agent_scenarios = [s for s in all_scenarios if s.agent_id == agent_id]
     if not agent_scenarios:
@@ -77,7 +166,6 @@ def _run_evaluation_job_task(job_id: str, agent_id: str, batch_size: int, chaos_
     job.total_scenarios = len(scenarios)
     store.jobs[job_id] = job
 
-    # 2. Execute scenarios and collect traces
     traces = []
     for idx, sc in enumerate(scenarios):
         try:
@@ -90,20 +178,17 @@ def _run_evaluation_job_task(job_id: str, agent_id: str, batch_size: int, chaos_
 
     store.traces[job_id] = traces
 
-    # 3. Evaluate traces using Hybrid Evaluator & LLM Judge
     llm = get_provider(binding.executed_provider, binding.executed_model)
     verdicts = evaluate_trace_suite(agent, traces, llm)
     store.verdicts[job_id] = verdicts
 
-    # 4. Generate Scorecard & Explainable Report
     scorecard = compute_reliability_scorecard(job_id, agent, verdicts, binding)
     store.save_scorecard(scorecard)
 
     report = generate_explainable_evaluation_report(job_id, agent, verdicts, binding)
     store.save_evaluation_report(report)
 
-    # 5. Cluster failure root causes
-    clusters = cluster_failure_verdicts(job_id, verdicts)
+    clusters = cluster_failure_verdicts(verdicts)
     store.clusters[job_id] = clusters
 
     job.status = "completed"
@@ -127,29 +212,53 @@ async def start_evaluation_run(payload: EvaluationRequest, background_tasks: Bac
 
     job_id = f"eval-{uuid.uuid4().hex[:8]}"
 
-    job = EvaluationJob(
-        id=job_id,
-        agent_id=payload.agent_id,
+    activity_log.emit(
+        category="EVALUATION",
+        action="JOB_START",
+        detail=f"Starting evaluation job {job_id} for agent: {agent.name}",
+        request_summary=f"Batch size: {payload.scenario_batch_size} | Counterfactuals: {payload.include_counterfactuals}",
+        status="success"
+    )
+
+    llm = get_provider("gemini", "gemini-3.6-flash")
+
+    # Stage 1: Plan, generate, and persist scenarios
+    strategy = build_test_strategy(agent, desired_count=payload.scenario_batch_size)
+    scenarios = await generate_scenarios_for_agent(agent, strategy, llm)
+    for scenario in scenarios:
+        scenario.agent_id = agent.id
+        store.save_scenario(scenario)
+
+    # Stage 2: Create execution job, run scenarios in sandbox, and persist traces
+    exec_job_id = f"exec-{uuid.uuid4().hex[:8]}"
+    scenario_ids = [sc.id for sc in scenarios]
+
+    exec_job = ExecutionJob(
+        id=exec_job_id,
+        agent_id=agent.id,
         agent_name=agent.name,
-        agent_version=agent.version_label,
-        status="pending",
-        total_scenarios=payload.scenario_batch_size,
+        status="running",
+        total_scenarios=len(scenario_ids),
         completed_scenarios=0,
+        scenario_ids=scenario_ids,
         created_at=_now(),
     )
-    store.jobs[job_id] = job
+    store.save_execution_job(exec_job)
 
-    background_tasks.add_task(
-        _run_evaluation_job_task,
-        job_id,
-        payload.agent_id,
-        payload.scenario_batch_size,
-        payload.chaos_mode,
-        payload.include_counterfactuals,
-        payload.requested_mode
+    from app.api.executions import _run_sandbox_scenarios_task
+    _run_sandbox_scenarios_task(
+        exec_job_id,
+        agent.id,
+        scenario_ids,
+        include_counterfactuals=payload.include_counterfactuals
     )
 
-    return job
+    # Stage 3: Evaluate executed traces using the persistent execution job
+    eval_req = EvaluateExecutionRequest(
+        execution_job_id=exec_job_id,
+        include_counterfactuals=payload.include_counterfactuals
+    )
+    return await evaluate_execution(eval_req)
 
 
 @router.get("/jobs/{job_id}", response_model=EvaluationJob)
@@ -164,7 +273,6 @@ def get_evaluation_job(job_id: str):
 def get_evaluation_scorecard(job_id: str):
     scorecard = store.get_scorecard(job_id)
     if not scorecard:
-        # Generate default scorecard for seed evaluation jobs
         agent = store.list_agents()[0] if store.list_agents() else None
         if not agent:
             raise HTTPException(status_code=404, detail=f"Scorecard for '{job_id}' not found")
@@ -196,7 +304,6 @@ def get_agent_reliability_metrics(agent_id: str):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # Find latest scorecard
     scorecard = None
     for sc in store.scorecards.values():
         if sc.agent_id == agent_id:

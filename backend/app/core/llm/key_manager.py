@@ -95,13 +95,10 @@ class GeminiKeyManager:
         with self._lock:
             self._check_cooldowns_unlocked()
             
-            # Find eligible keys
+            # Find eligible keys that are strictly AVAILABLE
             eligible = [k for k in self.keys if k.status == "AVAILABLE"]
             if not eligible:
-                # If all are exhausted or stopped, check if we can wake up cooled down keys early
-                eligible = [k for k in self.keys if k.status == "COOLDOWN"]
-                if not eligible:
-                    return None
+                return None
             
             # Pick least-recently used key
             selected = min(eligible, key=lambda x: x.last_used_at)

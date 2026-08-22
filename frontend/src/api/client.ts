@@ -390,14 +390,72 @@ export async function fetchStrategyPlan(agentId: string): Promise<StrategyPlan> 
   return res.json();
 }
 
-export async function generateScenarios(agentId: string, count: number = 25): Promise<Scenario[]> {
+export async function generateScenarios(
+  agentId: string,
+  count: number = 25,
+  scenarioType?: string,
+  difficulty?: string
+): Promise<Scenario[]> {
   const res = await fetch(`${API_BASE_URL}/scenarios/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agent_id: agentId, target_count: count }),
+    body: JSON.stringify({
+      agent_id: agentId,
+      target_count: count,
+      scenario_type: scenarioType,
+      difficulty,
+    }),
   });
   if (!res.ok) throw new Error(`Failed to generate scenarios: ${res.statusText}`);
   return res.json();
+}
+
+export async function startExecutionJob(
+  agentId: string,
+  scenarioIds: string[],
+  includeCounterfactuals: boolean = true,
+  runSync: boolean = true
+): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/executions/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent_id: agentId,
+      scenario_ids: scenarioIds,
+      include_counterfactuals: includeCounterfactuals,
+      run_sync: runSync,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to start execution job: ${res.statusText}`);
+  return res.json();
+}
+
+export async function evaluateExecutionJob(
+  executionJobId: string,
+  includeCounterfactuals: boolean = true
+): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/evaluate-execution`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      execution_job_id: executionJobId,
+      include_counterfactuals: includeCounterfactuals,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to evaluate execution job: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchDatasetSummary(agentId?: string): Promise<any> {
+  const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : '';
+  const res = await fetch(`${API_BASE_URL}/datasets/summary${query}`);
+  if (!res.ok) throw new Error(`Failed to fetch dataset summary: ${res.statusText}`);
+  return res.json();
+}
+
+export function getDatasetExportUrl(agentId?: string, format: string = 'jsonl'): string {
+  const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}&format=${format}` : `?format=${format}`;
+  return `${API_BASE_URL}/datasets/export${query}`;
 }
 
 export async function fetchScenarioLibrary(agentId?: string): Promise<Scenario[]> {
@@ -594,15 +652,5 @@ export async function fetchExecutionJobDetails(jobId: string): Promise<Execution
 export async function fetchExecutionTraces(jobId: string): Promise<ExecutionTrace[]> {
   const res = await fetch(`${API_BASE_URL}/executions/jobs/${jobId}/traces`);
   if (!res.ok) throw new Error(`Failed to fetch execution traces: ${res.statusText}`);
-  return res.json();
-}
-
-export async function evaluateExecutionJob(executionJobId: string): Promise<any> {
-  const res = await fetch(`${API_BASE_URL}/evaluations/evaluate-execution`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ execution_job_id: executionJobId }),
-  });
-  if (!res.ok) throw new Error(`Failed to run LLM evaluation: ${res.statusText}`);
   return res.json();
 }

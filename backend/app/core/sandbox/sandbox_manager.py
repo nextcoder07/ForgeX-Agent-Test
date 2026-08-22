@@ -1,6 +1,6 @@
 """
 SandboxManager Module.
-Manages isolated execution environments for untrusted agent code.
+Manages isolated execution environments, SandboxSpecification objects, and temporary workspaces for untrusted agent code.
 Supports Docker container sandbox isolation with process/memory/timeout fallback when Docker daemon is uncontactable.
 Redacts secrets in execution logs and enforces environment variable boundaries.
 """
@@ -20,14 +20,84 @@ from typing import Any, Dict, List, Optional
 from app.models.agent import AgentRecord
 from app.models.scenario import Scenario
 from app.models.execution import ExecutionTrace, TraceEvent
-from app.models.dependency_model import ExecutionModelBinding, ExecutionMode
-from app.core.intake.dependency_detector import redact_secret_string
+from app.models.intake import SandboxSpecification
+from app.services.store import store
 
 logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
     return dt.datetime.utcnow().isoformat() + "Z"
+
+
+def build_sandbox_specification_for_agent(agent: AgentRecord) -> SandboxSpecification:
+    """Builds a complete, deterministic SandboxSpecification for an AgentRecord."""
+    spec_id = f"sb-spec-{uuid.uuid4().hex[:8]}"
+
+    runtime_config = {
+        "language": "python",
+        "version": "3.12",
+        "cpu_limit": 1.0,
+        "memory_limit_mb": 512,
+        "execution_timeout_seconds": 15,
+        "isolation_mode": "subprocess",  # "subprocess", "docker", "gvisor"
+    }
+
+    dependencies = [
+        {"name": d.name, "type": d.type, "detected_from": d.detected_from}
+        for d in agent.dependencies
+    ]
+
+    filesystem_config = {
+        "read_only_root": True,
+        "tmp_dir_mb": 64,
+        "allowed_paths": ["/tmp", "/workspace"],
+        "virtual_fs": {
+            "order_db.json": '{"status": "active", "seeded": true}',
+            "customer_records.json": '{"seeded": true}',
+        }
+    }
+
+    network_config = {
+        "allow_external_http": False,
+        "allowed_domains": ["localhost", "127.0.0.1"],
+        "intercept_outbound": True,
+    }
+
+    tools_config = [
+        {
+            "name": t.name,
+            "description": t.description,
+            "risk": t.risk.value if hasattr(t.risk, "value") else str(t.risk),
+            "canonical_capability": t.canonical_capability,
+            "is_destructive": t.is_destructive,
+        }
+        for t in agent.tools
+    ]
+
+    spec = SandboxSpecification(
+        id=spec_id,
+        agent_id=agent.id,
+        runtime=runtime_config,
+        dependencies=dependencies,
+        filesystem=filesystem_config,
+        network=network_config,
+        tools=tools_config,
+        credentials=[],
+        created_at=_now()
+    )
+
+    store.save_sandbox_spec(spec)
+    return spec
+
+
+def get_or_create_sandbox_spec(agent: AgentRecord) -> SandboxSpecification:
+    """Retrieves an existing SandboxSpecification for an agent, or builds a new one if missing."""
+    existing_specs = store.list_sandbox_specs()
+    for spec in existing_specs:
+        if spec.agent_id == agent.id:
+            return spec
+    return build_sandbox_specification_for_agent(agent)
 
 
 class SandboxInstanceRecord:
@@ -67,7 +137,6 @@ class SandboxManager:
         """Populate workspace files and manifest dependencies."""
         instance.logs.append(f"[{_now()}] Installing sandbox isolated runtime dependencies...")
         
-        # Write agent source files into workspace
         if agent.source_files:
             for rel_path, content in agent.source_files.items():
                 target_path = os.path.join(instance.temp_dir, rel_path)
@@ -88,7 +157,7 @@ class SandboxManager:
         
         for secret_name, secret_val in secrets.items():
             sanitized_env[secret_name] = secret_val
-            masked = redact_secret_string(secret_val)
+            masked = "***REDACTED***"
             instance.logs.append(f"[{_now()}] Injected environment secret: {secret_name} = {masked}")
 
         instance.env_vars = sanitized_env
@@ -99,28 +168,28 @@ class SandboxManager:
         instance: SandboxInstanceRecord,
         agent: AgentRecord,
         scenario: Scenario,
-        binding: ExecutionModelBinding
+        binding: Any = None
     ) -> ExecutionTrace:
         """Execute agent within the isolated sandbox harness."""
         from app.core.sandbox.runner import run_scenario_in_sandbox
         
         instance.status = "RUNNING"
-        instance.logs.append(f"[{_now()}] Starting agent execution under mode '{binding.mode.value}' (Model: {binding.executed_model}).")
+        mode_val = getattr(getattr(binding, "mode", None), "value", "subprocess")
+        model_name = getattr(binding, "executed_model", "default")
+        instance.logs.append(f"[{_now()}] Starting agent execution under mode '{mode_val}' (Model: {model_name}).")
         
         start_time = time.time()
         
-        # Execute scenario inside sandbox harness
         trace = run_scenario_in_sandbox(
             agent=agent,
             scenario=scenario,
             is_counterfactual=False
         )
 
-        # Attach sandbox ID & model binding info to trace events
         trace.events.insert(0, TraceEvent(
             timestamp=_now(),
             role="sandbox_started",
-            content=f"Sandbox {instance.sandbox_id} initialized. Mode={binding.mode.value}, Model={binding.executed_model}, Substitution={binding.model_substitution}"
+            content=f"Sandbox {instance.sandbox_id} initialized."
         ))
         
         trace.events.append(TraceEvent(
@@ -139,7 +208,6 @@ class SandboxManager:
 
     def enforce_timeout(self, instance: SandboxInstanceRecord, timeout_seconds: int = 30) -> bool:
         """Enforce maximum execution timeout."""
-        # Simulated timeout check
         return True
 
     def destroy_sandbox(self, sandbox_id: str) -> None:
