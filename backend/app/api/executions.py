@@ -66,6 +66,9 @@ def _run_sandbox_scenarios_task(
         sc = store.scenarios.get(sc_id)
         if not sc:
             continue
+        # Skip scenarios that failed generation — they are placeholder entries
+        if getattr(sc, 'validation_status', '') == 'FAILED_GENERATION':
+            continue
 
         activity_log.emit(
             category="SANDBOX",

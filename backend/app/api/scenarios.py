@@ -40,23 +40,51 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
 
     strategy = build_test_strategy(agent, desired_count=payload.target_count)
     llm = GeminiProvider()
+    validated: List[Scenario] = []
 
     try:
         # 1. Generate
         generated = await generate_scenarios_for_agent(agent, strategy, llm)
         # 2. Critic
         critiqued = await critique_scenarios(generated, agent, llm)
+        # 3. Deterministic Validation
+        validated = validate_scenarios_deterministically(critiqued, agent)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Scenario generation failed due to LLM provider error: {str(e)}"
-        )
-        
-    # 3. Deterministic Validation
-    validated = validate_scenarios_deterministically(critiqued, agent)
+        import logging
+        logging.getLogger(__name__).warning(f"Scenario generation failed, filling up with blocked items: {e}")
 
     for scenario in validated:
         scenario.agent_id = agent.id
+
+    # 4. Fill up any missing scenarios to meet the requested target_count
+    total_target = payload.target_count
+    if len(validated) < total_target:
+        from app.models.scenario import ScenarioCategory
+        import uuid
+        categories = list(ScenarioCategory)
+        missing_count = total_target - len(validated)
+        
+        for i in range(missing_count):
+            cat = categories[i % len(categories)]
+            dummy_id = f"SC-FAIL-{uuid.uuid4().hex[:6]}".upper()
+            dummy_sc = Scenario(
+                id=dummy_id,
+                agent_id=agent.id,
+                version=1,
+                category=cat,
+                title=f"Generation Failed ({cat.value.title()})",
+                purpose="This scenario could not be generated. Rest cannot be done so leave that.",
+                user_messages=["Rest of scenarios cannot be generated"],
+                initial_state={},
+                required_capabilities=[],
+                fault_injections=[],
+                assertions=[],
+                critic_passed=False,
+                critic_notes="Quota/model limitation or parsing error. Rest cannot be done so leave that.",
+                validation_status="FAILED_GENERATION",
+                rationale="Rest cannot be done so leave that."
+            )
+            validated.append(dummy_sc)
 
     # Save to store
     for sc in validated:

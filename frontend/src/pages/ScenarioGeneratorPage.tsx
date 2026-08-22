@@ -155,7 +155,13 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({ on
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-bold text-slate-100">
-              Scenario Library ({scenarios.length} scenarios)
+              Scenario Library ({scenarios.filter(s => s.validation_status === 'VALIDATED').length} ready
+              {scenarios.filter(s => s.validation_status === 'FAILED_GENERATION').length > 0 && (
+                <span className="text-rose-400 font-normal text-sm ml-2">
+                  · {scenarios.filter(s => s.validation_status === 'FAILED_GENERATION').length} could not be generated
+                </span>
+              )}
+              )
             </h2>
           </div>
           <ScenarioLibraryView

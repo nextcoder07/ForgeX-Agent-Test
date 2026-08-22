@@ -15,7 +15,12 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(scenarios.map(s => s.id)));
+  
+  // Only select VALIDATED scenarios by default
+  const runnableScenarios = scenarios.filter(s => s.validation_status === 'VALIDATED');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    new Set(runnableScenarios.map(s => s.id))
+  );
 
   const categories = ['all', 'normal', 'edge', 'recovery', 'adversarial', 'safety', 'security', 'stress', 'chaos'];
 
@@ -29,14 +34,15 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
   });
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === scenarios.length) {
+    if (selectedIds.size === runnableScenarios.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(scenarios.map(s => s.id)));
+      setSelectedIds(new Set(runnableScenarios.map(s => s.id)));
     }
   };
 
-  const toggleSelectOne = (id: string) => {
+  const toggleSelectOne = (id: string, isValidated: boolean) => {
+    if (!isValidated) return;
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
     else next.add(id);
@@ -83,7 +89,7 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
             onClick={toggleSelectAll}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition"
           >
-            {selectedIds.size === scenarios.length ? 'Deselect All' : `Select All (${scenarios.length})`}
+            {selectedIds.size === runnableScenarios.length ? 'Deselect All' : `Select All (${runnableScenarios.length})`}
           </button>
 
           {onRunSelected && (
@@ -102,33 +108,40 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
       {/* Scenario Table / Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {filteredScenarios.map((sc) => {
-          const isSelected = selectedIds.has(sc.id);
           const isValidated = sc.validation_status === 'VALIDATED';
+          const isFailedGen = sc.validation_status === 'FAILED_GENERATION';
+          const isSelected = selectedIds.has(sc.id);
 
           return (
             <div
               key={sc.id}
-              onClick={() => toggleSelectOne(sc.id)}
-              className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
-                isSelected
-                  ? 'bg-slate-900/90 border-cyan-500/50 shadow-md shadow-cyan-500/10'
-                  : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 opacity-70'
+              onClick={() => toggleSelectOne(sc.id, isValidated)}
+              className={`p-4 rounded-xl border transition-all flex flex-col justify-between space-y-3 ${
+                isFailedGen
+                  ? 'bg-slate-950/30 border-rose-950/40 cursor-not-allowed opacity-50'
+                  : isSelected
+                  ? 'bg-slate-900/90 border-cyan-500/50 shadow-md shadow-cyan-500/10 cursor-pointer'
+                  : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 opacity-70 cursor-pointer'
               }`}
             >
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => {}}
-                      className="rounded border-slate-700 text-cyan-500 focus:ring-0 cursor-pointer"
-                    />
+                    {!isFailedGen && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        className="rounded border-slate-700 text-cyan-500 focus:ring-0 cursor-pointer"
+                      />
+                    )}
                     <span className="font-mono text-[10px] text-slate-400">{sc.id}</span>
                   </div>
                   <span
                     className={`px-2 py-0.5 text-[9px] font-mono uppercase font-bold rounded ${
-                      sc.category === 'safety' || sc.category === 'security'
+                      isFailedGen
+                        ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                        : sc.category === 'safety' || sc.category === 'security'
                         ? 'bg-rose-950 text-rose-300 border border-rose-500/30'
                         : sc.category === 'recovery' || sc.category === 'chaos'
                         ? 'bg-indigo-950 text-indigo-300 border border-indigo-500/30'
@@ -157,10 +170,10 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
                   </span>
                   <span
                     className={`flex items-center space-x-1 font-bold ${
-                      isValidated ? 'text-emerald-400' : 'text-amber-400'
+                      isValidated ? 'text-emerald-400' : isFailedGen ? 'text-rose-500' : 'text-amber-400'
                     }`}
                   >
-                    <CheckCircle2 className="w-3 h-3" />
+                    {isFailedGen ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
                     <span>{sc.validation_status}</span>
                   </span>
                 </div>
