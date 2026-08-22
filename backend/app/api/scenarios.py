@@ -62,8 +62,8 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
         import logging
         logging.getLogger(__name__).warning(f"Scenario generation failed, filling up with blocked items: {e}")
 
-    if not scenarios:
-        raise HTTPException(status_code=500, detail="Failed to generate any valid test scenarios.")
+    for scenario in validated:
+        scenario.agent_id = agent.id
 
     # 4. Fill up any missing scenarios to meet the requested target_count
     total_target = payload.target_count

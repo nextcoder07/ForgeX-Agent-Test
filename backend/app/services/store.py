@@ -188,6 +188,8 @@ def _serialize_scenario(key: str, sc: Scenario) -> Dict[str, Any]:
 
 def _deserialize_scenario(row: Dict[str, Any]) -> Scenario:
     spec = row.get("scenario_spec") or {}
+    if not spec.get("agent_id") and row.get("agent_id"):
+        spec = {**spec, "agent_id": row["agent_id"]}
     return Scenario(**spec)
 
 def _serialize_job(key: str, job: EvaluationJob) -> Dict[str, Any]:

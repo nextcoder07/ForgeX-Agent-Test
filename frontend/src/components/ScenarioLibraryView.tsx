@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { Scenario } from '../api/client';
 import { Layers, ShieldCheck, CheckCircle2, AlertTriangle, Filter, Search, Play, Zap } from 'lucide-react';
 
@@ -21,6 +21,10 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     new Set(runnableScenarios.map(s => s.id))
   );
+
+  useEffect(() => {
+    setSelectedIds(new Set(runnableScenarios.map(s => s.id)));
+  }, [scenarios]);
 
   const categories = ['all', 'normal', 'edge', 'recovery', 'adversarial', 'safety', 'security', 'stress', 'chaos'];
 
@@ -87,9 +91,12 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
         <div className="flex items-center space-x-3 w-full md:w-auto justify-end">
           <button
             onClick={toggleSelectAll}
+            disabled={runnableScenarios.length === 0}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition"
           >
-            {selectedIds.size === runnableScenarios.length ? 'Deselect All' : `Select All (${runnableScenarios.length})`}
+            {runnableScenarios.length > 0 && selectedIds.size === runnableScenarios.length
+              ? 'Deselect All'
+              : `Select All (${runnableScenarios.length})`}
           </button>
 
           {onRunSelected && (
