@@ -665,6 +665,21 @@ class Store:
 
     def save_agent(self, agent: AgentRecord):
         self.agents[agent.id] = agent
+        if self.agents._sb:
+            try:
+                version_row = {
+                    "id": agent.id,
+                    "agent_id": agent.id,
+                    "version": agent.version_label or "v1.0",
+                    "source_type": agent.input_type or "package",
+                    "artifact_path": agent.artifact_id,
+                    "artifact_hash": agent.artifact_hash or "",
+                    "agent_spec": agent.runtime_manifest,
+                    "analysis_status": "completed"
+                }
+                self.agents._sb.table("agent_versions").upsert(version_row).execute()
+            except Exception as e:
+                logger.error(f"Supabase error saving agent_version for {agent.id}: {e}")
 
     def save_agent_artifact(
         self,
@@ -719,6 +734,9 @@ class Store:
 
     def save_scenario(self, scenario: Scenario):
         self.scenarios[scenario.id] = scenario
+
+    def get_scenario(self, scenario_id: str) -> Optional[Scenario]:
+        return self.scenarios.get(scenario_id)
 
     def list_scenarios(self) -> List[Scenario]:
         return list(self.scenarios.values())
@@ -778,6 +796,22 @@ class Store:
     # --- Execution Jobs ---
     def save_execution_job(self, job: ExecutionJob):
         self.execution_jobs[job.id] = job
+        if self.execution_jobs._sb:
+            try:
+                eval_run_row = {
+                    "id": job.id,
+                    "agent_version_id": job.agent_id,
+                    "name": job.agent_name,
+                    "mode": "execution",
+                    "status": job.status,
+                    "total_scenarios": job.total_scenarios,
+                    "completed_scenarios": job.completed_scenarios,
+                    "started_at": job.created_at,
+                    "completed_at": job.finished_at
+                }
+                self.execution_jobs._sb.table("evaluation_runs").upsert(eval_run_row).execute()
+            except Exception as e:
+                logger.error(f"Supabase error saving evaluation_run stub for {job.id}: {e}")
 
     def get_execution_job(self, job_id: str) -> Optional[ExecutionJob]:
         return self.execution_jobs.get(job_id)

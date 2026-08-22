@@ -366,15 +366,29 @@ def register_normalized_spec(payload: RegisterSpecRequest):
     # --- Auto-extract dependencies and resolve bindings ---
     _resolve_dependencies_for_agent(rec.id, spec)
 
+    # --- Auto-build and persist SandboxSpecification ---
+    from app.core.sandbox.sandbox_manager import build_sandbox_specification_for_agent
+    build_sandbox_specification_for_agent(rec)
+
     activity_log.emit(
         category="INTAKE",
         action="REGISTER",
-        detail=f"Registered agent spec: {chosen_name}",
+        detail=f"Registered agent spec & created SandboxSpecification: {chosen_name}",
         response_summary=f"Agent ID: {agent_id} | Domain: {rec.domain} | Tools: {len(rec.tools)}",
         status="success"
     )
 
     return rec
+
+
+@router.get("/agents/{agent_id}/sandbox-spec", response_model=SandboxSpecification)
+def get_agent_sandbox_specification(agent_id: str):
+    """Retrieve or build the sandbox specification for a specific agent."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    from app.core.sandbox.sandbox_manager import get_or_create_sandbox_spec
+    return get_or_create_sandbox_spec(agent)
 
 
 @router.get("/test-specs", response_model=List[AgentTestSpecification])

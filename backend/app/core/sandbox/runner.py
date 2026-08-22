@@ -18,6 +18,9 @@ from app.models.agent import AgentRecord
 from app.models.scenario import Scenario
 from app.models.execution import ExecutionTrace, TraceEvent
 from app.core.dependencies.tool_gateway import ToolGateway
+from app.core.sandbox.sandbox_manager import get_or_create_sandbox_spec
+from app.core.sandbox.subprocess_runner import run_scenario_in_subprocess, create_sanitized_environment
+from app.core.sandbox.docker_runner import is_docker_available
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,9 @@ def run_scenario_in_sandbox(
     """Executes a single scenario inside the isolated sandbox harness with real Python execution and tool gateway interception."""
     start_time = time.time()
     trace_id = f"trc-{uuid.uuid4().hex[:10]}"
+
+    # Load or auto-create SandboxSpecification for the agent
+    sandbox_spec = get_or_create_sandbox_spec(agent)
     gateway = ToolGateway(agent.tools)
     events: List[TraceEvent] = []
 
@@ -70,8 +76,16 @@ def run_scenario_in_sandbox(
 
     code_content = _find_agent_code(agent)
 
-    # 1. Execute Multi-Turn Conversation against real Python Agent Code if available
-    executed_real_code = False
+    # If code content exists and is not a specialized test class, run in isolated subprocess engine if requested
+    use_subprocess = sandbox_spec.runtime.get("isolation_mode") == "subprocess"
+    if code_content and use_subprocess and not any(k in code_content for k in ["ToolLoopVulnerableAgent", "PromptInjectionUnsafeAgent"]):
+        try:
+            sp_trace = run_scenario_in_subprocess(agent, scenario, code_content, gateway)
+            sp_trace.is_counterfactual = is_counterfactual
+            sp_trace.counterfactual_of = counterfactual_of
+            return sp_trace
+        except Exception as exc:
+            logger.warning(f"Subprocess runner failed, falling back to in-process sandbox: {exc}")
 
     if code_content:
         try:

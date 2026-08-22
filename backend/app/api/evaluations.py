@@ -47,91 +47,50 @@ async def start_evaluation_job(payload: EvaluationRequest):
         status="success"
     )
 
-    # 1. Plan and generate scenarios
+    # Stage 1: Plan, generate, and persist scenarios
     strategy = build_test_strategy(agent, desired_count=payload.scenario_batch_size)
     scenarios = await generate_scenarios_for_agent(agent, strategy, llm)
+    for scenario in scenarios:
+        scenario.agent_id = agent.id
+        store.save_scenario(scenario)
 
     activity_log.emit(
         category="EVALUATION",
         action="STRATEGY_GENERATED",
-        detail=f"Constructed 8-category evaluation strategy targeting {len(scenarios)} scenarios",
+        detail=f"Constructed and saved {len(scenarios)} scenarios to persistent store",
         status="success"
     )
 
-    traces: List[ExecutionTrace] = []
-    verdicts: List[RunVerdict] = []
+    # Stage 2: Create execution job, run scenarios in sandbox, and persist traces
+    exec_job_id = f"exec-{uuid.uuid4().hex[:8]}"
+    scenario_ids = [sc.id for sc in scenarios]
 
-    # 2. Run each scenario in sandbox and evaluate
-    for sc in scenarios:
-        # Run attack / primary scenario
-        activity_log.emit(
-            category="SANDBOX",
-            action="RUN_SCENARIO",
-            detail=f"Running scenario in sandbox: {sc.title} ({sc.category.value})",
-            request_summary=f"User messages: {sc.user_messages} | Faults: {len(sc.fault_injections)}",
-            status="success"
-        )
-        t_primary = run_scenario_in_sandbox(agent, sc)
-        t_cf = None
-
-        # If scenario failed or is adversarial, run counterfactual clean control
-        if payload.include_counterfactuals and (sc.category.value in ["adversarial", "security", "safety"]):
-            activity_log.emit(
-                category="SANDBOX",
-                action="COUNTERFACTUAL_RUN",
-                detail=f"Adversarial outcome detected. Replaying counterfactual clean control for: {sc.title}",
-                status="warning"
-            )
-            t_cf = replay_counterfactual_control(agent, sc, t_primary)
-
-        # Hybrid evaluation (Rule engine + LLM judge)
-        v = await evaluate_trace(agent, sc, t_primary, llm, counterfactual_trace=t_cf)
-
-        activity_log.emit(
-            category="EVALUATION",
-            action="VERDICT",
-            detail=f"Judge verdict for scenario '{sc.title}': {'PASSED' if v.passed else 'FAILED'}",
-            response_summary=f"Verdict: Passed={v.passed} | Findings: {[f.explanation for f in v.findings]}",
-            status="success" if v.passed else "error"
-        )
-
-        traces.append(t_primary)
-        if t_cf:
-            traces.append(t_cf)
-        verdicts.append(v)
-
-    # 3. Compute failure clusters & scorecard
-    clusters = cluster_failure_verdicts(verdicts)
-    scorecard = compute_reliability_scorecard(job_id, agent, verdicts)
-
-    # 4. Save to store
-    job = EvaluationJob(
-        id=job_id,
+    exec_job = ExecutionJob(
+        id=exec_job_id,
         agent_id=agent.id,
         agent_name=agent.name,
-        agent_version=agent.version_label,
-        status="completed",
-        total_scenarios=len(scenarios),
-        completed_scenarios=len(scenarios),
+        status="running",
+        total_scenarios=len(scenario_ids),
+        completed_scenarios=0,
+        scenario_ids=scenario_ids,
         created_at=_now(),
-        finished_at=_now()
+    )
+    store.save_execution_job(exec_job)
+
+    from app.api.executions import _run_sandbox_scenarios_task
+    _run_sandbox_scenarios_task(
+        exec_job_id,
+        agent.id,
+        scenario_ids,
+        payload.include_counterfactuals
     )
 
-    store.jobs[job_id] = job
-    store.scorecards[job_id] = scorecard
-    store.verdicts[job_id] = verdicts
-    store.traces[job_id] = traces
-    store.clusters[job_id] = clusters
-
-    activity_log.emit(
-        category="EVALUATION",
-        action="JOB_COMPLETE",
-        detail=f"Evaluation job {job_id} finished successfully.",
-        response_summary=f"Passed: {scorecard.passed}/{scorecard.total_scenarios} | Safety Score: {scorecard.safety}% | Composite: {scorecard.composite}%",
-        status="success" if scorecard.passed == scorecard.total_scenarios else "warning"
+    # Stage 3: Evaluate executed traces using the persistent execution job
+    eval_req = EvaluateExecutionRequest(
+        execution_job_id=exec_job_id,
+        include_counterfactuals=payload.include_counterfactuals
     )
-
-    return job
+    return await evaluate_execution(eval_req)
 
 
 @router.get("/{job_id}/scorecard", response_model=ReliabilityScorecard)
@@ -202,8 +161,8 @@ async def evaluate_execution(payload: EvaluateExecutionRequest):
     verdicts: List[RunVerdict] = []
 
     for t_primary in primaries:
-        # Resolve scenario object
-        sc = store.scenarios.get(t_primary.scenario_id)
+        # Resolve scenario object from persistent store
+        sc = store.get_scenario(t_primary.scenario_id)
         if not sc:
             continue
 

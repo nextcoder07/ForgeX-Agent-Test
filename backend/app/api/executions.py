@@ -18,9 +18,10 @@ class RunExecutionRequest(BaseModel):
     agent_id: str
     scenario_ids: List[str]
     include_counterfactuals: bool = True
+    run_sync: bool = False
 
 def _run_sandbox_scenarios_task(job_id: str, agent_id: str, scenario_ids: List[str], include_counterfactuals: bool):
-    """Background task to execute scenarios inside the sandbox runner and save traces."""
+    """Background or sync task to execute scenarios inside the sandbox runner and save traces."""
     agent = store.get_agent(agent_id)
     job = store.get_execution_job(job_id)
     if not agent or not job:
@@ -40,7 +41,7 @@ def _run_sandbox_scenarios_task(job_id: str, agent_id: str, scenario_ids: List[s
     )
 
     for idx, sc_id in enumerate(scenario_ids):
-        sc = store.scenarios.get(sc_id)
+        sc = store.get_scenario(sc_id)
         if not sc:
             continue
 
@@ -102,6 +103,11 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
     if not payload.scenario_ids:
         raise HTTPException(status_code=422, detail="No scenarios selected for execution")
 
+    # Verify that scenarios exist in persistent storage
+    missing_ids = [sc_id for sc_id in payload.scenario_ids if not store.get_scenario(sc_id)]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"Scenarios not found in storage: {missing_ids}")
+
     job_id = f"exec-{uuid.uuid4().hex[:8]}"
     
     job = ExecutionJob(
@@ -116,16 +122,23 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
     )
     store.save_execution_job(job)
 
-    # Queue background task for non-blocking execution
-    background_tasks.add_task(
-        _run_sandbox_scenarios_task,
-        job_id,
-        payload.agent_id,
-        payload.scenario_ids,
-        payload.include_counterfactuals
-    )
-
-    return job
+    if payload.run_sync:
+        _run_sandbox_scenarios_task(
+            job_id,
+            payload.agent_id,
+            payload.scenario_ids,
+            payload.include_counterfactuals
+        )
+        return store.get_execution_job(job_id) or job
+    else:
+        background_tasks.add_task(
+            _run_sandbox_scenarios_task,
+            job_id,
+            payload.agent_id,
+            payload.scenario_ids,
+            payload.include_counterfactuals
+        )
+        return job
 
 @router.get("/jobs", response_model=List[ExecutionJob])
 def list_execution_jobs():

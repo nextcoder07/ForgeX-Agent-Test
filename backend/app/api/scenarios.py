@@ -4,10 +4,10 @@ Scenario Intelligence, Planning, Generation, Critic, and Coverage Gap API Router
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from app.models.scenario import Scenario, StrategyPlan, CoverageGapReport
+from pydantic import BaseModel, Field
+from app.models.scenario import Scenario, ScenarioCategory, StrategyPlan, CoverageGapReport
 from app.services.store import store
 from app.core.scenarios.strategy_planner import build_test_strategy
 from app.core.scenarios.scenario_generator import generate_scenarios_for_agent
@@ -22,6 +22,10 @@ router = APIRouter(prefix="/scenarios", tags=["Scenarios"])
 class GenerateScenariosRequest(BaseModel):
     agent_id: str
     target_count: int = 25
+    scenario_type: Optional[str] = None  # e.g. "normal", "adversarial", "security", "tool_misuse"
+    count: Optional[int] = None           # Alias for target_count
+    difficulty: Optional[str] = None      # "easy", "medium", "hard"
+    configuration: Optional[Dict[str, Any]] = None
 
 
 @router.get("/strategy/{agent_id}", response_model=StrategyPlan)
@@ -38,7 +42,8 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
-    strategy = build_test_strategy(agent, desired_count=payload.target_count)
+    target_count = payload.count if payload.count is not None else payload.target_count
+    strategy = build_test_strategy(agent, desired_count=target_count)
     llm = GeminiProvider()
 
     # 1. Generate
@@ -48,10 +53,17 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
     # 3. Deterministic Validation
     validated = validate_scenarios_deterministically(critiqued, agent)
 
+    # 4. Filter by scenario_type if specified
+    if payload.scenario_type and payload.scenario_type.lower() != "all":
+        stype = payload.scenario_type.lower().replace("-", "_").replace(" ", "_")
+        filtered = [sc for sc in validated if sc.category.value.lower() == stype or stype in sc.category.value.lower()]
+        if filtered:
+            validated = filtered
+
     for scenario in validated:
         scenario.agent_id = agent.id
 
-    # Save to store
+    # Save to persistent store
     for sc in validated:
         store.save_scenario(sc)
 

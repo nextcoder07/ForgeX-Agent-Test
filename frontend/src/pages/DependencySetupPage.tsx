@@ -267,7 +267,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
             Sandbox Needs & Simulation Mechanics
           </h3>
           <p className="text-xs text-slate-300 leading-relaxed">
-            The platform establishes an isolated virtual harness matching your agent's resource specifications. 
+            The platform establishes an isolated virtual harness matching your agent's resource specifications.
             All intercepted tool invocations and network access are routed dynamically based on a <strong>priority resolution policy</strong>:
           </p>
           <ol className="list-decimal pl-5 space-y-1.5 text-xs text-slate-400 font-mono">
@@ -462,11 +462,10 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
                         />
                       </div>
                       <button
-                        className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all ${
-                          hasInput
+                        className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all ${hasInput
                             ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-lg shadow-amber-500/20'
                             : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                        }`}
+                          }`}
                         disabled={!hasInput}
                       >
                         <Key className="w-3 h-3" />
@@ -528,11 +527,10 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
                         className="px-3 py-2 w-72 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 font-mono focus:outline-none focus:border-rose-500 transition-colors"
                       />
                       <button
-                        className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all ${
-                          hasInput
+                        className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all ${hasInput
                             ? 'bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-400 hover:to-pink-500 text-white shadow-lg shadow-rose-500/20'
                             : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                        }`}
+                          }`}
                         disabled={!hasInput}
                       >
                         <Link2 className="w-3 h-3" />
