@@ -29,3 +29,12 @@ def get_agent(agent_id: str):
 def create_agent(agent: AgentRecord):
     store.save_agent(agent)
     return agent
+
+
+@router.delete("/{agent_id}")
+def delete_agent(agent_id: str):
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    store.delete_agent(agent_id)
+    return {"status": "success", "message": f"Agent '{agent_id}' and all associated scenarios, results, and files deleted successfully"}

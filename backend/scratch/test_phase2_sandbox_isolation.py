@@ -46,7 +46,7 @@ async def run_phase2_verification():
         display_name="Simple Python Agent (Phase 2 Test)",
         source_files=demo_files["files"]
     )
-    agent = register_normalized_spec(register_req)
+    agent = await register_normalized_spec(register_req)
     
     sandbox_spec = get_agent_sandbox_specification(agent.id)
     assert sandbox_spec is not None, "SandboxSpecification must not be None"

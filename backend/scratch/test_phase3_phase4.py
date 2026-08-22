@@ -45,7 +45,7 @@ async def run_phase3_phase4_verification():
         display_name="Customer Support Agent (Phase 4 Test)",
         source_files=demo_files["files"]
     )
-    agent = register_normalized_spec(register_req)
+    agent = await register_normalized_spec(register_req)
     agent_id = agent.id
 
     gen_req = GenerateScenariosRequest(

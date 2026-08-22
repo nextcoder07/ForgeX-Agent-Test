@@ -46,10 +46,17 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
     strategy = build_test_strategy(agent, desired_count=target_count)
     llm = GeminiProvider()
 
-    # 1. Generate
-    generated = await generate_scenarios_for_agent(agent, strategy, llm)
-    # 2. Critic
-    critiqued = await critique_scenarios(generated, agent, llm)
+    try:
+        # 1. Generate
+        generated = await generate_scenarios_for_agent(agent, strategy, llm)
+        # 2. Critic
+        critiqued = await critique_scenarios(generated, agent, llm)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Scenario generation failed due to LLM provider error: {str(e)}"
+        )
+        
     # 3. Deterministic Validation
     validated = validate_scenarios_deterministically(critiqued, agent)
 

@@ -17,8 +17,8 @@ from app.models.agent import AgentRecord, ToolDefinition, ToolRisk, DependencyDe
 from app.models.scenario import Scenario, ScenarioCategory
 from app.models.evaluation import EvaluationJob, ReliabilityScorecard
 from app.models.failure import RunVerdict, FailureCluster, FailureFinding
-from app.models.execution import ExecutionTrace, ExecutionJob
-from app.models.pipeline import PipelineRun, PipelineStage
+from app.models.execution import ExecutionTrace, ExecutionJob, ExecutionSession, ExecutionStep, ExecutionMetrics, BenchmarkRecord
+from app.models.pipeline import PipelineRun, PipelineStage, AIGenerationRun
 from app.models.intake import AgentTestSpecification, SandboxSpecification, AgentDependency, PlatformResource, DependencyBinding
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,15 @@ class SyncedDict:
                 self._sb.table(self.table_name).upsert(row).execute()
             except Exception as e:
                 logger.error(f"Supabase error saving to {self.table_name} for key {key}: {e}")
+
+    def __delitem__(self, key: str) -> None:
+        if key in self._local_data:
+            del self._local_data[key]
+        if self._sb:
+            try:
+                self._sb.table(self.table_name).delete().eq(self.key_col, key).execute()
+            except Exception as e:
+                logger.error(f"Supabase error deleting from {self.table_name} for key {key}: {e}")
 
     def get(self, key: str, default: Optional[Any] = None) -> Any:
         try:
@@ -462,6 +471,150 @@ def _deserialize_execution_job(row: Dict[str, Any]) -> ExecutionJob:
     )
 
 
+def _serialize_ai_generation_run(key: str, run: AIGenerationRun) -> Dict[str, Any]:
+    return {
+        "id": run.id,
+        "stage": run.stage,
+        "provider": run.provider,
+        "model": run.model,
+        "status": run.status,
+        "input_tokens": run.input_tokens,
+        "output_tokens": run.output_tokens,
+        "error_message": run.error_message,
+        "prompt_version": run.prompt_version,
+        "input_reference": run.input_reference,
+        "output_reference": run.output_reference,
+        "created_at": run.created_at or _now(),
+    }
+
+
+def _deserialize_ai_generation_run(row: Dict[str, Any]) -> AIGenerationRun:
+    return AIGenerationRun(
+        id=row["id"],
+        stage=row.get("stage", ""),
+        provider=row.get("provider", "gemini"),
+        model=row.get("model", ""),
+        status=row.get("status", "SUCCESS"),
+        input_tokens=row.get("input_tokens", 0),
+        output_tokens=row.get("output_tokens", 0),
+        error_message=row.get("error_message"),
+        prompt_version=row.get("prompt_version", "v1"),
+        input_reference=row.get("input_reference"),
+        output_reference=row.get("output_reference"),
+        created_at=row.get("created_at"),
+    )
+
+
+def _serialize_execution_session(key: str, s: ExecutionSession) -> Dict[str, Any]:
+    return {
+        "id": s.id,
+        "evaluation_run_id": s.evaluation_run_id,
+        "agent_version_id": s.agent_version_id,
+        "scenario_id": s.scenario_id,
+        "sandbox_session_id": s.sandbox_session_id,
+        "status": s.status,
+        "started_at": s.started_at,
+        "completed_at": s.completed_at,
+    }
+
+
+def _deserialize_execution_session(row: Dict[str, Any]) -> ExecutionSession:
+    return ExecutionSession(
+        id=row["id"],
+        evaluation_run_id=row.get("evaluation_run_id"),
+        agent_version_id=row.get("agent_version_id"),
+        scenario_id=row.get("scenario_id"),
+        sandbox_session_id=row.get("sandbox_session_id"),
+        status=row.get("status", "active"),
+        started_at=row.get("started_at", _now()),
+        completed_at=row.get("completed_at"),
+    )
+
+
+def _serialize_execution_step(key: str, stp: ExecutionStep) -> Dict[str, Any]:
+    return {
+        "id": stp.id,
+        "execution_session_id": stp.execution_session_id,
+        "step_number": stp.step_number,
+        "event_type": stp.event_type,
+        "actor": stp.actor,
+        "input_data": stp.input_data,
+        "output_data": stp.output_data,
+        "metadata": stp.metadata,
+        "created_at": stp.created_at or _now(),
+    }
+
+
+def _deserialize_execution_step(row: Dict[str, Any]) -> ExecutionStep:
+    return ExecutionStep(
+        id=row["id"],
+        execution_session_id=row.get("execution_session_id", ""),
+        step_number=row.get("step_number", 0),
+        event_type=row.get("event_type", "OBSERVATION"),
+        actor=row.get("actor", "agent"),
+        input_data=row.get("input_data", {}),
+        output_data=row.get("output_data", {}),
+        metadata=row.get("metadata", {}),
+        created_at=row.get("created_at", _now()),
+    )
+
+
+def _serialize_execution_metrics(key: str, m: ExecutionMetrics) -> Dict[str, Any]:
+    return {
+        "id": m.id,
+        "execution_session_id": m.execution_session_id,
+        "steps_count": m.steps_count,
+        "tool_calls_count": m.tool_calls_count,
+        "failed_tools": m.failed_tools,
+        "tokens_used": m.tokens_used,
+        "latency_ms": m.latency_ms,
+        "cost": m.cost,
+        "created_at": m.created_at or _now(),
+    }
+
+
+def _deserialize_execution_metrics(row: Dict[str, Any]) -> ExecutionMetrics:
+    return ExecutionMetrics(
+        id=row["id"],
+        execution_session_id=row.get("execution_session_id", ""),
+        steps_count=row.get("steps_count", 0),
+        tool_calls_count=row.get("tool_calls_count", 0),
+        failed_tools=row.get("failed_tools", 0),
+        tokens_used=row.get("tokens_used", 0),
+        latency_ms=row.get("latency_ms", 0.0),
+        cost=row.get("cost", 0.0),
+        created_at=row.get("created_at"),
+    )
+
+
+def _serialize_benchmark_record(key: str, b: BenchmarkRecord) -> Dict[str, Any]:
+    return {
+        "id": b.id,
+        "agent_version_id": b.agent_version_id,
+        "scenario_id": b.scenario_id,
+        "execution_session_id": b.execution_session_id,
+        "trajectory": b.trajectory,
+        "evaluation": b.evaluation,
+        "human_feedback": b.human_feedback,
+        "quality_score": b.quality_score,
+        "created_at": b.created_at or _now(),
+    }
+
+
+def _deserialize_benchmark_record(row: Dict[str, Any]) -> BenchmarkRecord:
+    return BenchmarkRecord(
+        id=row["id"],
+        agent_version_id=row.get("agent_version_id"),
+        scenario_id=row.get("scenario_id"),
+        execution_session_id=row.get("execution_session_id", ""),
+        trajectory=row.get("trajectory", []),
+        evaluation=row.get("evaluation", {}),
+        human_feedback=row.get("human_feedback"),
+        quality_score=row.get("quality_score", 0.0),
+        created_at=row.get("created_at", _now()),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Global Store Implementation
 # ---------------------------------------------------------------------------
@@ -481,6 +634,11 @@ class Store:
         self.platform_resources = SyncedDict("platform_resources", _serialize_platform_resource, _deserialize_platform_resource)
         self.dependency_bindings = SyncedDict("dependency_bindings", _serialize_dependency_binding, _deserialize_dependency_binding)
         self.execution_jobs = SyncedDict("execution_jobs", _serialize_execution_job, _deserialize_execution_job)
+        self.ai_generation_runs = SyncedDict("ai_generation_runs", _serialize_ai_generation_run, _deserialize_ai_generation_run)
+        self.execution_sessions = SyncedDict("execution_sessions", _serialize_execution_session, _deserialize_execution_session)
+        self.execution_steps = SyncedDict("execution_steps", _serialize_execution_step, _deserialize_execution_step)
+        self.execution_metrics = SyncedDict("execution_metrics", _serialize_execution_metrics, _deserialize_execution_metrics)
+        self.benchmark_records = SyncedDict("benchmark_records", _serialize_benchmark_record, _deserialize_benchmark_record)
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
 
         # Seed platform-provided resources (free sandbox / mock capabilities)
@@ -681,6 +839,79 @@ class Store:
             except Exception as e:
                 logger.error(f"Supabase error saving agent_version for {agent.id}: {e}")
 
+    def delete_agent(self, agent_id: str) -> None:
+        """Deletes the agent and cascades deletion of scenarios, artifacts, results, jobs, and bindings."""
+        # 1. Delete associated scenarios
+        scenario_keys = [k for k, v in self.scenarios.items() if v.agent_id == agent_id]
+        for k in scenario_keys:
+            try:
+                del self.scenarios[k]
+            except Exception:
+                pass
+
+        # 2. Delete associated evaluation runs (jobs), scorecards, verdicts, traces, and clusters
+        eval_job_keys = [k for k, v in self.jobs.items() if v.agent_id == agent_id]
+        for k in eval_job_keys:
+            try:
+                del self.jobs[k]
+            except Exception:
+                pass
+            try:
+                del self.scorecards[k]
+            except Exception:
+                pass
+            try:
+                del self.verdicts[k]
+            except Exception:
+                pass
+            try:
+                del self.traces[k]
+            except Exception:
+                pass
+            try:
+                del self.clusters[k]
+            except Exception:
+                pass
+
+        # 3. Delete dependencies, platform resources bindings, and execution jobs
+        dep_keys = [k for k, v in self.agent_dependencies.items() if v.agent_id == agent_id]
+        for k in dep_keys:
+            try:
+                del self.agent_dependencies[k]
+            except Exception:
+                pass
+
+        binding_keys = [k for k, v in self.dependency_bindings.items() if v.agent_id == agent_id]
+        for k in binding_keys:
+            try:
+                del self.dependency_bindings[k]
+            except Exception:
+                pass
+
+        execution_job_keys = [k for k, v in self.execution_jobs.items() if v.agent_id == agent_id]
+        for k in execution_job_keys:
+            try:
+                del self.execution_jobs[k]
+            except Exception:
+                pass
+            # Traces/verdicts can also be keyed by execution job ID
+            try:
+                del self.traces[k]
+            except Exception:
+                pass
+            try:
+                del self.verdicts[k]
+            except Exception:
+                pass
+
+        # 4. Clean up local uploaded files/artifacts cache
+        if agent_id in self._local_artifacts:
+            del self._local_artifacts[agent_id]
+
+        # 5. Finally, delete the agent record itself
+        if agent_id in self.agents:
+            del self.agents[agent_id]
+
     def save_agent_artifact(
         self,
         agent: AgentRecord,
@@ -818,5 +1049,68 @@ class Store:
 
     def list_execution_jobs(self) -> List[ExecutionJob]:
         return list(self.execution_jobs.values())
+    # --- AI Generation Runs ---
+    def save_ai_generation_run(self, run: AIGenerationRun):
+        self.ai_generation_runs[run.id] = run
+
+    def list_ai_generation_runs(self) -> List[AIGenerationRun]:
+        return list(self.ai_generation_runs.values())
+
+    # --- Kaggle-Style Execution Sessions & Trajectories ---
+    def save_execution_session(self, session: ExecutionSession):
+        self.execution_sessions[session.id] = session
+
+    def get_execution_session(self, session_id: str) -> Optional[ExecutionSession]:
+        return self.execution_sessions.get(session_id)
+
+    def save_execution_step(self, step: ExecutionStep):
+        self.execution_steps[step.id] = step
+
+    def get_execution_steps(self, session_id: str) -> List[ExecutionStep]:
+        steps = [s for s in self.execution_steps.values() if s.execution_session_id == session_id]
+        return sorted(steps, key=lambda x: x.step_number)
+
+    def save_execution_metrics(self, metrics: ExecutionMetrics):
+        self.execution_metrics[metrics.id] = metrics
+
+    def get_execution_metrics(self, session_id: str) -> Optional[ExecutionMetrics]:
+        for m in self.execution_metrics.values():
+            if m.execution_session_id == session_id:
+                return m
+        return None
+
+    def save_benchmark_record(self, record: BenchmarkRecord):
+        self.benchmark_records[record.id] = record
+
+    def list_benchmark_records(self) -> List[BenchmarkRecord]:
+        return list(self.benchmark_records.values())
+
+    # --- Agent Model Dependencies & Execution Bindings ---
+    def save_agent_dependency_model(self, dep: Any):
+        if hasattr(self, "_model_deps"):
+            self._model_deps[dep.id] = dep
+        else:
+            self._model_deps = {dep.id: dep}
+
+    def save_execution_model_binding(self, binding: Any):
+        if not hasattr(self, "_bindings"):
+            self._bindings = {}
+        self._bindings[binding.execution_id] = binding
+
+    def get_execution_model_binding(self, exec_id: str) -> Optional[Any]:
+        if not hasattr(self, "_bindings"):
+            self._bindings = {}
+        return self._bindings.get(exec_id)
+
+    def save_evaluation_report(self, report: Any):
+        if not hasattr(self, "_reports"):
+            self._reports = {}
+        self._reports[report.evaluation_id] = report
+
+    def get_evaluation_report(self, eval_id: str) -> Optional[Any]:
+        if not hasattr(self, "_reports"):
+            self._reports = {}
+        return self._reports.get(eval_id)
 
 store = Store()
+

@@ -45,7 +45,7 @@ async def run_verification():
         display_name="Customer Support Agent (Phase 1 Test)",
         source_files=demo_files["files"]
     )
-    agent = register_normalized_spec(register_req)
+    agent = await register_normalized_spec(register_req)
     agent_id = agent.id
 
     assert agent_id is not None, "Agent ID must not be None"

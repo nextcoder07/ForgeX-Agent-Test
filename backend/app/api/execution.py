@@ -1,0 +1,96 @@
+"""
+Kaggle-Style Trajectory Execution, Event Sourcing, and Benchmark API Router.
+"""
+
+from __future__ import annotations
+
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from app.models.execution import ExecutionSession, ExecutionStep, ExecutionMetrics, BenchmarkRecord
+from app.services.store import store
+from app.core.execution.controller import ExecutionController
+from app.core.execution.replay_engine import ReplayEngine
+from app.core.evaluation.trajectory_evaluator import TrajectoryEvaluator
+from app.services.activity_log import activity_log
+
+router = APIRouter(prefix="/execution", tags=["Execution"])
+
+
+class StartExecutionRequest(BaseModel):
+    agent_id: str
+    scenario_id: str
+    evaluation_run_id: Optional[str] = None
+
+
+@router.post("/sessions/start")
+async def start_execution_session(payload: StartExecutionRequest):
+    """Launches a sandboxed execution session for an agent and scenario, logging full interaction trajectories."""
+    agent = store.get_agent(payload.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
+
+    scenarios = store.list_scenarios()
+    scenario = next((s for s in scenarios if s.id == payload.scenario_id), None)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"Scenario '{payload.scenario_id}' not found")
+
+    activity_log.emit(
+        category="SANDBOX",
+        action="SESSION_START",
+        detail=f"Starting execution session for agent {agent.name} on scenario: {scenario.title}",
+        status="success"
+    )
+
+    result = await ExecutionController.run_session(agent, scenario, payload.evaluation_run_id)
+
+    activity_log.emit(
+        category="SANDBOX",
+        action="SESSION_COMPLETE",
+        detail=f"Completed execution session: {result['session_id']} ({result['trajectory_steps']} steps recorded)",
+        status="success"
+    )
+
+    return result
+
+
+@router.get("/sessions/{session_id}", response_model=ExecutionSession)
+def get_execution_session(session_id: str):
+    """Retrieve metadata for a specific execution session."""
+    session = store.get_execution_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Execution session '{session_id}' not found")
+    return session
+
+
+@router.get("/sessions/{session_id}/trajectory", response_model=List[ExecutionStep])
+def get_session_trajectory(session_id: str):
+    """Retrieve sequential event-sourcing trajectory steps for an execution session."""
+    session = store.get_execution_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Execution session '{session_id}' not found")
+    return store.get_execution_steps(session_id)
+
+
+@router.get("/sessions/{session_id}/metrics", response_model=ExecutionMetrics)
+def get_session_metrics(session_id: str):
+    """Retrieve execution performance metrics (steps, latency, tool calls, cost)."""
+    metrics = store.get_execution_metrics(session_id)
+    if not metrics:
+        raise HTTPException(status_code=404, detail=f"Metrics for execution session '{session_id}' not found")
+    return metrics
+
+
+@router.post("/sessions/{session_id}/replay")
+def replay_execution_session(session_id: str):
+    """Reconstructs and replays an execution trajectory for regression diffing."""
+    result = ReplayEngine.replay_session(session_id)
+    if not result.get("reconstructed"):
+        raise HTTPException(status_code=404, detail=result.get("error", "Replay failed"))
+    return result
+
+
+@router.get("/benchmark/records", response_model=List[BenchmarkRecord])
+def list_benchmark_records():
+    """List stored benchmark dataset records for ML training and model comparisons."""
+    return store.list_benchmark_records()
