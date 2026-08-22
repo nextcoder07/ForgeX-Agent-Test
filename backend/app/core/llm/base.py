@@ -25,6 +25,12 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
+    async def generate_scenarios(self, agent_spec: Dict[str, Any], strategy_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate targeted multi-turn test scenarios covering strategy categories."""
+        pass
+
+    @abstractmethod
     async def judge_trace(self, trace_json: Dict[str, Any], constraints: list[str]) -> Dict[str, Any]:
         """Semantic LLM Judge evaluating execution traces against safety policies."""
         pass
+

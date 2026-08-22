@@ -33,7 +33,11 @@ def analyze_python_source(code: str) -> Dict[str, Any]:
                 if doc:
                     docstrings.append(f"{node.name}: {doc}")
 
+                if node.name.startswith("_") or node.name.lower() in ("main", "cli", "run", "setup", "teardown"):
+                    continue
+
                 fname_lower = node.name.lower()
+
                 is_destructive = any(k in fname_lower for k in ["refund", "cancel", "delete", "remove", "payout", "drop", "write"])
                 requires_auth = "refund" in fname_lower or "payout" in fname_lower or "pay" in fname_lower
                 requires_conf = "cancel" in fname_lower or "delete" in fname_lower or "drop" in fname_lower

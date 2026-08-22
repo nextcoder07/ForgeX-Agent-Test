@@ -14,11 +14,12 @@ class ToolCallRecord(BaseModel):
     tool_name: str
     canonical_capability: Optional[str] = None
     arguments: Dict[str, Any] = Field(default_factory=dict)
-    result: Dict[str, Any] = Field(default_factory=dict)
+    result: Any = Field(default_factory=dict)
     latency_ms: float = 0.0
     status: str = "SUCCESS"  # "SUCCESS", "TIMEOUT", "INJECTED_ERROR", "BLOCKED_POLICY"
     routing_decision: str = "SIMULATED_SANDBOX"  # "SIMULATED_SANDBOX", "REDIRECTED", "BLOCKED"
     injected_fault: Optional[str] = None
+
 
 
 class StateChange(BaseModel):

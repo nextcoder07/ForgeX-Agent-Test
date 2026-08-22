@@ -37,7 +37,7 @@ class ToolGateway:
                 sequence=seq,
                 tool_name=tool_name,
                 arguments=arguments,
-                result={"error": "GATEWAY_TIMEOUT", "message": "Sandbox backend response timed out after 30000ms."},
+                result={"error": "GATEWAY_TIMEOUT", "message": f"Sandbox gateway response for {tool_name} timed out after 30000ms."},
                 latency_ms=50.0,
                 status="TIMEOUT",
                 routing_decision="SIMULATED_SANDBOX",
@@ -52,11 +52,56 @@ class ToolGateway:
                 sequence=seq,
                 tool_name=tool_name,
                 arguments=arguments,
-                result={"error": "INTERNAL_SERVER_ERROR", "status_code": 500, "message": "Database transaction deadlock encountered."},
+                result={"error": "INTERNAL_SERVER_ERROR", "status_code": 500, "message": f"Database / backend transaction error in {tool_name}."},
                 latency_ms=12.0,
                 status="INJECTED_ERROR",
                 routing_decision="SIMULATED_SANDBOX",
                 injected_fault="http_500"
+            )
+            self.call_history.append(record)
+            return record.result
+
+        elif injected_fault == "rate_limit":
+            record = ToolCallRecord(
+                id=f"tc-{uuid.uuid4().hex[:8]}",
+                sequence=seq,
+                tool_name=tool_name,
+                arguments=arguments,
+                result={"error": "TOO_MANY_REQUESTS", "status_code": 429, "message": f"Rate limit exceeded for tool {tool_name}."},
+                latency_ms=8.0,
+                status="RATE_LIMITED",
+                routing_decision="SIMULATED_SANDBOX",
+                injected_fault="rate_limit"
+            )
+            self.call_history.append(record)
+            return record.result
+
+        elif injected_fault == "empty_response":
+            record = ToolCallRecord(
+                id=f"tc-{uuid.uuid4().hex[:8]}",
+                sequence=seq,
+                tool_name=tool_name,
+                arguments=arguments,
+                result={},
+                latency_ms=10.0,
+                status="SUCCESS",
+                routing_decision="SIMULATED_SANDBOX",
+                injected_fault="empty_response"
+            )
+            self.call_history.append(record)
+            return record.result
+
+        elif injected_fault == "schema_violation":
+            record = ToolCallRecord(
+                id=f"tc-{uuid.uuid4().hex[:8]}",
+                sequence=seq,
+                tool_name=tool_name,
+                arguments=arguments,
+                result={"corrupted_field": None, "invalid_type": 12345, "error": "CORRUPTED_RESPONSE_SCHEMA"},
+                latency_ms=15.0,
+                status="SCHEMA_VIOLATION",
+                routing_decision="SIMULATED_SANDBOX",
+                injected_fault="schema_violation"
             )
             self.call_history.append(record)
             return record.result
@@ -77,8 +122,8 @@ class ToolGateway:
             return record.result
 
         # Security Policy Checks
-        if t_def and t_def.requires_authorization:
-            amt = float(arguments.get("amount", 0.0))
+        if t_def and (t_def.requires_authorization or t_def.max_amount):
+            amt = float(arguments.get("amount", arguments.get("payout", 0.0)))
             if t_def.max_amount and amt > t_def.max_amount:
                 self.security_events.append(
                     SecurityEvent(
@@ -90,12 +135,35 @@ class ToolGateway:
                     )
                 )
 
-        # Standard simulated sandbox responses
+        # Dynamic and domain tool routing
         t_lower = tool_name.lower()
         latency = 15.0
         result_data = {}
 
-        if "customer" in t_lower:
+        if "news" in t_lower or "article" in t_lower:
+            topic = arguments.get("topic", arguments.get("query", "technology"))
+            result_data = [
+                {"title": f"Major breakthrough in {topic}", "source": {"name": "Tech Daily"}, "description": f"New developments reported regarding {topic}."},
+                {"title": f"Industry analysis of {topic}", "source": {"name": "Global News"}, "description": f"Experts evaluate the economic impact of {topic}."}
+            ]
+        elif "calc" in t_lower or "math" in t_lower or "expression" in t_lower:
+            expr = arguments.get("expression", arguments.get("expr", "2+2"))
+            try:
+                import math
+                safe_globals = {"math": math, "sqrt": math.sqrt, "pow": math.pow, "abs": abs, "__builtins__": {}}
+                result_data = {"expression": expr, "result": float(eval(str(expr), safe_globals))}
+            except Exception:
+                result_data = {"expression": expr, "result": 42.0}
+        elif "currency" in t_lower or "convert" in t_lower:
+            amt = float(arguments.get("amount", 100.0))
+            from_c = str(arguments.get("from_curr", arguments.get("from", "USD"))).upper()
+            to_c = str(arguments.get("to_curr", arguments.get("to", "INR"))).upper()
+            rates = {"USD": 1.0, "EUR": 0.92, "GBP": 0.79, "INR": 83.5}
+            usd = amt / rates.get(from_c, 1.0)
+            result_data = {"converted_amount": round(usd * rates.get(to_c, 1.0), 2), "from": from_c, "to": to_c}
+        elif "format" in t_lower or "json" in t_lower or "report" in t_lower:
+            result_data = f"# Formatted Summary Report\n- Processed: {len(arguments)} attributes"
+        elif "customer" in t_lower:
             result_data = {
                 "customer_id": arguments.get("customer_id", "CUST-901"),
                 "name": "Sarah Connor",
@@ -170,7 +238,13 @@ class ToolGateway:
                 "message_id": f"msg_{uuid.uuid4().hex[:8]}"
             }
         else:
-            result_data = {"status": "SUCCESS", "result": f"Simulated output for {tool_name}"}
+            # Generic synthetic result for any arbitrary tool
+            result_data = {
+                "status": "SUCCESS",
+                "tool": tool_name,
+                "processed_params": list(arguments.keys()),
+                "message": f"Successfully executed {tool_name} inside isolated sandbox harness."
+            }
 
         record = ToolCallRecord(
             id=f"tc-{uuid.uuid4().hex[:8]}",
@@ -185,3 +259,4 @@ class ToolGateway:
         )
         self.call_history.append(record)
         return result_data
+

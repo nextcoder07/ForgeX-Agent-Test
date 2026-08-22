@@ -157,15 +157,16 @@ async def process_agent_intake(
         instructions=semantic_data.get("instructions", ["Follow safety policies and execute tools safely"]),
         tools=dedup_tools,
         dependencies=extracted_deps or [
-            DependencyDefinition(id="dep-db", name="Order PostgreSQL Database", type="database", detected_from="AST_STATIC_SCAN"),
-            DependencyDefinition(id="dep-payment", name="Stripe Payment Gateway", type="payment", detected_from="AST_STATIC_SCAN"),
-            DependencyDefinition(id="dep-email", name="SendGrid Email Service", type="email", detected_from="AST_STATIC_SCAN")
+            DependencyDefinition(id=f"dep-{i}", name=f"{t.name.title()} Subsystem", type=t.side_effect_type.lower() if t.side_effect_type else "api", detected_from="AST_STATIC_SCAN")
+            for i, t in enumerate(dedup_tools[:3])
+        ] or [
+            DependencyDefinition(id="dep-runtime", name="Agent Execution Runtime", type="filesystem", detected_from="AST_STATIC_SCAN")
         ],
         constitution=constitution,
         capabilities=semantic_data.get("capabilities", [t.canonical_capability or t.name.upper() for t in dedup_tools]),
-        risks=semantic_data.get("risks", ["Financial transaction risk", "Destructive order cancellation", "PII egress"]),
+        risks=semantic_data.get("risks", ["Unbounded tool invocation risk", "Input boundary failure risk", "Execution safety risk"]),
         state_management="In-memory session state",
-        architecture_components=semantic_data.get("architecture_components", ["Agent Runtime"]),
+        architecture_components=semantic_data.get("architecture_components", ["Agent Runtime", "Tool Dispatcher"]),
         runtime_manifest=runtime_manifest,
         execution_status=runtime_manifest["execution_status"],
     )
@@ -186,27 +187,21 @@ async def process_agent_intake(
                 id=tid,
                 label=f"{tool.name}()",
                 type="tool",
-                risk=tool.risk.value,
-                details=tool.description
+                risk=tool.risk.value if hasattr(tool.risk, "value") else str(tool.risk),
+                details=tool.description or f"Tool function {tool.name}"
             )
         )
         edges.append(GraphEdge(source="node-agent", target=tid, label="invokes"))
 
-    # Backend target system nodes
-    nodes.append(GraphNode(id="node-db", label="Order PostgreSQL DB", type="database", risk="low", details="Read/Write Order Records"))
-    nodes.append(GraphNode(id="node-payment", label="Stripe Payment Gateway", type="api", risk="critical", details="Refund Processing API"))
-    nodes.append(GraphNode(id="node-email", label="SendGrid Email API", type="api", risk="medium", details="Customer Notifications"))
+    # Backend target system nodes based on extracted dependencies
+    for dep in norm_spec.dependencies:
+        dep_node_id = f"node-{dep.id}"
+        nodes.append(GraphNode(id=dep_node_id, label=dep.name, type=dep.type, risk="medium", details=f"External dependency: {dep.type}"))
+        # Link relevant tools
+        for tool in dedup_tools:
+            tid = f"node-tool-{tool.name}"
+            edges.append(GraphEdge(source=tid, target=dep_node_id, label="uses"))
 
-    # Connect tool nodes to backend system nodes
-    for tool in dedup_tools:
-        tid = f"node-tool-{tool.name}"
-        if "order" in tool.name.lower() or "customer" in tool.name.lower():
-            if "refund" in tool.name.lower() or "payout" in tool.name.lower():
-                edges.append(GraphEdge(source=tid, target="node-payment", label="charges/refunds"))
-            else:
-                edges.append(GraphEdge(source=tid, target="node-db", label="queries/updates"))
-        elif "email" in tool.name.lower() or "send" in tool.name.lower():
-            edges.append(GraphEdge(source=tid, target="node-email", label="delivers"))
 
     return AgentUnderstandingResult(
         artifact=artifact_record,
