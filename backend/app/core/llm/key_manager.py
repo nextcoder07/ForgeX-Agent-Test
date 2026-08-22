@@ -119,10 +119,14 @@ class GeminiKeyManager:
                     if error_type in ("INVALID_KEY", "AUTHENTICATION_ERROR"):
                         k.status = "STOPPED"
                         logger.error(f"{k.key_id} permanently stopped due to authentication failure.")
+                    elif error_type == "QUOTA_EXHAUSTED":
+                        k.status = "COOLDOWN"
+                        k.cooldown_until = time.time() + 600  # 10 minutes for rate limits / quota exhausted
+                        logger.warning(f"{k.key_id} placed on long cooldown (600s) due to quota limit.")
                     else:
                         k.status = "COOLDOWN"
-                        k.cooldown_until = time.time() + self.cooldown_seconds
-                        logger.warning(f"{k.key_id} placed on cooldown for {self.cooldown_seconds}s. Reason: {error_type}")
+                        k.cooldown_until = time.time() + 30   # Short 30s cooldown for server/network temporary issues
+                        logger.warning(f"{k.key_id} placed on short cooldown (30s) due to temporary issue: {error_type}")
                     break
 
     def mark_key_success(self, key_id: str):

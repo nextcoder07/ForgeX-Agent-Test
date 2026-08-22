@@ -83,3 +83,60 @@ class ExecutionJob(BaseModel):
     created_at: str
     finished_at: Optional[str] = None
 
+
+class ExecutionSession(BaseModel):
+    id: str
+    evaluation_run_id: Optional[str] = None
+    agent_version_id: Optional[str] = None
+    scenario_id: Optional[str] = None
+    sandbox_session_id: Optional[str] = None
+    status: str = "active"  # "active", "completed", "failed"
+    started_at: str
+    completed_at: Optional[str] = None
+
+
+class ExecutionStep(BaseModel):
+    id: str
+    execution_session_id: str
+    step_number: int
+    event_type: str  # "USER_INPUT", "AGENT_ACTION", "TOOL_CALL", "TOOL_RESPONSE", "OBSERVATION", "MEMORY_ACCESS", "STATE_CHANGE", "ERROR", "FINAL_RESPONSE"
+    actor: str  # "user", "agent", "tool", "environment", "evaluator"
+    input_data: Dict[str, Any] = Field(default_factory=dict)
+    output_data: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class ExecutionMetrics(BaseModel):
+    id: str
+    execution_session_id: str
+    steps_count: int = 0
+    tool_calls_count: int = 0
+    failed_tools: int = 0
+    tokens_used: int = 0
+    latency_ms: float = 0.0
+    cost: float = 0.0
+    created_at: Optional[str] = None
+
+
+class RuleEvaluationEvidence(BaseModel):
+    id: str
+    rule_name: str
+    rule_type: str  # "STATE_VALIDATOR", "ACTION_ORDER_VALIDATOR", "TOOL_PARAM_VALIDATOR", "GOAL_ASSERTION", "SAFETY_ASSERTION"
+    expected: Any
+    actual: Any
+    passed: bool
+    failure_reason: Optional[str] = None
+
+
+class BenchmarkRecord(BaseModel):
+    id: str
+    agent_version_id: Optional[str] = None
+    scenario_id: Optional[str] = None
+    execution_session_id: str
+    trajectory: List[Dict[str, Any]] = Field(default_factory=list)
+    evaluation: Dict[str, Any] = Field(default_factory=dict)
+    human_feedback: Optional[Dict[str, Any]] = None
+    quality_score: float = 0.0
+    created_at: str
+

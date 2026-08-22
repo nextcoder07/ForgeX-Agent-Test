@@ -34,6 +34,7 @@ class AgentTestSpecification(BaseModel):
 class SandboxSpecification(BaseModel):
     id: str
     agent_id: str
+    description: Optional[str] = None
     runtime: Dict[str, Any] = Field(default_factory=dict)
     dependencies: List[Dict[str, Any]] = Field(default_factory=list)
     filesystem: Dict[str, Any] = Field(default_factory=dict)
@@ -118,6 +119,7 @@ class GraphEdge(BaseModel):
 
 class NormalizedAgentSpec(BaseModel):
     identity: Dict[str, str]  # name, domain, framework, language, entrypoint
+    agent_description: Optional[str] = None
     goals: List[str] = Field(default_factory=list)
     instructions: List[str] = Field(default_factory=list)
     tools: List[ToolDefinition] = Field(default_factory=list)
@@ -142,6 +144,7 @@ class RegisterSpecRequest(BaseModel):
 class AgentUnderstandingResult(BaseModel):
     artifact: ArtifactRecord
     normalized_spec: NormalizedAgentSpec
+    agent_description: Optional[str] = None
     conflicts: List[SpecConflict]
     confidence_score: float  # e.g., 96.4%
     ambiguities: List[str]

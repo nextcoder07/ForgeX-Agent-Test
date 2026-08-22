@@ -386,6 +386,73 @@ CREATE TABLE IF NOT EXISTS runtime.state_changes (
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 19. ai_generation_runs
+CREATE TABLE IF NOT EXISTS public.ai_generation_runs (
+    id               TEXT PRIMARY KEY,
+    stage            TEXT NOT NULL,
+    provider         TEXT NOT NULL,
+    model            TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    input_tokens     INTEGER NOT NULL DEFAULT 0,
+    output_tokens    INTEGER NOT NULL DEFAULT 0,
+    error_message    TEXT,
+    prompt_version   TEXT NOT NULL DEFAULT 'v1',
+    input_reference  JSONB,
+    output_reference JSONB,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 20. runtime.execution_sessions
+CREATE TABLE IF NOT EXISTS runtime.execution_sessions (
+    id                 TEXT PRIMARY KEY,
+    evaluation_run_id  TEXT,
+    agent_version_id   TEXT,
+    scenario_id        TEXT,
+    sandbox_session_id TEXT,
+    status             TEXT NOT NULL DEFAULT 'active',
+    started_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at       TIMESTAMPTZ
+);
+
+-- 21. runtime.execution_steps
+CREATE TABLE IF NOT EXISTS runtime.execution_steps (
+    id                   TEXT PRIMARY KEY,
+    execution_session_id TEXT NOT NULL REFERENCES runtime.execution_sessions(id) ON DELETE CASCADE,
+    step_number          INTEGER NOT NULL,
+    event_type           TEXT NOT NULL,
+    actor                TEXT NOT NULL,
+    input_data           JSONB NOT NULL DEFAULT '{}'::jsonb,
+    output_data          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metadata             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 22. runtime.execution_metrics
+CREATE TABLE IF NOT EXISTS runtime.execution_metrics (
+    id                   TEXT PRIMARY KEY,
+    execution_session_id TEXT NOT NULL REFERENCES runtime.execution_sessions(id) ON DELETE CASCADE,
+    steps_count          INTEGER NOT NULL DEFAULT 0,
+    tool_calls_count     INTEGER NOT NULL DEFAULT 0,
+    failed_tools         INTEGER NOT NULL DEFAULT 0,
+    tokens_used          INTEGER NOT NULL DEFAULT 0,
+    latency_ms           DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    cost                 DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 23. benchmark_records
+CREATE TABLE IF NOT EXISTS public.benchmark_records (
+    id                   TEXT PRIMARY KEY,
+    agent_version_id     TEXT,
+    scenario_id          TEXT,
+    execution_session_id TEXT REFERENCES runtime.execution_sessions(id) ON DELETE CASCADE,
+    trajectory           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    evaluation           JSONB NOT NULL DEFAULT '{}'::jsonb,
+    human_feedback       JSONB,
+    quality_score        DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- =============================================================================
 -- INDEXES
 -- =============================================================================
@@ -400,3 +467,7 @@ CREATE INDEX IF NOT EXISTS idx_rt_agent_actions_instance   ON runtime.agent_acti
 CREATE INDEX IF NOT EXISTS idx_rt_security_events_instance ON runtime.security_events(scenario_instance_id);
 CREATE INDEX IF NOT EXISTS idx_rt_side_effects_instance    ON runtime.side_effect_events(scenario_instance_id);
 CREATE INDEX IF NOT EXISTS idx_rt_state_changes_instance   ON runtime.state_changes(scenario_instance_id);
+
+CREATE INDEX IF NOT EXISTS idx_rt_exec_steps_session       ON runtime.execution_steps(execution_session_id);
+CREATE INDEX IF NOT EXISTS idx_rt_exec_metrics_session     ON runtime.execution_metrics(execution_session_id);
+CREATE INDEX IF NOT EXISTS idx_benchmark_records_session   ON public.benchmark_records(execution_session_id);

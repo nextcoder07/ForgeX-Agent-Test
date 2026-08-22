@@ -8,6 +8,7 @@ import os
 import uuid
 import datetime as dt
 from typing import Dict, List
+import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.models.intake import (
@@ -29,6 +30,7 @@ from app.core.llm.gemini_provider import GeminiProvider
 from app.services.activity_log import activity_log
 
 router = APIRouter(prefix="/intake", tags=["Intake"])
+logger = logging.getLogger(__name__)
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BACKEND_DIR = os.path.dirname(APP_DIR)
@@ -291,7 +293,23 @@ async def analyze_agent(payload: AgentIntakePayload):
     )
 
     llm = GeminiProvider()
-    result = await process_agent_intake(payload, llm, tracker=tracker)
+    try:
+        result = await process_agent_intake(payload, llm, tracker=tracker)
+    except Exception as e:
+        for stg in tracker.stages:
+            if stg.status in ("running", "queued"):
+                stg.status = "failed"
+                stg.error = str(e)
+        run_snap = tracker.get_run_snapshot()
+        run_snap.status = "failed"
+        store.save_pipeline_run(run_snap)
+        activity_log.emit(
+            category="INTAKE",
+            action="ANALYZE_FAILED",
+            detail=f"Analysis failed: {str(e)}",
+            status="error"
+        )
+        raise HTTPException(status_code=500, detail=f"Gemini AI pipeline failed: {str(e)}")
 
     activity_log.emit(
         category="INTAKE",
@@ -324,7 +342,7 @@ async def analyze_agent(payload: AgentIntakePayload):
 
 
 @router.post("/register-spec", response_model=AgentRecord)
-def register_normalized_spec(payload: RegisterSpecRequest):
+async def register_normalized_spec(payload: RegisterSpecRequest):
     """Converts confirmed Normalized Spec into active agent record."""
     spec = payload.normalized_spec
     registered_name = spec.identity.get("name", "Custom Discovered Agent")
@@ -365,6 +383,15 @@ def register_normalized_spec(payload: RegisterSpecRequest):
 
     # --- Auto-extract dependencies and resolve bindings ---
     _resolve_dependencies_for_agent(rec.id, spec)
+
+    # --- Auto-generate Sandbox Specification ---
+    try:
+        from app.core.intake.sandbox_analyzer import analyze_sandbox_requirements
+        sandbox_spec = await analyze_sandbox_requirements(rec.id, payload.source_files or {}, GeminiProvider())
+        store.save_sandbox_spec(sandbox_spec)
+        logger.info(f"Auto-generated sandbox specification for agent {chosen_name}")
+    except Exception as e:
+        logger.error(f"Failed to auto-generate sandbox specification during registration: {e}")
 
     activity_log.emit(
         category="INTAKE",
