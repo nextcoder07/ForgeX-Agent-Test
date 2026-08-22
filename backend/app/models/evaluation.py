@@ -26,8 +26,8 @@ class EvaluationJob(BaseModel):
     total_scenarios: int = 25
     completed_scenarios: int = 0
     execution_mode: str = "faithful"
-    original_model: str = "openai/gpt-5"
-    executed_model: str = "openai/gpt-5"
+    original_model: Optional[str] = None
+    executed_model: Optional[str] = None
     model_substitution: bool = False
     confidence: str = "HIGH"
     created_at: str
@@ -65,7 +65,7 @@ class ReliabilityScorecard(BaseModel):
     passed: int
     failed: int
     critical_failures: int
-    judge_agreement_rate: float = 94.5
+    judge_agreement_rate: Optional[float] = None
     execution_mode: str = "faithful"
     model_substitution: bool = False
     confidence: str = "HIGH"
@@ -77,10 +77,10 @@ class EvaluationReport(BaseModel):
     agent_id: str
     agent_name: str
     scenario_id: Optional[str] = None
-    original_model: str = "openai/gpt-5"
-    executed_model: str = "google/gemini-2.5-flash"
+    original_model: Optional[str] = None
+    executed_model: Optional[str] = None
     execution_mode: str = "compatible"     # "faithful", "compatible", "simulation"
-    model_substitution: bool = True
+    model_substitution: bool = False
     confidence: str = "MEDIUM"             # "HIGH", "MEDIUM", "TEST-SPECIFIC"
     overall_score: float
     dimension_scores: TenDimensionScoreBreakdown

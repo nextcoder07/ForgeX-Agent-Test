@@ -4,6 +4,7 @@ Runtime Ephemeral Execution, Tool Call, State Change, and Security Event Models.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
@@ -95,12 +96,51 @@ class ExecutionSession(BaseModel):
     completed_at: Optional[str] = None
 
 
+class ExecutionEventType(str, Enum):
+    # Process & CLI
+    PROCESS_STARTED = "PROCESS_STARTED"
+    PROCESS_EXITED = "PROCESS_EXITED"
+    CLI_ARGUMENTS = "CLI_ARGUMENTS"
+    STDIN_INPUT = "STDIN_INPUT"
+    STDOUT_CHUNK = "STDOUT_CHUNK"
+    STDERR_CHUNK = "STDERR_CHUNK"
+    
+    # File & I/O
+    FILE_CREATED = "FILE_CREATED"
+    FILE_READ = "FILE_READ"
+    FILE_WRITTEN = "FILE_WRITTEN"
+    
+    # Network & Model
+    NETWORK_REQUEST = "NETWORK_REQUEST"
+    NETWORK_RESPONSE = "NETWORK_RESPONSE"
+    LLM_CALL = "LLM_CALL"
+    LLM_RESPONSE = "LLM_RESPONSE"
+    
+    # Tool & Agent Actions
+    TOOL_CALL = "TOOL_CALL"
+    TOOL_RESPONSE = "TOOL_RESPONSE"
+    TOOL_INVOCATION = "TOOL_INVOCATION"
+    USER_INPUT = "USER_INPUT"
+    AGENT_ACTION = "AGENT_ACTION"
+    OBSERVATION = "OBSERVATION"
+    MEMORY_ACCESS = "MEMORY_ACCESS"
+    STATE_CHANGE = "STATE_CHANGE"
+    ERROR = "ERROR"
+    FINAL_RESPONSE = "FINAL_RESPONSE"
+    
+    # Sandbox Lifecycle
+    SANDBOX_STARTED = "SANDBOX_STARTED"
+    SANDBOX_TERMINATED = "SANDBOX_TERMINATED"
+
+
 class ExecutionStep(BaseModel):
     id: str
     execution_session_id: str
     step_number: int
-    event_type: str  # "USER_INPUT", "AGENT_ACTION", "TOOL_CALL", "TOOL_RESPONSE", "OBSERVATION", "MEMORY_ACCESS", "STATE_CHANGE", "ERROR", "FINAL_RESPONSE"
-    actor: str  # "user", "agent", "tool", "environment", "evaluator"
+    event_type: str  # Can be ExecutionEventType or custom string
+    actor: str = "agent"  # "user", "agent", "tool", "environment", "evaluator", "system", "sandbox"
+    parent_event_id: Optional[str] = None  # Causal lineage link
+    payload: Dict[str, Any] = Field(default_factory=dict)
     input_data: Dict[str, Any] = Field(default_factory=dict)
     output_data: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)

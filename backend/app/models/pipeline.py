@@ -16,7 +16,7 @@ class PipelineStage(BaseModel):
     status: str = "queued"  # "queued", "running", "completed", "failed", "skipped"
     progress_pct: int = 0
     duration_ms: float = 0.0
-    model: str = Field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))
+    model: Optional[str] = None
     input_tokens: int = 0
     output_tokens: int = 0
     retry_count: int = 0
@@ -45,21 +45,6 @@ class PipelineRun(BaseModel):
     events: List[TelemetryEvent] = Field(default_factory=list)
     started_at: str
     completed_at: Optional[str] = None
-
-
-class AIGenerationRun(BaseModel):
-    id: str
-    stage: str
-    provider: str
-    model: str
-    status: str  # "SUCCESS", "FAILED", "FALLBACK", "BLOCKED"
-    input_tokens: int = 0
-    output_tokens: int = 0
-    error_message: Optional[str] = None
-    prompt_version: str = "v1"
-    input_reference: Optional[Dict[str, Any]] = None
-    output_reference: Optional[Dict[str, Any]] = None
-    created_at: Optional[str] = None
 
 
 class AIGenerationRun(BaseModel):

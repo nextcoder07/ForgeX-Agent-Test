@@ -16,8 +16,8 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   
-  // Only select VALIDATED scenarios by default
-  const runnableScenarios = scenarios.filter(s => s.validation_status === 'VALIDATED');
+  // Failed-generation placeholders cannot be executed; reviewed scenarios remain runnable.
+  const runnableScenarios = scenarios.filter(s => s.validation_status !== 'FAILED_GENERATION');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     new Set(runnableScenarios.map(s => s.id))
   );
@@ -45,8 +45,8 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
     }
   };
 
-  const toggleSelectOne = (id: string, isValidated: boolean) => {
-    if (!isValidated) return;
+  const toggleSelectOne = (id: string, isRunnable: boolean) => {
+    if (!isRunnable) return;
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
     else next.add(id);
@@ -115,14 +115,14 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
       {/* Scenario Table / Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {filteredScenarios.map((sc) => {
-          const isValidated = sc.validation_status === 'VALIDATED';
           const isFailedGen = sc.validation_status === 'FAILED_GENERATION';
+          const isRunnable = !isFailedGen;
           const isSelected = selectedIds.has(sc.id);
 
           return (
             <div
               key={sc.id}
-              onClick={() => toggleSelectOne(sc.id, isValidated)}
+              onClick={() => toggleSelectOne(sc.id, isRunnable)}
               className={`p-4 rounded-xl border transition-all flex flex-col justify-between space-y-3 ${
                 isFailedGen
                   ? 'bg-slate-950/30 border-rose-950/40 cursor-not-allowed opacity-50'
@@ -138,7 +138,8 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => {}}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={() => toggleSelectOne(sc.id, isRunnable)}
                         className="rounded border-slate-700 text-cyan-500 focus:ring-0 cursor-pointer"
                       />
                     )}
@@ -177,7 +178,7 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
                   </span>
                   <span
                     className={`flex items-center space-x-1 font-bold ${
-                      isValidated ? 'text-emerald-400' : isFailedGen ? 'text-rose-500' : 'text-amber-400'
+                      sc.validation_status === 'VALIDATED' ? 'text-emerald-400' : isFailedGen ? 'text-rose-500' : 'text-amber-400'
                     }`}
                   >
                     {isFailedGen ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}

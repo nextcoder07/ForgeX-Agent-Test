@@ -78,12 +78,41 @@ class DeclaredVsImplementedConflict(BaseModel):
     explanation: str
 
 
+class InterfaceType(str, Enum):
+    CLI = "CLI"
+    HTTP = "HTTP"
+    FUNCTION = "FUNCTION"
+    CHAT = "CHAT"
+    EVENT = "EVENT"
+    BATCH = "BATCH"
+    DIRECTORY = "DIRECTORY"
+    UNKNOWN = "UNKNOWN"
+
+
+class InterfaceContract(BaseModel):
+    interface_type: InterfaceType = InterfaceType.UNKNOWN
+    entrypoint: Optional[str] = None          # e.g., "python main.py", "app.py:main"
+    invocation_pattern: Dict[str, Any] = Field(default_factory=dict) # flags, argv format, HTTP route
+    input_artifacts: List[str] = Field(default_factory=list)          # e.g., ["resume.pdf", "data.json"]
+    stdin_supported: bool = False
+    interactive: bool = False
+    endpoint: Optional[str] = None
+    env_vars_required: List[str] = Field(default_factory=list)
+
+
+class OutputContract(BaseModel):
+    stdout_format: str = "TEXT"               # "JSON", "TEXT", "TABLE", "RAW"
+    output_files: List[str] = Field(default_factory=list)            # e.g., ["output.json"]
+    exit_codes: Dict[int, str] = Field(default_factory=lambda: {0: "SUCCESS"})
+    schema_definition: Optional[Dict[str, Any]] = None
+
+
 class ReadinessBreakdown(BaseModel):
     analysis_ready: bool = True
     runtime_ready: bool = True
     dependencies_ready: bool = True
     credentials_ready: bool = False
-    sandbox_ready: bool = True
+    sandbox_ready: bool = False
     execution_ready: bool = False
     blocked_reasons: List[str] = Field(default_factory=list)
 
@@ -95,6 +124,9 @@ class AgentBehaviorProfile(BaseModel):
     schema_version: str = "v1"
     identity: Dict[str, str] = Field(default_factory=dict)
     goal: str = ""
+    interface_contract: InterfaceContract = Field(default_factory=InterfaceContract)
+    output_contract: OutputContract = Field(default_factory=OutputContract)
+    dependency_requirements: List[Dict[str, Any]] = Field(default_factory=list)
     workflow_graph: WorkflowGraph = Field(default_factory=WorkflowGraph)
     inputs: List[Dict[str, Any]] = Field(default_factory=list)
     outputs: List[Dict[str, Any]] = Field(default_factory=list)

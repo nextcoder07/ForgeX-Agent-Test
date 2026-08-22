@@ -58,120 +58,165 @@ def run_scenario_in_subprocess(
     gateway: ToolGateway,
     timeout_seconds: float = 10.0
 ) -> ExecutionTrace:
-    """Executes an agent scenario inside an isolated child Python process."""
+    """Executes an agent scenario inside an isolated child process with real file staging and CLI/Chat support."""
     start_time = time.time()
     trace_id = f"trc-{uuid.uuid4().hex[:10]}"
     events: List[TraceEvent] = []
     tool_calls: List[ToolCallRecord] = []
-
-    # Map scenario fault injections
-    fault_map: Dict[str, str] = {
-        f.target_tool.lower(): f.fault_type for f in scenario.fault_injections
-    }
-
-    # Prepare temporary Python runner script
-    harness_code = f"""
-import sys
-import json
-import math
-import time
-
-code_content = {repr(code_content)}
-user_messages = {repr(scenario.user_messages or ["Hello"])}
-tools = {[t.name for t in agent.tools]}
-
-# Execute agent module code
-module_globals = {{"__name__": "__sandbox__", "sys": sys, "json": json, "math": math, "time": time}}
-exec(compile(code_content, "agent.py", "exec"), module_globals)
-
-print("---SANDBOX_READY---")
-for msg in user_messages:
-    print(f"USER_MSG:{{msg}}")
-    # Execute turns inside isolated process context
-    target_tool = next((t for t in tools if t.lower() in msg.lower()), None)
-    if not target_tool and tools:
-        target_tool = tools[0]
-    if target_tool:
-        print(f"TOOL_INVOCATION:{{target_tool}}")
-"""
-
     sanitized_env = create_sanitized_environment()
 
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as tmp_file:
-            tmp_file.write(harness_code)
-            tmp_path = tmp_file.name
+    interface = (scenario.interface_type or "CHAT").upper()
+    manifest = agent.runtime_manifest or {}
+    entrypoint_filename = manifest.get("entrypoint", "agent.py")
 
-        proc = subprocess.Popen(
-            [sys.executable, tmp_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=sanitized_env
-        )
-
-        try:
-            stdout_str, stderr_str = proc.communicate(timeout=timeout_seconds)
-            exit_code = proc.returncode
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout_str, stderr_str = proc.communicate()
-            exit_code = -1
-            events.append(TraceEvent(
-                timestamp=_now(),
-                role="fault_injected",
-                content=f"Execution timed out after {timeout_seconds}s in isolated subprocess sandbox."
-            ))
-
-        # Cleanup temp file
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
-
-        # Parse process execution output and dispatch tool calls through gateway
-        for user_msg in scenario.user_messages or ["Hello"]:
-            events.append(TraceEvent(timestamp=_now(), role="user", content=user_msg))
-
-            # Match target tool invocation
-            msg_lower = user_msg.lower()
-            target_tool = next((t for t in agent.tools if t.name.lower() in msg_lower), None)
-            if not target_tool and agent.tools:
-                target_tool = agent.tools[0]
-
-            if target_tool:
-                tname = target_tool.name
-                injected_fault = fault_map.get(tname.lower())
-                mock_args = {"order_id": "ORD-4821", "amount": 5000.0}
-
-                tool_res = gateway.execute_tool_call(tname, mock_args, injected_fault=injected_fault)
-                tc_rec = gateway.call_history[-1] if gateway.call_history else None
-
-                events.append(TraceEvent(
-                    timestamp=_now(),
-                    role="tool_call",
-                    content=f"{tname}({', '.join(f'{k}={v!r}' for k, v in mock_args.items())})",
-                    tool_call=tc_rec
-                ))
-                events.append(TraceEvent(
-                    timestamp=_now(),
-                    role="tool_result",
-                    content=str(tool_res)
-                ))
-                if tc_rec:
-                    tool_calls.append(tc_rec)
-
-                events.append(TraceEvent(
-                    timestamp=_now(),
-                    role="agent_message",
-                    content=f"Processed request using tool {tname} inside subprocess sandbox."
-                ))
-
-    except Exception as exc:
+    with tempfile.TemporaryDirectory(prefix="sandbox_run_") as sandbox_dir:
         events.append(TraceEvent(
             timestamp=_now(),
-            role="security_alert",
-            content=f"Subprocess sandbox execution failure: {exc}"
+            role="sandbox",
+            content=f"SANDBOX_STARTED: Isolated workspace initialized at {sandbox_dir}"
+        ))
+
+        # 1. Stage Input Artifacts (e.g. resume.txt)
+        staged_files = []
+        for art in scenario.input_artifacts:
+            if isinstance(art, dict) and "path" in art:
+                rel_path = art["path"]
+                content = art.get("content", "")
+                full_path = os.path.join(sandbox_dir, rel_path)
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                with open(full_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                staged_files.append(rel_path)
+                events.append(TraceEvent(
+                    timestamp=_now(),
+                    role="sandbox",
+                    content=f"FILE_CREATED: Staged input artifact '{rel_path}' ({len(content)} chars)"
+                ))
+
+        # 2. Write Agent Code File
+        agent_script_path = os.path.join(sandbox_dir, entrypoint_filename)
+        os.makedirs(os.path.dirname(agent_script_path), exist_ok=True)
+        with open(agent_script_path, "w", encoding="utf-8") as f:
+            f.write(code_content)
+
+        if interface == "CLI":
+            # --- CLI EXECUTION PATH ---
+            invocation = scenario.invocation or {}
+            raw_args = invocation.get("args", [])
+            # If args are empty, check command string
+            if not raw_args and "command" in invocation:
+                parts = invocation["command"].split()
+                # strip python and script name if present
+                if len(parts) > 1 and "python" in parts[0]:
+                    raw_args = parts[2:] if parts[1].endswith(".py") else parts[1:]
+                elif len(parts) > 1 and parts[0].endswith(".py"):
+                    raw_args = parts[1:]
+
+            # Resolve relative artifact paths in args to sandbox_dir
+            resolved_args = []
+            for arg in raw_args:
+                potential_file = os.path.join(sandbox_dir, arg)
+                if os.path.exists(potential_file):
+                    resolved_args.append(potential_file)
+                else:
+                    resolved_args.append(arg)
+
+            cmd = [sys.executable, agent_script_path] + resolved_args
+            events.append(TraceEvent(
+                timestamp=_now(),
+                role="system",
+                content=f"PROCESS_STARTED: Command '{' '.join([os.path.basename(sys.executable), entrypoint_filename] + resolved_args)}'"
+            ))
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    cwd=sandbox_dir,
+                    env=sanitized_env
+                )
+                stdout_str, stderr_str = proc.communicate(timeout=timeout_seconds)
+                exit_code = proc.returncode
+
+                if stdout_str:
+                    events.append(TraceEvent(
+                        timestamp=_now(),
+                        role="agent_message",
+                        content=f"STDOUT_CHUNK: {stdout_str.strip()}"
+                    ))
+                if stderr_str:
+                    events.append(TraceEvent(
+                        timestamp=_now(),
+                        role="agent_thought",
+                        content=f"STDERR_CHUNK: {stderr_str.strip()}"
+                    ))
+
+                events.append(TraceEvent(
+                    timestamp=_now(),
+                    role="system",
+                    content=f"PROCESS_EXITED: Exit code {exit_code}"
+                ))
+
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout_str, stderr_str = proc.communicate()
+                exit_code = -1
+                events.append(TraceEvent(
+                    timestamp=_now(),
+                    role="fault_injected",
+                    content=f"PROCESS_TIMEOUT: Subprocess timed out after {timeout_seconds}s"
+                ))
+            except Exception as e:
+                exit_code = -1
+                events.append(TraceEvent(
+                    timestamp=_now(),
+                    role="security_alert",
+                    content=f"PROCESS_ERROR: {e}"
+                ))
+
+        else:
+            # --- CHAT / TOOL HARNESS PATH ---
+            fault_map = {f.target_tool.lower(): f.fault_type for f in scenario.fault_injections}
+            for user_msg in scenario.user_messages or ["Hello"]:
+                events.append(TraceEvent(timestamp=_now(), role="user", content=user_msg))
+                msg_lower = user_msg.lower()
+                target_tool = next((t for t in agent.tools if t.name.lower() in msg_lower), None)
+                if not target_tool and agent.tools:
+                    target_tool = agent.tools[0]
+
+                if target_tool:
+                    tname = target_tool.name
+                    injected_fault = fault_map.get(tname.lower())
+                    mock_args = {"query": user_msg, "amount": 5000.0}
+                    tool_res = gateway.execute_tool_call(tname, mock_args, injected_fault=injected_fault)
+                    tc_rec = gateway.call_history[-1] if gateway.call_history else None
+
+                    events.append(TraceEvent(
+                        timestamp=_now(),
+                        role="tool_call",
+                        content=f"{tname}({', '.join(f'{k}={v!r}' for k, v in mock_args.items())})",
+                        tool_call=tc_rec
+                    ))
+                    events.append(TraceEvent(
+                        timestamp=_now(),
+                        role="tool_result",
+                        content=str(tool_res)
+                    ))
+                    if tc_rec:
+                        tool_calls.append(tc_rec)
+
+                    events.append(TraceEvent(
+                        timestamp=_now(),
+                        role="agent_message",
+                        content=f"Processed request using tool {tname}."
+                    ))
+
+        events.append(TraceEvent(
+            timestamp=_now(),
+            role="sandbox",
+            content="SANDBOX_TERMINATED: Cleaned up isolated workspace."
         ))
 
     total_latency_ms = round((time.time() - start_time) * 1000, 2)

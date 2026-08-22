@@ -224,3 +224,88 @@ def is_rotation_eligible(error_type: str) -> bool:
         "TEMPORARY_SERVER_ERROR",
         "NETWORK_ERROR"
     )
+
+
+class TestAgentKeyManager:
+    """Manages dedicated Gemini API keys strictly reserved for test agents in compatible mode."""
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(TestAgentKeyManager, cls).__new__(cls, *args, **kwargs)
+                cls._instance._initialized = False
+            return cls._instance
+
+    def __init__(self, cooldown_seconds: int = 120):
+        if self._initialized:
+            return
+        self.keys: List[GeminiKey] = []
+        self.cooldown_seconds = cooldown_seconds
+        self.load_keys()
+        self._initialized = True
+
+    def load_keys(self):
+        """Loads Test Agent Gemini API keys dynamically from environment variables."""
+        self.keys.clear()
+        
+        main_key = os.getenv("TEST_AGENT_GEMINI_API_KEY", "")
+        if main_key:
+            self.keys.append(GeminiKey(key_id="Test Agent Key 1", value=main_key))
+            logger.info("Registered TEST_AGENT_GEMINI_API_KEY as 'Test Agent Key 1'")
+
+        idx = 1
+        consecutive_misses = 0
+        while consecutive_misses < 5:
+            env_var_name = f"TEST_AGENT_GEMINI_API_KEY_{idx}"
+            key_val = os.getenv(env_var_name, "")
+            if key_val:
+                consecutive_misses = 0
+                if not any(k.value == key_val for k in self.keys):
+                    display_id = f"Test Agent Key {len(self.keys) + 1}"
+                    self.keys.append(GeminiKey(key_id=display_id, value=key_val))
+                    logger.info(f"Registered {env_var_name} as '{display_id}'")
+            else:
+                consecutive_misses += 1
+            idx += 1
+
+    def select_key(self) -> Optional[GeminiKey]:
+        with self._lock:
+            now = time.time()
+            for k in self.keys:
+                if k.status == "COOLDOWN" and now >= k.cooldown_until:
+                    k.status = "AVAILABLE"
+
+            eligible = [k for k in self.keys if k.status == "AVAILABLE"]
+            if not eligible:
+                return None
+
+            selected = min(eligible, key=lambda x: x.last_used_at)
+            selected.last_used_at = time.time()
+            return selected
+
+    def mark_key_failed(self, key_id: str, error_type: str, error_msg: str):
+        with self._lock:
+            for k in self.keys:
+                if k.key_id == key_id:
+                    k.failure_count += 1
+                    k.last_error = error_msg
+                    if error_type in ("INVALID_KEY", "AUTHENTICATION_ERROR"):
+                        k.status = "STOPPED"
+                    elif error_type == "QUOTA_EXHAUSTED":
+                        k.status = "COOLDOWN"
+                        k.cooldown_until = time.time() + 600
+                    else:
+                        k.status = "COOLDOWN"
+                        k.cooldown_until = time.time() + 30
+                    break
+
+    def mark_key_success(self, key_id: str):
+        with self._lock:
+            for k in self.keys:
+                if k.key_id == key_id:
+                    k.failure_count = 0
+                    if k.status not in ("STOPPED", "COOLDOWN"):
+                        k.status = "AVAILABLE"
+                    break

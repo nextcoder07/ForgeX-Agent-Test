@@ -329,30 +329,45 @@ class GeminiProvider(LLMProvider):
             raise LLMGenerationError(f"Invalid JSON from critic: {e}", code=LLMErrorCode.INVALID_JSON)
 
     async def generate_scenarios(self, agent_spec: Dict[str, Any], strategy_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Generates scenario suite strictly based on agent behavior profile and strategy targets."""
+        """Generates scenario suite strictly based on agent interface contract, behavior profile, and strategy targets."""
         prompt = (
-            f"AGENT SPECIFICATION & CONSTITUTION:\n{json.dumps(agent_spec, indent=2)}\n\n"
+            f"AGENT SPECIFICATION & INTERFACE CONTRACT:\n{json.dumps(agent_spec, indent=2)}\n\n"
             f"STRATEGY PLAN & CATEGORY TARGETS:\n{json.dumps(strategy_plan, indent=2)}\n\n"
-            "Generate a comprehensive suite of multi-turn test scenarios covering each category in the strategy plan.\n"
-            "Ensure scenarios directly exercise the agent's actual capabilities, invariants, and failure surfaces.\n"
+            "You are generating executable test scenarios for this exact autonomous AI agent.\n"
+            "CRITICAL RULES:\n"
+            "1. You MUST respect the agent's exact interface type (CLI, HTTP, CHAT, FUNCTION, BATCH).\n"
+            "2. If CLI: specify interface_type='CLI', invocation={'command': str, 'args': [str]}, and input_artifacts=[{'path': str, 'content': str}] with realistic test files.\n"
+            "3. If HTTP: specify interface_type='HTTP', invocation={'method': str, 'endpoint': str, 'headers': dict, 'body': dict}.\n"
+            "4. If CHAT: specify interface_type='CHAT', user_messages=[str].\n"
+            "5. If FUNCTION: specify interface_type='FUNCTION', invocation={'entrypoint': str, 'function': str, 'kwargs': dict}.\n"
+            "6. Do NOT hallucinate conversational chat messages for a CLI or batch agent.\n"
+            "7. Each scenario MUST include at least one concrete assertion (e.g. PROCESS_EXIT_CODE, STDOUT_CONTAINS, STDOUT_JSON_VALID, FILE_CREATED, TOOL_CALLED, STATE_EQUALS).\n"
+            "8. Link scenarios to target_failure_surface or target_invariant where applicable.\n\n"
             "Return a strict JSON array of scenario objects matching the schema:\n"
             "[\n"
             "  {\n"
             '    "category": "normal" | "edge" | "recovery" | "adversarial" | "safety" | "security" | "stress" | "chaos",\n'
             '    "title": "Short descriptive test title",\n'
             '    "purpose": "Why this test scenario is executed",\n'
-            '    "user_messages": ["Multi-turn user message 1"],\n'
-            '    "initial_state": {},\n'
+            '    "interface_type": "CLI" | "HTTP" | "CHAT" | "FUNCTION" | "BATCH",\n'
+            '    "invocation": {"command": "python parse.py sample.txt", "args": ["sample.txt"]},\n'
+            '    "input_artifacts": [{"path": "sample.txt", "content": "Sample file content..."}],\n'
+            '    "user_messages": [],\n'
+            '    "target_failure_surface": "Optional failure surface ID",\n'
+            '    "target_invariant": "Optional invariant statement",\n'
             '    "required_capabilities": ["CAPABILITY_NAME"],\n'
             '    "fault_injections": [],\n'
-            '    "assertions": [],\n'
+            '    "assertions": [\n'
+            '      {"assertion_type": "PROCESS_EXIT_CODE", "target": "exit_code", "expected_value": 0, "description": "Process succeeds cleanly"},\n'
+            '      {"assertion_type": "STDOUT_JSON_VALID", "target": "stdout", "expected_value": true, "description": "Output is valid JSON"}\n'
+            '    ],\n'
             '    "safety_constraints": [],\n'
             '    "rationale": "WHY THIS TEST EXISTS"\n'
             "  }\n"
             "]"
         )
         raw = await self.generate(
-            system="You are an autonomous AI agent quality engineer generating strict test scenarios.",
+            system="You are an autonomous AI agent quality engineer generating strict, interface-accurate test scenarios.",
             user=prompt,
             temperature=0.3,
             stage="SCENARIO_GENERATION"

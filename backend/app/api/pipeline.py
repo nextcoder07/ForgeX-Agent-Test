@@ -21,13 +21,5 @@ def list_pipeline_runs():
 def get_pipeline_run(run_id: str):
     run = store.get_pipeline_run(run_id)
     if not run:
-        # Generate default demonstration pipeline snapshot
-        from app.core.pipeline.monitor import PipelineTracker
-        tracker = PipelineTracker(agent_id="agent-cust-v1", agent_name="Customer Support Agent")
-        for i in range(10):
-            tracker.start_stage(i)
-            tracker.complete_stage(i, duration_ms=45.0 + i * 20, input_tokens=150 + i * 30, output_tokens=80 + i * 20)
-        snap = tracker.get_run_snapshot()
-        store.save_pipeline_run(snap)
-        return snap
+        raise HTTPException(status_code=404, detail=f"Pipeline run '{run_id}' not found")
     return run

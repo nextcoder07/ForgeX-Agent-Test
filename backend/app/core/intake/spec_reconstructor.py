@@ -65,6 +65,62 @@ def _infer_runtime(files: Dict[str, str], endpoint_url: str = None) -> Dict[str,
     }
 
 
+def _infer_interface_contract(
+    runtime_manifest: Dict[str, Any],
+    ast_trees: Dict[str, ast.AST],
+    behavioral_facts: Dict[str, Any],
+    endpoint_url: str = None,
+) -> Dict[str, Any]:
+    if endpoint_url or runtime_manifest.get("runtime") == "endpoint":
+        interface_type = "HTTP"
+    else:
+        has_argparse = any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "argparse"
+            and node.func.attr == "ArgumentParser"
+            for tree in ast_trees.values()
+            for node in ast.walk(tree)
+        )
+        interface_type = "CLI" if has_argparse else "FUNCTION"
+
+    arguments: List[Dict[str, Any]] = []
+    for tree in ast_trees.values():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != "add_argument" or not node.args:
+                continue
+            flags = [arg.value for arg in node.args if isinstance(arg, ast.Constant) and isinstance(arg.value, str)]
+            if not flags:
+                continue
+            kwargs = {
+                keyword.arg: keyword.value.value
+                for keyword in node.keywords
+                if keyword.arg in {"required", "default", "type"}
+                and isinstance(keyword.value, ast.Constant)
+            }
+            arguments.append({"flags": flags, **kwargs})
+
+    return {
+        "type": interface_type,
+        "entrypoint": runtime_manifest.get("entrypoint"),
+        "endpoint_url": endpoint_url,
+        "arguments": arguments,
+        "inputs": behavioral_facts.get("inputs", []),
+        "stdin": False,
+    }
+
+
+def _build_output_contract(behavioral_facts: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "outputs": behavioral_facts.get("outputs", []),
+        "transformations": [t.model_dump() for t in behavioral_facts.get("transformations", [])],
+        "observed_invariants": [i.model_dump() for i in behavioral_facts.get("invariants", [])],
+    }
+
+
 async def process_agent_intake(
     payload: AgentIntakePayload,
     llm: LLMProvider,
@@ -261,6 +317,10 @@ async def process_agent_intake(
     runtime_manifest["detected_model_dependencies"] = [m.model_dump() for m in detected_model_deps]
     runtime_manifest["detected_secrets"] = [s.model_dump() for s in detected_secrets]
     runtime_manifest["execution_status"] = derived_exec_status
+    runtime_manifest["interface_contract"] = _infer_interface_contract(
+        runtime_manifest, ast_trees, behavioral_facts, payload.endpoint_url
+    )
+    runtime_manifest["output_contract"] = _build_output_contract(behavioral_facts)
 
     # Combine canonical capabilities from ServiceDetector with LLM semantic capabilities
     canonical_caps = service_facts.get("capabilities", [])
