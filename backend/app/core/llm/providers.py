@@ -124,13 +124,15 @@ class OllamaProvider(LLMProvider):
         return FallbackMockEngine.mock_judge_verdict(trace_json, constraints)
 
 
+from app.core.llm.llm_config import LLMConfig
+
 def get_provider(provider_name: str, model_name: str = "", api_key: str = "", mock_behavior: Optional[Dict[str, Any]] = None) -> LLMProvider:
     """Factory function returning appropriate LLMProvider instance."""
     p_lower = (provider_name or "").lower()
     if p_lower == "openai":
         return OpenAIProvider(api_key=api_key, model_name=model_name or "gpt-5")
     elif p_lower in ["google", "gemini"]:
-        return GeminiProvider(api_key=api_key, model_name=model_name or "gemini-2.5-flash")
+        return GeminiProvider(api_key=api_key, model_name=model_name or LLMConfig.GEMINI_MODEL)
     elif p_lower == "anthropic":
         return AnthropicProvider(api_key=api_key, model_name=model_name or "claude-3-5-sonnet")
     elif p_lower in ["ollama", "local"]:
@@ -138,5 +140,5 @@ def get_provider(provider_name: str, model_name: str = "", api_key: str = "", mo
     elif p_lower == "mock":
         return MockLLM(mock_behavior=mock_behavior)
     
-    # Default to GeminiProvider or FallbackMock
-    return GeminiProvider(api_key=api_key, model_name=model_name or "gemini-2.5-flash")
+    # Default to GeminiProvider
+    return GeminiProvider(api_key=api_key, model_name=model_name or LLMConfig.GEMINI_MODEL)
