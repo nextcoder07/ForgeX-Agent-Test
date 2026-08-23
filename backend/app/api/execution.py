@@ -39,6 +39,22 @@ async def start_execution_session(payload: StartExecutionRequest):
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Scenario '{payload.scenario_id}' not found")
 
+    # Gatekeeper Check 0: Sandbox Status Check
+    sandbox_specs = store.list_sandbox_specs()
+    sandbox_spec = next((spec for spec in sandbox_specs if spec.agent_id == agent.id), None)
+    if not sandbox_spec or sandbox_spec.status != "READY":
+        blockers_str = ", ".join(sandbox_spec.blockers) if (sandbox_spec and sandbox_spec.blockers) else "Sandbox specification unavailable"
+        activity_log.emit(
+            category="SANDBOX",
+            action="EXECUTION_BLOCKED",
+            detail=f"Execution blocked for agent {agent.name}: {blockers_str}",
+            status="warning"
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sandbox specification unavailable. Blockers: {blockers_str}"
+        )
+
     # 1. Gatekeeper Check: Evaluate Credential Demands
     prompt = DependencyResolver.evaluate_execution_credential_demands(
         agent=agent,

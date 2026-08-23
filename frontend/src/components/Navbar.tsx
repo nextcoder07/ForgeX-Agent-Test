@@ -11,6 +11,7 @@ import {
   Cpu,
   ShieldCheck,
   Radio,
+  Wrench,
 } from 'lucide-react';
 
 export type PageId =
@@ -25,7 +26,8 @@ export type PageId =
   | 'scorecard'
   | 'live-attack'
   | 'calibration'
-  | 'pipeline';
+  | 'pipeline'
+  | 'fix-agent';
 
 interface NavbarProps {
   activePage: PageId;
@@ -41,12 +43,14 @@ export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
     { id: 'scenarios', label: 'Scenario Library', icon: Layers },
     { id: 'executions', label: 'Execution Sandbox', icon: Radio },
     { id: 'evaluations', label: 'Evaluation Engine', icon: Zap },
+    { id: 'fix-agent', label: 'Fix My Agent', icon: Wrench },
     { id: 'live-attack', label: 'Live Attack', icon: Flame },
     { id: 'failures', label: 'Failure Clusters', icon: ShieldCheck },
     { id: 'scorecard', label: 'Regression Diff', icon: GitCompare },
     { id: 'calibration', label: 'Judge Calibration', icon: CheckCircle2 },
     { id: 'pipeline', label: 'Pipeline Monitor', icon: Radio },
   ];
+
 
   return (
     <header className="sticky top-0 z-50 border-b border-slate-800 bg-[#030712]/90 backdrop-blur-xl">

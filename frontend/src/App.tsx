@@ -13,6 +13,7 @@ import { RegressionPage } from './pages/RegressionPage';
 import { PipelineObservabilityPage } from './pages/PipelineObservabilityPage';
 import { useEffect } from 'react';
 import { ExecutionPage } from './pages/ExecutionPage';
+import { FixMyAgentPage } from './pages/FixMyAgentPage';
 import type { AgentRecord } from './api/client';
 
 const getPageFromHash = (): PageId => {
@@ -25,6 +26,7 @@ const getPageFromHash = (): PageId => {
     'scenarios',
     'executions',
     'evaluations',
+    'fix-agent',
     'failures',
     'scorecard',
     'calibration',
@@ -35,6 +37,7 @@ const getPageFromHash = (): PageId => {
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageId>(getPageFromHash);
+  const [activeEvaluationJobId, setActiveEvaluationJobId] = useState<string | undefined>(undefined);
   const [lastRegisteredAgent, setLastRegisteredAgent] = useState<AgentRecord | null>(() => {
     const saved = localStorage.getItem('lastRegisteredAgent');
     return saved ? JSON.parse(saved) : null;
@@ -65,6 +68,17 @@ export default function App() {
     navigate('dependencies');
   };
 
+  const handleExecutionEvaluated = (evalJob: any) => {
+    const jobId = evalJob?.id || evalJob?.job_id;
+    if (jobId) {
+      setActiveEvaluationJobId(jobId);
+      // Navigate AFTER state is set so EvaluationRunPage gets the jobId immediately
+      window.location.hash = '#/evaluations';
+      setActivePage('evaluations');
+    }
+  };
+
+
   const renderPage = () => {
     switch (activePage) {
       case 'dashboard':
@@ -87,13 +101,30 @@ export default function App() {
       case 'scenarios':
         return <ScenarioGeneratorPage onNavigate={navigate} />;
       case 'executions':
-        return <ExecutionPage onNavigate={navigate} />;
+        return (
+          <ExecutionPage
+            onNavigate={navigate}
+            onExecutionEvaluated={handleExecutionEvaluated}
+          />
+        );
       case 'evaluations':
-        return <EvaluationRunPage onNavigate={navigate} />;
+        return (
+          <EvaluationRunPage
+            onNavigate={navigate}
+            evaluationJobId={activeEvaluationJobId}
+          />
+        );
+      case 'fix-agent':
+        return <FixMyAgentPage onNavigate={navigate} />;
       case 'live-attack':
         return <LiveAttackPage />;
       case 'failures':
-        return <EvaluationRunPage onNavigate={navigate} />;
+        return (
+          <EvaluationRunPage
+            onNavigate={navigate}
+            evaluationJobId={activeEvaluationJobId}
+          />
+        );
       case 'scorecard':
         return <RegressionPage />;
       case 'calibration':
@@ -104,6 +135,8 @@ export default function App() {
         return <DashboardPage onNavigate={navigate} />;
     }
   };
+
+
 
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100">

@@ -26,7 +26,7 @@ from app.models.agent import AgentRecord
 from app.services.store import store
 from app.core.intake.spec_reconstructor import process_agent_intake
 from app.core.pipeline.monitor import PipelineTracker
-from app.core.llm.gemini_provider import GeminiProvider
+from app.core.llm.providers import get_platform_provider
 from app.services.activity_log import activity_log
 
 router = APIRouter(prefix="/intake", tags=["Intake"])
@@ -234,7 +234,7 @@ async def analyze_agent(payload: AgentIntakePayload):
         agent_name=payload.agent_name_hint or "Discovered Agent"
     )
 
-    llm = GeminiProvider()
+    llm = get_platform_provider()
     try:
         result = await process_agent_intake(payload, llm, tracker=tracker)
     except Exception as e:
@@ -260,24 +260,34 @@ async def analyze_agent(payload: AgentIntakePayload):
         status="success"
     )
 
-    activity_log.emit(
-        category="INTAKE",
-        action="SPEC_RECONSTRUCT",
-        detail="Reconstructed normalized spec using Gemini semantic analysis.",
-        status="success"
-    )
+    if result.analysis_status == "COMPLETE":
+        activity_log.emit(
+            category="INTAKE",
+            action="SPEC_RECONSTRUCT_SUCCESS",
+            detail="Reconstructed normalized spec using Gemini semantic analysis.",
+            status="success"
+        )
+    else:
+        activity_log.emit(
+            category="INTAKE",
+            action="SPEC_RECONSTRUCT_PARTIAL",
+            detail=f"Reconstructed normalized spec from deterministic AST facts ({result.semantic_status}).",
+            status="warning"
+        )
 
     # Save pipeline snapshot
     run_snap = tracker.get_run_snapshot()
+    if result.analysis_status != "COMPLETE":
+        run_snap.status = "partial"
     store.save_pipeline_run(run_snap)
     result.pipeline_run_id = run_snap.id
 
     activity_log.emit(
         category="INTAKE",
         action="ANALYZE_COMPLETE",
-        detail=f"Analysis complete for {result.normalized_spec.identity.get('name')}.",
-        response_summary=f"Tools: {len(result.normalized_spec.tools)} | Confidence: {result.confidence_score}%",
-        status="success"
+        detail=f"Analysis complete ({result.analysis_status}) for {result.normalized_spec.identity.get('name')}.",
+        response_summary=f"Tools: {len(result.normalized_spec.tools)} | Status: {result.analysis_status} | Confidence: {result.confidence_score}%",
+        status="success" if result.analysis_status == "COMPLETE" else "warning"
     )
 
     return result
@@ -319,64 +329,113 @@ async def register_normalized_spec(payload: RegisterSpecRequest):
         input_type=payload.artifact.input_type if payload.artifact else "package",
         created_at=_now()
     )
-    store.save_agent(rec)
-    if payload.artifact:
-        store.save_agent_artifact(rec, payload.artifact, payload.source_files)
+    agent_status = "SUCCESS"
+    version_status = "SUCCESS"
+    artifact_status = "SUCCESS" if payload.artifact else "SKIPPED"
+    behavior_profile_status = "PENDING"
+    sandbox_spec_status = "PENDING"
+
+    try:
+        store.save_agent(rec)
+    except Exception as e:
+        logger.error(f"Error saving agent to store: {e}")
+        agent_status = "FAILED"
+
+    if payload.artifact and agent_status == "SUCCESS":
+        try:
+            store.save_agent_artifact(rec, payload.artifact, payload.source_files)
+        except Exception as e:
+            logger.error(f"Error saving agent artifact: {e}")
+            artifact_status = "FAILED"
 
     # --- Auto-extract dependencies and resolve bindings ---
     _resolve_dependencies_for_agent(rec.id, spec)
 
     # --- Build and Persist AgentBehaviorProfile ---
     try:
-        from app.core.intake.profile_builder import ProfileBuilder
-        from app.models.agent_behavior import (
-            WorkflowGraph,
-            DataTransformation,
-            CodeInvariant,
-            FailureSurface,
-            DeclaredVsImplementedConflict,
-        )
-
-        out_contract = spec.runtime_manifest.get("output_contract", {}) if isinstance(spec.runtime_manifest, dict) else {}
-        transformations = [DataTransformation(**t) for t in out_contract.get("transformations", [])]
-        invariants = [CodeInvariant(**inv) for inv in out_contract.get("observed_invariants", [])]
-
-        wf_graph = WorkflowGraph(
-            entrypoint=spec.runtime_manifest.get("entrypoint", "agent.py") if isinstance(spec.runtime_manifest, dict) else "agent.py",
-            nodes=[],
-            edges=[]
-        )
-
-        bp = ProfileBuilder.build_behavior_profile(
-            agent_id=rec.id,
-            agent_name=rec.display_name or rec.name,
-            domain=rec.domain or "general",
-            workflow_graph=wf_graph,
-            capabilities=spec.capabilities or [],
-            external_calls=[],
-            credential_references=[],
-            transformations=transformations,
-            invariants=invariants,
-            failure_surfaces=[],
-            agent_version_id=rec.id
-        )
-        store.save_behavior_profile(bp)
+        if spec.behavior_profile:
+            bp = spec.behavior_profile
+            bp.agent_id = rec.id
+            bp.agent_version_id = rec.id
+            store.save_behavior_profile(bp)
+        else:
+            from app.core.intake.profile_builder import ProfileBuilder
+            from app.models.agent_behavior import WorkflowGraph
+            wf_graph = WorkflowGraph(
+                entrypoint=spec.runtime_manifest.get("entrypoint", "agent.py") if isinstance(spec.runtime_manifest, dict) else "agent.py",
+                nodes=[],
+                edges=[]
+            )
+            bp = ProfileBuilder.build_behavior_profile(
+                agent_id=rec.id,
+                agent_name=rec.display_name or rec.name,
+                domain=rec.domain or "general",
+                workflow_graph=wf_graph,
+                capabilities=spec.capabilities or [],
+                external_calls=[],
+                credential_references=[],
+                transformations=[],
+                invariants=[],
+                failure_surfaces=[],
+                agent_version_id=rec.id
+            )
+            store.save_behavior_profile(bp)
+        behavior_profile_status = "SUCCESS"
     except Exception as e:
         logger.warning(f"Error building/saving AgentBehaviorProfile for {rec.id}: {e}")
+        behavior_profile_status = "FAILED"
 
     # --- Auto-build and persist SandboxSpecification ---
     try:
         from app.core.sandbox.sandbox_manager import build_sandbox_specification_for_agent
         build_sandbox_specification_for_agent(rec)
+        sandbox_spec_status = "SUCCESS"
     except Exception as e:
         logger.warning(f"Error auto-building sandbox specification: {e}")
+        sandbox_spec_status = "FAILED"
+
+    # Overall registration status
+    if (
+        agent_status == "SUCCESS"
+        and artifact_status in ("SUCCESS", "SKIPPED")
+        and behavior_profile_status == "SUCCESS"
+        and sandbox_spec_status == "SUCCESS"
+    ):
+        overall = "COMPLETE"
+    elif agent_status == "FAILED":
+        overall = "FAILED"
+    else:
+        overall = "PARTIAL"
+
+    status_dict = {
+        "agent_status": agent_status,
+        "version_status": version_status,
+        "artifact_status": artifact_status,
+        "behavior_profile_status": behavior_profile_status,
+        "sandbox_spec_status": sandbox_spec_status,
+        "overall": overall
+    }
+
+    # Store registration status inside the record's runtime manifest
+    if not isinstance(rec.runtime_manifest, dict):
+        rec.runtime_manifest = {}
+    rec.runtime_manifest["registration_status"] = status_dict
+
+    # If sandbox spec failed, block execution
+    if sandbox_spec_status == "FAILED":
+        rec.execution_status = "EXECUTION_BLOCKED"
+        try:
+            # Update store with registration status details
+            store.save_agent(rec)
+        except Exception:
+            pass
 
     activity_log.emit(
         category="INTAKE",
         action="REGISTER",
-        detail=f"Registered agent spec & created SandboxSpecification: {chosen_name}",
-        response_summary=f"Agent ID: {agent_id} | Domain: {rec.domain} | Tools: {len(rec.tools)}",
-        status="success"
+        detail=f"Registered agent spec: {chosen_name} | Sandbox: {sandbox_spec_status} | Profile: {behavior_profile_status} | Overall: {overall}",
+        response_summary=f"Agent ID: {agent_id} | Domain: {rec.domain} | Status: {status_dict}",
+        status="success" if overall == "COMPLETE" else "warning"
     )
 
     return rec

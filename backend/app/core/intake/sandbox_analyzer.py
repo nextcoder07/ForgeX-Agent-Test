@@ -14,7 +14,7 @@ import datetime as dt
 from typing import Dict, Any, List
 from app.models.intake import SandboxSpecification
 from app.core.llm.gemini_provider import GeminiProvider, LLMGenerationError
-from app.core.llm.key_manager import GeminiKeyManager
+from app.core.llm.key_manager import UnifiedKeyManager
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ async def analyze_sandbox_requirements(
         network_domains.append("generativelanguage.googleapis.com")
 
     # If AI key is available and LLM provided, optionally refine description fields
-    key_mgr = GeminiKeyManager()
+    key_mgr = UnifiedKeyManager()
     if key_mgr.keys and llm:
         try:
             evidence_payload = {

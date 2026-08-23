@@ -1,24 +1,64 @@
-import React, { useState, useEffect } from 'react';
-import { fetchAgents, runEvaluationJob, fetchScorecard, fetchFailureClusters } from '../api/client';
-import type { AgentRecord, ReliabilityScorecard, FailureCluster } from '../api/client';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Zap,
+  BarChart3,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  RefreshCw,
+  Clock,
+  Cpu,
+  Shield,
+  ChevronDown,
+  ChevronRight,
+  Wrench,
+  Info,
+  Sliders,
+  Check,
+  Ban,
+  HelpCircle,
+  AlertOctagon,
+  Eye,
+  X,
+  Database
+} from 'lucide-react';
+import type { PageId } from '../components/Navbar';
+import type { AgentRecord, ReliabilityScorecard, FailureCluster, FailureFinding } from '../api/client';
+import {
+  fetchAgents,
+  runEvaluationJob,
+  fetchScorecard,
+  fetchFailureClusters,
+  fetchEvaluationJobDetails,
+  fetchEvaluationVerdicts,
+  fetchEvaluationTracesDetails,
+  fetchEvaluationReport,
+} from '../api/client';
 import { TwoAxisQuadrant } from '../components/TwoAxisQuadrant';
 import { FailureClustersView } from '../components/FailureClustersView';
-import { RefreshCw, Zap, CheckCircle2, ShieldCheck, BarChart3, AlertTriangle, Clock, Cpu } from 'lucide-react';
-import type { PageId } from '../components/Navbar';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface EvaluationRunPageProps {
   onNavigate: (page: PageId) => void;
+  evaluationJobId?: string;
 }
 
-export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({ onNavigate }) => {
+export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({ onNavigate, evaluationJobId }) => {
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
-  const [batchSize, setBatchSize] = useState(25);
-  const [running, setRunning] = useState(false);
-  const [jobResult, setJobResult] = useState<any | null>(null);
+  const [batchSize, setBatchSize] = useState(34);
+  const [evalJob, setEvalJob] = useState<any | null>(null);
   const [scorecard, setScorecard] = useState<ReliabilityScorecard | null>(null);
+  const [report, setReport] = useState<any | null>(null);
+  const [verdicts, setVerdicts] = useState<any[]>([]);
+  const [traces, setTraces] = useState<any[]>([]);
   const [clusters, setClusters] = useState<FailureCluster[]>([]);
+  const [running, setRunning] = useState(false);
+  const [userDeclinedRepair, setUserDeclinedRepair] = useState(false);
+  const [expandedScenarioId, setExpandedScenarioId] = useState<string | null>(null);
+  const [inspectFinding, setInspectFinding] = useState<FailureFinding | null>(null);
+
+  const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
     fetchAgents().then((list) => {
@@ -27,266 +67,496 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({ onNavigate
     });
   }, []);
 
-  const handleRunEvaluation = async () => {
+  const startPolling = (jobId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = window.setInterval(async () => {
+      try {
+        const details = await fetchEvaluationJobDetails(jobId);
+        setEvalJob(details);
+
+        if (['completed', 'failed', 'cancelled', 'partial', 'blocked'].includes(details.status)) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setRunning(false);
+
+          if (details.status === 'completed' || details.status === 'partial') {
+            loadResults(jobId);
+          }
+        }
+      } catch (err) {
+        console.error('Error polling evaluation job:', err);
+        if (pollRef.current) clearInterval(pollRef.current);
+        setRunning(false);
+      }
+    }, 1200);
+  };
+
+  const loadResults = async (jobId: string) => {
+    try {
+      const [sc, rep, verd, trc, clus] = await Promise.all([
+        fetchScorecard(jobId).catch(() => null),
+        fetchEvaluationReport(jobId).catch(() => null),
+        fetchEvaluationVerdicts(jobId).catch(() => []),
+        fetchEvaluationTracesDetails(jobId).catch(() => []),
+        fetchFailureClusters(jobId).catch(() => []),
+      ]);
+      if (sc) setScorecard(sc);
+      if (rep) setReport(rep);
+      setVerdicts(verd);
+      setTraces(trc);
+      setClusters(clus);
+    } catch (e) {
+      console.error('Failed loading evaluation results:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (evaluationJobId) {
+      startPolling(evaluationJobId);
+    }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [evaluationJobId]);
+
+  const handleLaunchEvaluation = async () => {
     if (!selectedAgentId) return;
     setRunning(true);
-    setJobResult(null);
+    setEvalJob(null);
     setScorecard(null);
+    setReport(null);
+    setVerdicts([]);
+    setTraces([]);
     setClusters([]);
+    setUserDeclinedRepair(false);
 
     try {
-      const result = await runEvaluationJob(selectedAgentId, batchSize);
-      setJobResult(result);
-
-      if (result.job_id || result.id) {
-        const evalId = result.job_id || result.id;
-        const [sc, clust] = await Promise.all([
-          fetchScorecard(evalId),
-          fetchFailureClusters(evalId),
-        ]);
-        setScorecard(sc);
-        setClusters(clust);
-      }
-    } catch (e: any) {
-      console.error(e);
-    } finally {
+      const job = await runEvaluationJob(selectedAgentId, batchSize);
+      setEvalJob(job);
+      startPolling(job.id || job.job_id);
+    } catch (e) {
+      console.error('Failed to launch evaluation run:', e);
       setRunning(false);
     }
   };
 
-  return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-extrabold text-slate-100">Evaluation & Reliability Engine</h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Run a full sandboxed evaluation batch. The engine executes scenarios with fault injection, scores every run with a hybrid rule + LLM judge, proves failure causation via counterfactual replay, and produces a 2D reliability scorecard.
-        </p>
+  const progressPct = evalJob && evalJob.total_scenarios > 0
+    ? Math.round((evalJob.completed_scenarios / evalJob.total_scenarios) * 100)
+    : 0;
+
+  const isCompleted = evalJob?.status === 'completed';
+  const isFailed = evalJob?.status === 'failed';
+  const isEvaluating = evalJob?.status && ['pending', 'running', 'evaluating', 'aggregating'].includes(evalJob.status);
+
+  const renderVerdictBadge = (status?: string, passed?: boolean) => {
+    const st = (status || (passed ? 'PASS' : 'FAIL')).toUpperCase();
+    if (st === 'PASS') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 w-fit">
+          <CheckCircle2 className="w-3 h-3" /> PASS
+        </span>
+      );
+    }
+    if (st === 'FAIL') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-950 text-rose-300 border border-rose-500/30 flex items-center gap-1 w-fit">
+          <XCircle className="w-3 h-3" /> FAIL
+        </span>
+      );
+    }
+    if (st === 'BLOCKED') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-950 text-amber-300 border border-amber-500/30 flex items-center gap-1 w-fit">
+          <Ban className="w-3 h-3" /> BLOCKED
+        </span>
+      );
+    }
+    if (st === 'INCONCLUSIVE' || st === 'ERROR') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-950 text-purple-300 border border-purple-500/30 flex items-center gap-1 w-fit">
+          <HelpCircle className="w-3 h-3" /> {st}
+        </span>
+      );
+    }
+    return (
+      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1 w-fit">
+        {st}
+      </span>
+    );
+  };
+
+  const renderDimScore = (val: number | null | undefined, label: string, weight: string) => {
+    const isNA = val === null || val === undefined;
+    return (
+      <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+        <span className="text-[10px] text-slate-500 block uppercase tracking-wider">{label} ({weight})</span>
+        {isNA ? (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 inline-block font-mono">
+            N/A
+          </span>
+        ) : (
+          <span className={`font-bold text-base font-mono ${
+            val >= 80 ? 'text-emerald-300' : val >= 60 ? 'text-amber-300' : 'text-rose-300'
+          }`}>
+            {val.toFixed(1)}%
+          </span>
+        )}
       </div>
+    );
+  };
 
-      {/* Launch Controls */}
-      <div className="p-5 rounded-2xl glass-panel border border-indigo-500/30 bg-gradient-to-r from-slate-950 via-indigo-950/20 to-slate-950 space-y-4">
-        <h2 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
-          <Zap className="w-4 h-4 text-indigo-400" />
-          <span>Launch Evaluation Job</span>
-        </h2>
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      {/* Page Header */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-100 flex items-center space-x-3">
+            <Zap className="w-6 h-6 text-indigo-400 fill-current" />
+            <span>Evaluation & Reliability Engine Report</span>
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Evidence-backed, 10-dimension evaluation engine analyzing execution traces, tool discipline, safety bounds, and model fidelity.
+          </p>
+        </div>
 
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="flex-1 min-w-48">
-            <label className="text-xs font-semibold text-slate-400 block mb-1">Target Agent:</label>
-            <select
-              value={selectedAgentId}
-              onChange={(e) => setSelectedAgentId(e.target.value)}
-              className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-xs focus:outline-none focus:border-indigo-500 transition"
-            >
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.display_name || a.name} · registered: {a.name} · {a.version_label}
-                </option>
-              ))}
-              {agents.length === 0 && <option>No agents — use Intake page first</option>}
-            </select>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold text-slate-400 block mb-1">Scenario Batch Size:</label>
-            <input
-              type="number"
-              min={5}
-              max={100}
-              value={batchSize}
-              onChange={(e) => setBatchSize(Number(e.target.value))}
-              className="w-24 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 transition text-center"
-            />
-          </div>
+        {/* Launch / Select Agent Controls */}
+        <div className="flex items-center space-x-3">
+          <select
+            value={selectedAgentId}
+            onChange={(e) => setSelectedAgentId(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-xs focus:outline-none focus:border-indigo-500 transition"
+          >
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.display_name || a.name} · {a.version_label}
+              </option>
+            ))}
+          </select>
 
           <button
-            onClick={handleRunEvaluation}
+            onClick={handleLaunchEvaluation}
             disabled={running || !selectedAgentId}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-600 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-slate-100 font-bold text-sm shadow-lg shadow-indigo-500/20 flex items-center space-x-2 transition disabled:opacity-50"
+            className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-600 to-indigo-600 hover:from-indigo-400 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/20 flex items-center space-x-2 transition disabled:opacity-50"
           >
             {running ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Running Evaluation... (includes counterfactuals)</span>
-              </>
+              <><RefreshCw className="w-4 h-4 animate-spin" /><span>Evaluating...</span></>
             ) : (
-              <>
-                <Zap className="w-4 h-4" />
-                <span>Launch Full Evaluation</span>
-              </>
+              <><Zap className="w-4 h-4" /><span>Launch Evaluation</span></>
             )}
           </button>
         </div>
-
-        {running && (
-          <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-xs text-indigo-300 space-y-1">
-            <p className="font-bold flex items-center space-x-2">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              <span>Evaluation Pipeline Running...</span>
-            </p>
-            <p className="text-slate-400">
-              Executing {batchSize} scenarios → Applying fault injections → Scoring with hybrid evaluator → Running counterfactual replays → Clustering failures...
-            </p>
-          </div>
-        )}
       </div>
 
-      {/* Job Summary */}
-      {jobResult && (
-        <div className="p-5 rounded-2xl glass-panel border border-slate-700 space-y-4">
-          <h2 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
-            <BarChart3 className="w-4 h-4 text-emerald-400" />
-            <span>Evaluation Job Complete</span>
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-              <span className="text-[10px] text-slate-500 uppercase block">Job ID</span>
-              <span className="text-cyan-300 font-bold">{jobResult.job_id || jobResult.id}</span>
+      {/* Real-time Status Management & Progress Card */}
+      {evalJob && (
+        <div className="p-6 rounded-2xl glass-panel border border-indigo-500/30 bg-slate-950/90 space-y-4 shadow-xl font-mono">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 rounded-xl bg-indigo-500/20">
+                <Clock className={`w-5 h-5 text-indigo-400 ${isEvaluating ? 'animate-pulse' : ''}`} />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-slate-400 uppercase">EVALUATION JOB:</span>
+                  <span className="text-xs font-bold text-cyan-300">{evalJob.id}</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                    isCompleted
+                      ? 'bg-emerald-950 text-emerald-300 border-emerald-500/40'
+                      : isFailed
+                      ? 'bg-rose-950 text-rose-300 border-rose-500/40'
+                      : 'bg-indigo-950 text-indigo-300 border-indigo-500/40 animate-pulse'
+                  }`}>
+                    ● {evalJob.status}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-1">{evalJob.current_step || 'Processing scenarios...'}</p>
+              </div>
             </div>
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-              <span className="text-[10px] text-slate-500 uppercase block">Status</span>
-              <span className="text-emerald-300 font-bold uppercase">{jobResult.status}</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-              <span className="text-[10px] text-slate-500 uppercase block">Verdicts</span>
-              <span className="text-slate-200 font-bold">{jobResult.total_verdicts ?? batchSize}</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-              <span className="text-[10px] text-slate-500 uppercase block">Agent</span>
-              <span className="text-slate-200 font-bold">{jobResult.agent_id || selectedAgentId}</span>
+
+            <div className="text-right text-xs">
+              <span className="text-slate-400">Scenarios: </span>
+              <strong className="text-slate-100">{evalJob.completed_scenarios} / {evalJob.total_scenarios} ({progressPct}%)</strong>
             </div>
           </div>
+
+          {/* Real-time Progress Bar */}
+          <div className="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+
+          {/* Failed job retry notice */}
+          {isFailed && (
+            <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-center justify-between flex-wrap gap-2">
+              <span>Failure Reason: {evalJob.error_message || 'Evaluation worker encountered an unexpected error.'}</span>
+              <button
+                onClick={handleLaunchEvaluation}
+                className="px-3 py-1 rounded-lg bg-rose-800 hover:bg-rose-700 text-white font-bold text-[11px]"
+              >
+                Retry Evaluation
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Scorecard */}
+      {/* SECTION A: Evaluation Overview Dashboard */}
       {scorecard && (
-        <div>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 font-mono">
+            {/* Overall Score */}
+            <div className="p-6 rounded-2xl glass-panel border border-cyan-500/30 bg-gradient-to-tr from-cyan-950/30 via-slate-950 to-slate-950 space-y-2">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">OVERALL RELIABILITY SCORE</span>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-4xl font-extrabold text-cyan-400">{scorecard.composite.toFixed(1)}</span>
+                <span className="text-sm text-slate-500">/ 100</span>
+              </div>
+              <p className="text-[11px] text-slate-400">Formula: {scorecard.score_formula_version || 'v2.0-weighted'}</p>
+            </div>
+
+            {/* Confidence & Fidelity */}
+            <div className="p-6 rounded-2xl glass-panel border border-indigo-500/30 bg-slate-950 space-y-2">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">EVALUATION CONFIDENCE</span>
+              <div className="text-2xl font-extrabold text-indigo-400">{scorecard.confidence || 'HIGH'}</div>
+              <p className="text-[11px] text-slate-400">Two-Layer: Deterministic + LLM Judge</p>
+            </div>
+
+            {/* Scenario Breakdown */}
+            <div className="p-6 rounded-2xl glass-panel border border-emerald-500/30 bg-slate-950 space-y-2">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">PASSED SCENARIOS</span>
+              <div className="text-2xl font-extrabold text-emerald-400">
+                {scorecard.passed} <span className="text-sm text-slate-500 font-normal">/ {scorecard.total_scenarios}</span>
+              </div>
+              <p className="text-[11px] text-slate-400">{((scorecard.passed / Math.max(1, scorecard.total_scenarios)) * 100).toFixed(1)}% Pass Rate</p>
+            </div>
+
+            {/* Critical Failures */}
+            <div className="p-6 rounded-2xl glass-panel border border-rose-500/30 bg-slate-950 space-y-2">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">CRITICAL FAILURES</span>
+              <div className="text-2xl font-extrabold text-rose-400">{scorecard.critical_failures}</div>
+              <p className="text-[11px] text-slate-400">Policy violations & uncontained side effects</p>
+            </div>
+          </div>
+
+          {/* SECTION B: Model Binding & Fidelity Banner */}
+          <div className="p-5 rounded-2xl glass-panel border border-amber-500/30 bg-amber-950/20 flex items-center justify-between flex-wrap gap-4 font-mono">
+            <div className="flex items-center space-x-3">
+              <Cpu className="w-5 h-5 text-amber-400" />
+              <div>
+                <div className="flex items-center space-x-2 text-xs">
+                  <span className="font-bold text-slate-100 uppercase">MODE: {scorecard.execution_mode.toUpperCase()}</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Substitution: {scorecard.model_substitution ? 'YES' : 'NO'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    Fidelity: {scorecard.confidence || 'HIGH'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Evaluated on immutable sandbox execution traces
+                </p>
+              </div>
+            </div>
+            <div className="text-right text-[11px] text-slate-400">
+              <span>Formula Version: </span>
+              <strong className="text-cyan-400">{scorecard.score_formula_version || 'v2.0-weighted'}</strong>
+            </div>
+          </div>
+
           <TwoAxisQuadrant scorecard={scorecard} />
-        </div>
-      )}
 
-      {/* Platform Reliability Report & Mitigation Strategy */}
-      {scorecard && (
-        <div className="p-6 rounded-2xl glass-panel border border-indigo-500/20 bg-slate-950/80 space-y-6">
-          <div>
-            <h2 className="text-base font-extrabold text-slate-100 flex items-center space-x-2">
-              <ShieldCheck className="w-5 h-5 text-indigo-400" />
-              <span>Reliability Assessment & Mitigation Strategy</span>
-            </h2>
-            <p className="text-xs text-slate-400 mt-1">
-              Automated report summarizing identified weaknesses and recommended code-level fixes to optimize agent resilience.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs leading-relaxed">
-            {/* Reliability Summary */}
-            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
-                Project Summary
+          {/* SECTION C: 10-Dimension Score Breakdown */}
+          {scorecard.dimension_scores && (
+            <div className="p-6 rounded-2xl glass-panel border border-slate-800 bg-slate-950 space-y-4">
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-mono flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-cyan-400" />
+                10-Dimension Reliability Scorecard
               </h3>
-              <p className="text-slate-300">
-                Evaluation run completed for agent <strong>{scorecard.agent_name}</strong> (version {scorecard.agent_version}) across <strong>{scorecard.total_scenarios}</strong> test scenarios. The agent achieved a composite reliability score of <strong className={scorecard.composite >= 85 ? 'text-emerald-400' : 'text-amber-400'}>{scorecard.composite.toFixed(1)}%</strong>.
-              </p>
-              <div className="grid grid-cols-2 gap-2 font-mono text-[11px] pt-1">
-                <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-900">
-                  <span className="text-slate-500 block">SAFETY AXIS</span>
-                  <span className="text-rose-400 font-bold">{scorecard.safety.toFixed(0)}/100</span>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-900">
-                  <span className="text-slate-500 block">CAPABILITY AXIS</span>
-                  <span className="text-cyan-400 font-bold">{scorecard.correctness.toFixed(0)}/100</span>
-                </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 font-mono text-xs">
+                {renderDimScore(scorecard.dimension_scores.correctness, 'CORRECTNESS', '25%')}
+                {renderDimScore(scorecard.dimension_scores.goal_adherence, 'GOAL ADHERENCE', '15%')}
+                {renderDimScore(scorecard.dimension_scores.safety, 'SAFETY', '15%')}
+                {renderDimScore(scorecard.dimension_scores.security, 'SECURITY', '10%')}
+                {renderDimScore(scorecard.dimension_scores.tool_discipline, 'TOOL DISCIPLINE', '10%')}
+                {renderDimScore(scorecard.dimension_scores.robustness, 'ROBUSTNESS', '5%')}
+                {renderDimScore(scorecard.dimension_scores.recovery, 'RECOVERY', '5%')}
+                {renderDimScore(scorecard.dimension_scores.output_quality, 'OUTPUT QUALITY', '5%')}
+                {renderDimScore(scorecard.dimension_scores.efficiency, 'EFFICIENCY', '5%')}
+                {renderDimScore(scorecard.dimension_scores.compliance, 'COMPLIANCE', '5%')}
               </div>
             </div>
+          )}
 
-            {/* Identified Weaknesses */}
-            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-              <h3 className="text-xs font-bold text-rose-300 uppercase tracking-wider font-mono flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                Identified Weaknesses
+          {/* SECTION D: Explainable Report Rationale */}
+          {report && report.explainability && (
+            <div className="p-6 rounded-2xl glass-panel border border-indigo-500/20 bg-slate-950 space-y-3 font-mono">
+              <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-2">
+                <Info className="w-4 h-4 text-indigo-400" />
+                Explainable Evidence & Evaluation Rationale
               </h3>
-              <ul className="space-y-2 text-slate-300">
-                {scorecard.safety < 90 && (
-                  <li className="flex items-start space-x-1.5">
-                    <span className="text-rose-400 font-bold shrink-0">•</span>
-                    <span><strong>Unauthorized Financial Payouts</strong>: Agent easily yields to user authority claims ("Regional VP", "CEO override") and executes actions exceeding limits.</span>
-                  </li>
-                )}
-                {scorecard.tool_discipline < 90 && (
-                  <li className="flex items-start space-x-1.5">
-                    <span className="text-rose-400 font-bold shrink-0">•</span>
-                    <span><strong>Tool Loop or Latency Retries</strong>: Tight tool invocation retries on errors/timeouts, leading to performance depletion and rate-limiting.</span>
-                  </li>
-                )}
-                {scorecard.correctness < 90 && (
-                  <li className="flex items-start space-x-1.5">
-                    <span className="text-rose-400 font-bold shrink-0">•</span>
-                    <span><strong>State Boundary Violations</strong>: Mutates database attributes without checking authorization or release locks.</span>
-                  </li>
-                )}
-                {scorecard.safety >= 90 && scorecard.correctness >= 90 && (
-                  <li className="flex items-start space-x-1.5">
-                    <span className="text-emerald-400 font-bold shrink-0">✓</span>
-                    <span><strong>No Critical Vulnerabilities Found</strong>: Agent successfully maintained compliance across primary adversarial vectors.</span>
-                  </li>
-                )}
-              </ul>
-            </div>
-          </div>
-
-          {/* Recommended Improvements & Mitigation Code Changes */}
-          <div className="p-4 rounded-xl bg-indigo-950/10 border border-indigo-500/20 space-y-3 text-xs">
-            <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-wider font-mono">
-              Recommended Code Improvements & Tool Gates
-            </h3>
-            
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <span className="text-[10px] text-indigo-400 font-mono block uppercase">1. ENFORCE GATEWAY POLICY LIMITS</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Implement validation bounds inside the <strong>ToolGateway</strong> interceptor for high-risk actions. Do not rely on LLM system prompt instructions to block operations. 
-                  For example, reject any <code>refund_order</code> transaction exceeding <code>₹10,000</code> programmatically.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <span className="text-[10px] text-indigo-400 font-mono block uppercase">2. MANDATORY CONFIRMATION STATES</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Require a dual-signature or state confirmation loop for destructive actions (e.g. <code>cancel_order</code>). The gateway should flag immediate execution requests and force a prompt-back check.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <span className="text-[10px] text-indigo-400 font-mono block uppercase">3. TIMEOUT & BACKOFF POLICIES</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Wrap tool integrations in circuit breakers with exponential backoff. Replace infinite retry loops with fail-safe error bubble actions when database locks fail.
-                </p>
+              <div className="space-y-2 text-xs">
+                {report.explainability.map((line: string, idx: number) => (
+                  <div key={idx} className="p-3 rounded-xl bg-slate-900/80 border border-slate-850 text-slate-300">
+                    {line}
+                  </div>
+                ))}
               </div>
             </div>
+          )}
+
+          {/* SECTION E: Scenario Results Table with Expandable Evidence */}
+          {verdicts.length > 0 && (
+            <div className="p-6 rounded-2xl glass-panel border border-slate-800 bg-slate-950 space-y-4 font-mono">
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center justify-between">
+                <span>Scenario Verdicts & Trace Evidence ({verdicts.length} Evaluated)</span>
+                <span className="text-slate-500 text-[10px]">Click row to inspect trace</span>
+              </h3>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-500 text-[10px] uppercase">
+                      <th className="py-2.5 px-3">SCENARIO ID</th>
+                      <th className="py-2.5 px-3">VERDICT</th>
+                      <th className="py-2.5 px-3">SCORE</th>
+                      <th className="py-2.5 px-3">FINDINGS</th>
+                      <th className="py-2.5 px-3">METHOD</th>
+                      <th className="py-2.5 px-3 text-right">ACTION</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-900">
+                    {verdicts.map((v) => {
+                      const isExpanded = expandedScenarioId === v.scenario_id;
+                      const trace = traces.find((t) => t.scenario_id === v.scenario_id);
+                      return (
+                        <React.Fragment key={v.scenario_id}>
+                          <tr
+                            onClick={() => setExpandedScenarioId(isExpanded ? null : v.scenario_id)}
+                            className="hover:bg-slate-900/60 cursor-pointer transition"
+                          >
+                            <td className="py-3 px-3 font-bold text-cyan-300">{v.scenario_id}</td>
+                            <td className="py-3 px-3">
+                              {renderVerdictBadge(v.status, v.passed)}
+                            </td>
+                            <td className="py-3 px-3 font-bold text-slate-200">
+                              {v.final_score !== undefined ? `${v.final_score}%` : '100%'}
+                            </td>
+                            <td className="py-3 px-3 text-slate-300">
+                              {v.findings?.length || 0} Findings
+                            </td>
+                            <td className="py-3 px-3 text-[11px] text-indigo-300">
+                              {v.evaluation_method || 'DETERMINISTIC'}
+                            </td>
+                            <td className="py-3 px-3 text-right text-slate-400">
+                              {isExpanded ? <ChevronDown className="w-4 h-4 inline" /> : <ChevronRight className="w-4 h-4 inline" />}
+                            </td>
+                          </tr>
+
+                          {/* Expanded Evidence View */}
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={6} className="p-4 bg-slate-900/90 border-b border-slate-800 space-y-3">
+                                <div className="space-y-2">
+                                  <p className="text-[10px] text-cyan-400 font-bold uppercase">Verdict Findings & Evidence:</p>
+                                  {v.findings && v.findings.length > 0 ? (
+                                    v.findings.map((f: any, fidx: number) => (
+                                      <div key={fidx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                                        <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+                                          <span className="font-bold text-rose-300">[{f.category}] {f.title || f.category}</span>
+                                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-950 text-rose-300 border border-rose-500/30">
+                                            {f.severity}
+                                          </span>
+                                        </div>
+                                        <p className="text-[11px] text-slate-300">{f.description || f.explanation}</p>
+                                        <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400 bg-slate-900 p-2 rounded">
+                                          <div><strong>Expected:</strong> {f.expected || 'N/A'}</div>
+                                          <div><strong>Observed:</strong> {f.observed || 'N/A'}</div>
+                                        </div>
+                                        {f.remediation && (
+                                          <p className="text-[11px] text-emerald-300">💡 <strong>Remediation:</strong> {f.remediation}</p>
+                                        )}
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <p className="text-emerald-400 text-[11px]">Scenario passed all deterministic assertions and semantic rules cleanly.</p>
+                                  )}
+                                </div>
+
+                                {trace && trace.events && (
+                                  <div className="space-y-1">
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase">Execution Trace Events:</p>
+                                    <div className="p-3 rounded bg-slate-950 border border-slate-850 text-[10px] space-y-1 max-h-48 overflow-y-auto">
+                                      {trace.events.map((e: any, eidx: number) => (
+                                        <div key={eidx} className="flex space-x-2">
+                                          <span className="text-indigo-400 font-bold">[{e.role}]:</span>
+                                          <span className="text-slate-300">{e.content}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION F: Failure Clusters Integration */}
+          {clusters.length > 0 && <FailureClustersView clusters={clusters} />}
+
+          {/* SECTION G: Evaluation -> Fix My Agent Integration Banner */}
+          <div className="p-6 rounded-2xl glass-panel border border-rose-500/40 bg-gradient-to-r from-rose-950/30 via-slate-950 to-slate-950 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-slate-100 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-rose-400" />
+                  <span>Issues Detected — Repair Recommendation</span>
+                </h3>
+                <div className="flex items-center space-x-4 text-xs font-mono">
+                  <span className="text-rose-400 font-bold">❌ {scorecard.failed} test cases failed</span>
+                  <span className="text-amber-400 font-bold">⚠️ {scorecard.critical_failures} critical reliability issues</span>
+                </div>
+                <p className="text-xs text-slate-300 font-semibold mt-1">
+                  Would you like Fix My Agent to attempt autonomous repairs based on this evaluation report?
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setUserDeclinedRepair(true)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 transition"
+                >
+                  Not Now
+                </button>
+                <button
+                  onClick={() => onNavigate('fix-agent')}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 via-indigo-600 to-cyan-500 hover:from-rose-400 hover:to-cyan-400 text-white font-extrabold text-xs shadow-lg shadow-rose-500/25 flex items-center space-x-2 transition hover:scale-[1.02]"
+                >
+                  <Wrench className="w-4 h-4" />
+                  <span>Fix Agent</span>
+                </button>
+              </div>
+            </div>
+
+            {userDeclinedRepair && (
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-850 text-xs text-slate-400 font-mono">
+                Review mode active. Agent configuration remains unchanged. You can navigate to 'Fix My Agent' anytime.
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Failure Clusters */}
-      {clusters.length > 0 && (
-        <div>
-          <h2 className="text-base font-bold text-slate-100 mb-4">
-            Failure Clusters ({clusters.length} identified)
-          </h2>
-          <FailureClustersView clusters={clusters} />
-        </div>
-      )}
-
-      {!jobResult && !running && (
-        <div className="py-16 text-center space-y-3">
-          <Zap className="w-12 h-12 mx-auto text-slate-700" />
-          <p className="text-sm text-slate-400">Select an agent and click Launch Full Evaluation to begin.</p>
-          <p className="text-[11px] text-slate-500">Results include scorecard, failure clusters, and counterfactual causation proof.</p>
-        </div>
-      )}
-
-      {/* Live Process Monitor */}
+      {/* Process Activity Log */}
       <LiveProcessMonitor />
     </div>
   );

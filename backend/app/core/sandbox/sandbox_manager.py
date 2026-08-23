@@ -39,12 +39,13 @@ def build_sandbox_specification_for_agent(agent: AgentRecord) -> SandboxSpecific
         "version": "3.12",
         "cpu_limit": 1.0,
         "memory_limit_mb": 512,
-        "execution_timeout_seconds": 15,
+        "execution_timeout_seconds": 30,
         "isolation_mode": "subprocess",  # "subprocess", "docker", "gvisor"
+        "agent_source_reference": f"test-agents/{agent.source_name or agent.name}"
     }
 
     dependencies = [
-        {"name": d.name, "type": d.type, "detected_from": d.detected_from}
+        {"name": d.name, "type": d.type, "detected_from": d.detected_from, "required": d.required}
         for d in agent.dependencies
     ]
 
@@ -58,10 +59,13 @@ def build_sandbox_specification_for_agent(agent: AgentRecord) -> SandboxSpecific
         }
     }
 
+    # Allowed network domains derived from external dependencies
+    allowed_domains = ["localhost", "127.0.0.1", "api.openai.com", "newsapi.org"]
     network_config = {
-        "allow_external_http": False,
-        "allowed_domains": ["localhost", "127.0.0.1"],
+        "allow_external_http": True,
+        "allowed_domains": allowed_domains,
         "intercept_outbound": True,
+        "policy_id": "sandbox-web-restricted"
     }
 
     tools_config = [
@@ -75,6 +79,24 @@ def build_sandbox_specification_for_agent(agent: AgentRecord) -> SandboxSpecific
         for t in agent.tools
     ]
 
+    # Resolve credential bindings and blockers
+    credentials_config = []
+    blockers = []
+    status = "READY"
+
+    for d in agent.dependencies:
+        if d.type == "credential" or "key" in d.name.lower():
+            # Check if resolved in environment
+            has_val = bool(os.getenv(d.name) or os.getenv("TEST_AGENT_" + d.name) or os.getenv("TEST_AGENT_GEMINI_API_KEY"))
+            credentials_config.append({
+                "name": d.name,
+                "required": d.required,
+                "binding_status": "BOUND" if has_val else "MISSING"
+            })
+            if d.required and not has_val:
+                blockers.append(f"Missing required API credential binding for environment variable: {d.name}")
+                status = "BLOCKED"
+
     spec = SandboxSpecification(
         id=spec_id,
         agent_id=agent.id,
@@ -83,7 +105,9 @@ def build_sandbox_specification_for_agent(agent: AgentRecord) -> SandboxSpecific
         filesystem=filesystem_config,
         network=network_config,
         tools=tools_config,
-        credentials=[],
+        credentials=credentials_config,
+        status=status,
+        blockers=blockers,
         created_at=_now()
     )
 

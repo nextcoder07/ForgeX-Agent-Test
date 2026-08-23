@@ -123,18 +123,22 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onNavigate, onExec
     if (!executionJob || executionJob.status !== 'completed') return;
     setEvaluating(true);
     try {
-      const evalResult = await evaluateExecutionJob(executionJob.id);
+      // POST /api/evaluations/evaluate-execution with execution_job_id
+      const evalJob = await evaluateExecutionJob(executionJob.id);
+      // Pass full evalJob to App.tsx which sets activeEvaluationJobId then navigates
       if (onExecutionEvaluated) {
-        onExecutionEvaluated(evalResult);
+        onExecutionEvaluated(evalJob);
       }
-      // Transition to Evaluations scorecard page
-      onNavigate('evaluations');
+      // App.tsx now handles navigation to 'evaluations' with the correct job ID
     } catch (e) {
-      console.error('Failed to trigger evaluation:', e);
+      console.error('[SEND_TO_EVAL] Failed to trigger evaluation:', e);
+      // Don't navigate if evaluation creation failed
     } finally {
       setEvaluating(false);
     }
   };
+
+
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
   const progressPct = executionJob && executionJob.total_scenarios > 0
@@ -346,10 +350,12 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onNavigate, onExec
                   <button
                     onClick={handleSendToEvaluation}
                     disabled={evaluating}
-                    className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-white font-extrabold text-[11px] shadow-lg shadow-emerald-500/25 flex items-center space-x-1.5 transition"
+                    className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 disabled:from-slate-700 disabled:to-slate-700 text-white font-extrabold text-[11px] shadow-lg shadow-emerald-500/25 flex items-center space-x-1.5 transition"
                   >
-                    <span>{evaluating ? 'Evaluating...' : 'Send to Evaluation Engine'}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <span>
+                      {evaluating ? '[ Creating Evaluation Job... ]' : '[ Send to Evaluation Engine ]'}
+                    </span>
+                    {!evaluating && <ArrowRight className="w-3.5 h-3.5" />}
                   </button>
                 </div>
               )}
@@ -360,6 +366,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onNavigate, onExec
 
       {/* Process activity log */}
       <LiveProcessMonitor />
+
     </div>
   );
 };

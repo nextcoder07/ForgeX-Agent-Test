@@ -508,3 +508,41 @@ CREATE TABLE IF NOT EXISTS public.agent_behavior_profiles (
 
 CREATE INDEX IF NOT EXISTS idx_agent_behavior_profiles_agent_id ON public.agent_behavior_profiles(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_behavior_profiles_version ON public.agent_behavior_profiles(agent_version_id);
+
+-- 25. pipeline_runs
+CREATE TABLE IF NOT EXISTS public.pipeline_runs (
+    id          TEXT PRIMARY KEY,
+    agent_id    TEXT,
+    agent_name  TEXT,
+    status      TEXT NOT NULL DEFAULT 'running',
+    stages      JSONB NOT NULL DEFAULT '[]'::jsonb,
+    events      JSONB NOT NULL DEFAULT '[]'::jsonb,
+    started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_agent_id ON public.pipeline_runs(agent_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status ON public.pipeline_runs(status);
+
+-- 26. sandbox_specifications
+CREATE TABLE IF NOT EXISTS public.sandbox_specifications (
+    id                      TEXT PRIMARY KEY,
+    agent_id                TEXT REFERENCES public.agents(id) ON DELETE CASCADE,
+    agent_version_id        TEXT,
+    language                TEXT NOT NULL,
+    base_image              TEXT NOT NULL,
+    entrypoint              TEXT NOT NULL,
+    timeout_seconds         INTEGER NOT NULL DEFAULT 60,
+    network_policy          TEXT NOT NULL DEFAULT 'isolated',
+    allowed_hosts           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    mocked_services         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    required_env_vars       JSONB NOT NULL DEFAULT '[]'::jsonb,
+    resource_limits         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    filesystem_mounts       JSONB NOT NULL DEFAULT '[]'::jsonb,
+    tool_gateway_policies   JSONB NOT NULL DEFAULT '[]'::jsonb,
+    pre_execution_commands  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sandbox_specifications_agent_id ON public.sandbox_specifications(agent_id);

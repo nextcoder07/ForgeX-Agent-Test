@@ -20,10 +20,13 @@ from app.models.agent import (
 from app.models.agent_behavior import (
     AgentBehaviorProfile,
     WorkflowGraph,
+    WorkflowNode,
     DataTransformation,
     CodeInvariant,
     FailureSurface,
     DeclaredVsImplementedConflict,
+    InterfaceContract,
+    OutputContract,
 )
 from app.models.intake import (
     AgentAnalysisResponse,
@@ -127,18 +130,92 @@ class ProfileMerger:
         )
 
         # 7. Workflow Graph:
-        # Deterministic AST workflow nodes take precedence
-        nodes_count = fw_info.get("workflow_nodes_count", 0)
-        wf_graph = WorkflowGraph(
-            entrypoint=runtime_manifest.get("entrypoint", "agent.py"),
-            nodes=[],
-            edges=[]
+        # If framework workflow graph exists, use it. Otherwise construct generic functional flow.
+        entrypoint_path = runtime_manifest.get("entrypoint", "agent.py")
+        fw_graph_dict = fw_info.get("workflow_graph")
+        if fw_graph_dict and isinstance(fw_graph_dict, dict) and fw_graph_dict.get("nodes"):
+            wf_graph = WorkflowGraph(**fw_graph_dict)
+        else:
+            # Generic functional control-flow graph from AST functions
+            ast_functions = ast_info.get("functions", [])
+            wf_nodes: List[WorkflowNode] = []
+            wf_edges: List[Dict[str, str]] = []
+            prev_node_id = None
+
+            for fn in ast_functions:
+                fn_name = fn.get("name", "")
+                if fn_name.startswith("_"):
+                    continue
+                node_type = "entrypoint" if fn_name in ["main", "run", "cli"] else "node"
+                ext_deps = []
+                for call in fn.get("calls_made", []):
+                    if any(kw in call.lower() for kw in ["openai", "llm", "chat"]):
+                        ext_deps.append("OpenAI")
+                    elif any(kw in call.lower() for kw in ["news", "requests", "get", "fetch"]):
+                        ext_deps.append("NewsAPI")
+                
+                wf_node = WorkflowNode(
+                    id=fn_name,
+                    name=fn_name,
+                    implementation=fn_name,
+                    node_type=node_type,
+                    external_dependencies=list(dict.fromkeys(ext_deps))
+                )
+                wf_nodes.append(wf_node)
+                if prev_node_id:
+                    wf_edges.append({"source": prev_node_id, "target": fn_name})
+                prev_node_id = fn_name
+
+            wf_graph = WorkflowGraph(
+                entrypoint=entrypoint_path,
+                nodes=wf_nodes,
+                edges=wf_edges
+            )
+
+        # 8. Detected Secrets & Dependency Requirements
+        detected_secrets = deterministic_evidence.get("credentials", [])
+        dep_reqs: List[Dict[str, Any]] = []
+        for d in deps:
+            dep_reqs.append({
+                "name": d.name,
+                "type": d.type,
+                "required": d.required,
+                "detected_from": d.detected_from
+            })
+        for s in detected_secrets:
+            s_name = s.name if hasattr(s, "name") else s.get("name", "")
+            s_req = s.required if hasattr(s, "required") else s.get("required", True)
+            if not any(dr["name"] == s_name for dr in dep_reqs):
+                dep_reqs.append({
+                    "name": s_name,
+                    "type": "credential",
+                    "required": s_req,
+                    "detected_from": "environment_reference"
+                })
+
+        # 9. Interface Contract & Output Contract
+        raw_inputs = behavioral_raw.get("inputs", [])
+        interface_details = behavioral_raw.get("interface_details", {})
+        is_cli = interface_details.get("interface_type") == "CLI" or (entrypoint_path and entrypoint_path.endswith(".py"))
+
+        interface_contract = InterfaceContract(
+            interface_type="CLI" if is_cli else "UNKNOWN",
+            entrypoint=entrypoint_path,
+            invocation_pattern={
+                "command": f"python {entrypoint_path}" + (" " + " ".join(inp["name"] for inp in raw_inputs) if raw_inputs else ""),
+                "arguments": [inp["name"] for inp in raw_inputs]
+            },
+            interactive=False,
+            stdin_supported=False,
+            env_vars_required=[s.name if hasattr(s, "name") else s.get("name", "") for s in detected_secrets]
         )
 
-        # 8. Detected Secrets from deterministic evidence
-        detected_secrets = deterministic_evidence.get("credentials", [])
+        output_contract = OutputContract(
+            stdout_format="TEXT",
+            exit_codes={0: "SUCCESS"}
+        )
 
-        # 9. Build AgentBehaviorProfile
+        # 10. Build AgentBehaviorProfile
         behavior_profile = ProfileBuilder.build_behavior_profile(
             agent_id=agent_version_id,
             agent_name=declared_name,
@@ -150,10 +227,18 @@ class ProfileMerger:
             transformations=transformations,
             invariants=invariants,
             failure_surfaces=failure_surfaces,
+            state_model=behavioral_raw.get("state_model", {}),
+            inputs=raw_inputs,
+            outputs=behavioral_raw.get("outputs", []),
+            security_surfaces=behavioral_raw.get("security_surfaces", []),
+            conflicts=behavioral_raw.get("conflicts", []),
+            interface_contract=interface_contract,
+            output_contract=output_contract,
+            dependency_requirements=dep_reqs,
             agent_version_id=agent_version_id
         )
 
-        # 10. Assemble NormalizedAgentSpec
+        # 11. Assemble NormalizedAgentSpec
         derived_exec_status = "EXECUTION_READY" if behavior_profile.readiness.execution_ready else "EXECUTION_BLOCKED"
 
         norm_spec = NormalizedAgentSpec(
@@ -165,7 +250,7 @@ class ProfileMerger:
                 "entrypoint": runtime_manifest.get("entrypoint") or "unknown",
                 "category": runtime_manifest.get("agent_category") or "general"
             },
-            agent_description=f"Agent '{declared_name}' ({domain}) with {nodes_count} workflow nodes, {len(merged_caps)} capabilities, and {len(invariants)} invariants.",
+            agent_description=f"Agent '{declared_name}' ({domain}) with {len(wf_graph.nodes)} workflow nodes, {len(merged_caps)} capabilities, and {len(invariants)} invariants.",
             behavior_profile=behavior_profile,
             goals=constitution.goals,
             instructions=semantic_response.instructions,

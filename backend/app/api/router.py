@@ -20,6 +20,7 @@ from app.api.dependencies import router as dependencies_router
 from app.api.gemini import router as gemini_router
 from app.api.execution import router as execution_router
 from app.api.llm_health import router as llm_health_router
+from app.api.repair import router as repair_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(agents_router)
@@ -37,3 +38,5 @@ api_router.include_router(dependencies_router)
 api_router.include_router(gemini_router)
 api_router.include_router(execution_router)
 api_router.include_router(llm_health_router)
+api_router.include_router(repair_router)
+

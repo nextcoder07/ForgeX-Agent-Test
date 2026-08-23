@@ -33,7 +33,7 @@ async def critique_scenarios(
             continue
 
         try:
-            critic_res = await llm.critique(sc.dict(), agent.dict())
+            critic_res = await llm.critique(sc.model_dump(), agent.model_dump())
             passed = critic_res.get("passed", True)
             notes = critic_res.get("notes", "Scenario validated as relevant and executable.")
 

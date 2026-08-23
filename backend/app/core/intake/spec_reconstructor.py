@@ -4,6 +4,7 @@ Normalized Agent Specification Reconstructor and Universal Ingestion Pipeline.
 
 from __future__ import annotations
 
+import json
 import hashlib
 import datetime as dt
 from typing import Any, Dict, List
@@ -24,10 +25,40 @@ from app.core.intake.service_detector import ServiceDetector
 from app.core.intake.behavior_extractor import BehaviorExtractor
 from app.core.intake.profile_builder import ProfileBuilder
 from app.core.llm.base import LLMProvider
+from app.services.activity_log import activity_log
 import ast
 import logging
+from enum import Enum
+import uuid
+from pathlib import Path
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+def to_json_safe(val: Any) -> Any:
+    """Recursively converts any object (Pydantic models, dataclasses, Enums, UUIDs, datetimes, sets) into standard JSON-serializable primitives."""
+    if val is None:
+        return None
+    if isinstance(val, (str, int, float, bool)):
+        return val
+    if isinstance(val, BaseModel):
+        if hasattr(val, "model_dump"):
+            return to_json_safe(val.model_dump(mode="json"))
+        return to_json_safe(val.dict())
+    if isinstance(val, Enum):
+        return val.value
+    if isinstance(val, (dt.datetime, dt.date)):
+        return val.isoformat()
+    if isinstance(val, (uuid.UUID, Path)):
+        return str(val)
+    if isinstance(val, dict):
+        return {str(k): to_json_safe(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple, set)):
+        return [to_json_safe(item) for item in val]
+    if hasattr(val, "__dict__"):
+        return to_json_safe(vars(val))
+    return str(val)
 
 
 def _now() -> str:
@@ -188,14 +219,15 @@ async def process_agent_intake(
 
     for path, content in analysis_files.items():
         total_bytes += len(content.encode("utf-8"))
-        if path.endswith((".py", ".ts", ".js", ".json", ".yaml", ".yml")):
+        lower_p = path.lower()
+        if lower_p.endswith((".py", ".ts", ".js", ".json", ".yaml", ".yml", ".toml", ".sh", ".sql")):
             all_code_list.append(f"# --- {path} ---\n{content}\n")
-            if path.endswith(".py"):
+            if lower_p.endswith(".py"):
                 try:
                     ast_trees[path] = ast.parse(content)
                 except Exception:
                     pass
-        elif path.endswith((".md", ".txt", "README", "metadata.yaml")):
+        else:
             all_docs_list.append(f"# --- {path} ---\n{content}\n")
 
     all_code = "\n".join(all_code_list)
@@ -204,12 +236,15 @@ async def process_agent_intake(
     # 1. AST Analysis for External Tools & Dependencies
     extracted_tools: List[ToolDefinition] = []
     extracted_deps: List[DependencyDefinition] = []
+    ast_info = {"docstrings": []}
 
     for path, content in analysis_files.items():
         if path.endswith(".py"):
             res = analyze_python_source(content, filename=path)
             extracted_tools.extend(res.get("tools", []))
             extracted_deps.extend(res.get("dependencies", []))
+            if res.get("docstring"):
+                ast_info["docstrings"].append(res["docstring"])
         elif path.endswith((".ts", ".js")):
             res = analyze_generic_source(content, filename=path)
             extracted_tools.extend(res.get("tools", []))
@@ -288,8 +323,16 @@ async def process_agent_intake(
             "transformations": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in behavioral_facts.get("transformations", [])],
             "invariants": [inv.model_dump() if hasattr(inv, "model_dump") else inv.dict() for inv in behavioral_facts.get("invariants", [])],
             "failure_surfaces": [f.model_dump() if hasattr(f, "model_dump") else f.dict() for f in behavioral_facts.get("failure_surfaces", [])],
+            "inputs": behavioral_facts.get("inputs", []),
+            "outputs": behavioral_facts.get("outputs", []),
+            "security_surfaces": behavioral_facts.get("security_surfaces", []),
+            "conflicts": [c.model_dump() if hasattr(c, "model_dump") else c for c in behavioral_facts.get("conflicts", [])],
+            "interface_details": behavioral_facts.get("interface_details", {}),
+            "state_model": behavioral_facts.get("state_model", {})
         }
     }
+
+    safe_deterministic_evidence = to_json_safe(deterministic_evidence)
 
     evidence_packet = {
         "analysis_context": {
@@ -317,15 +360,32 @@ async def process_agent_intake(
             ]
         },
         "source_files": typed_source_files,
-        "deterministic_evidence": deterministic_evidence,
+        "deterministic_evidence": safe_deterministic_evidence,
         "user_instructions": payload.pasted_prompt or None
     }
+
+    safe_evidence_packet = to_json_safe(evidence_packet)
+    serialized_bytes = len(json.dumps(safe_evidence_packet))
+
+    activity_log.emit(
+        category="INTAKE",
+        action="EVIDENCE_PACKET_READY",
+        detail=f"Evidence packet normalized: {len(typed_source_files)} files, {len(dedup_tools)} tools, {len(extracted_deps)} deps, {len(detected_secrets)} credentials ({serialized_bytes} bytes).",
+        request_summary=f"Run: run-{hasher.hexdigest()[:8]} | Size: {serialized_bytes}b",
+        status="success"
+    )
 
     t2_start = time.time()
     # 4. LLM Semantic Understanding via Structured Evidence Packet & Pydantic Validation
     try:
+        activity_log.emit(
+            category="INTAKE",
+            action="GEMINI_SEMANTIC_START",
+            detail="Calling Gemini Semantic Analyzer with normalized evidence packet...",
+            status="success"
+        )
         if hasattr(llm, "analyze_evidence_packet"):
-            semantic_raw = await llm.analyze_evidence_packet(evidence_packet)
+            semantic_raw = await llm.analyze_evidence_packet(safe_evidence_packet)
         else:
             semantic_raw = await llm.analyze(all_code, all_docs)
         
@@ -333,17 +393,70 @@ async def process_agent_intake(
         from app.models.intake import AgentAnalysisResponse
         validated_response = AgentAnalysisResponse.model_validate(semantic_raw)
         semantic_status = "AI_ANALYSIS_COMPLETED"
+        analysis_status = "COMPLETE"
+        activity_log.emit(
+            category="INTAKE",
+            action="GEMINI_SEMANTIC_SUCCESS",
+            detail=f"Gemini semantic analysis completed for {validated_response.name}.",
+            status="success"
+        )
     except Exception as e:
         logger.warning(f"LLM semantic analysis schema error / failure: {e}")
         from app.models.intake import AgentAnalysisResponse
+        
+        # Try to parse metadata.yaml / metadata.json / metadata.yml if present
+        manifest_facts = {}
+        for fname, content in analysis_files.items():
+            if "metadata" in fname.lower() and (fname.endswith(".yaml") or fname.endswith(".yml")):
+                try:
+                    import yaml
+                    manifest_facts = yaml.safe_load(content) or {}
+                except Exception:
+                    pass
+            elif "metadata" in fname.lower() and fname.endswith(".json"):
+                try:
+                    manifest_facts = json.loads(content) or {}
+                except Exception:
+                    pass
+
+        # Build robust deterministic fallback facts from metadata, docstrings, and invariants
+        fallback_name = manifest_facts.get("title") or manifest_facts.get("name") or payload.agent_name_hint or "Discovered Agent"
+        fallback_domain = manifest_facts.get("industry") or manifest_facts.get("domain") or "General"
+        fallback_goals = []
+        if manifest_facts.get("description"):
+            fallback_goals.append(str(manifest_facts["description"]))
+        if ast_info.get("docstrings"):
+            for d in ast_info["docstrings"][:2]:
+                first_line = d.strip().split("\n")[0].strip()
+                if len(first_line) > 10 and not any(first_line in g for g in fallback_goals):
+                    fallback_goals.append(first_line)
+        if not fallback_goals:
+            fallback_goals = [f"Execute {fallback_domain} workflow and process inputs."]
+
+        fallback_always = [
+            inv.statement if hasattr(inv, "statement") else inv.get("statement", "")
+            for inv in behavioral_facts.get("invariants", [])
+        ][:5]
+
         validated_response = AgentAnalysisResponse(
-            name=payload.agent_name_hint or "Discovered Agent",
-            domain="General AI Agent",
-            archetypes=["UTILITY", "LLM_POWERED"] if agent_category.value == "llm_powered" else ["UTILITY"],
-            goals=[],
-            instructions=[]
+            name=fallback_name,
+            domain=fallback_domain,
+            archetypes=["CLI_PROCESSOR", "LLM_POWERED"] if "cli" in fallback_name.lower() or "news" in fallback_name.lower() else (["UTILITY", "LLM_POWERED"] if agent_category.value == "llm_powered" else ["UTILITY"]),
+            goals=fallback_goals,
+            instructions=[d for d in ast_info.get("docstrings", [])[:2]],
+            always_rules=fallback_always,
+            never_rules=[],
+            escalation_rules=[],
+            data_policies=[f"Enforce observed code invariants: {', '.join(fallback_always[:2])}"] if fallback_always else []
         )
         semantic_status = "AI_ANALYSIS_SCHEMA_ERROR" if "validation" in str(e).lower() else "AI_ANALYSIS_FAILED"
+        analysis_status = "PARTIAL"
+        activity_log.emit(
+            category="INTAKE",
+            action="GEMINI_SEMANTIC_FAILED",
+            detail=f"Gemini semantic analysis failed ({semantic_status}): {e}. Preserving deterministic AST facts.",
+            status="warning"
+        )
 
     t2_dur = (time.time() - t2_start) * 1000.0
     if tracker:
@@ -359,7 +472,7 @@ async def process_agent_intake(
     # 5. Profile Merger: Precedence (Observed Deterministic > Declared Documentation > Gemini Inference)
     from app.core.intake.profile_merger import ProfileMerger
     norm_spec, behavior_profile, merged_conflicts = ProfileMerger.merge_profiles(
-        deterministic_evidence=deterministic_evidence,
+        deterministic_evidence=safe_deterministic_evidence,
         semantic_response=validated_response,
         artifact_id=artifact_record.artifact_id,
         agent_version_id=agent_id_temp,
@@ -367,6 +480,8 @@ async def process_agent_intake(
         agent_name_hint=payload.agent_name_hint,
         custom_instructions=payload.pasted_prompt
     )
+    norm_spec.semantic_status = semantic_status
+    norm_spec.analysis_status = analysis_status
     constitution = norm_spec.constitution
 
     t3_dur = (time.time() - t3_start) * 1000.0
@@ -384,6 +499,7 @@ async def process_agent_intake(
     ]
     edges: List[GraphEdge] = []
 
+    # A. Extracted Tool Nodes
     for tool in dedup_tools:
         tid = f"node-tool-{tool.name}"
         nodes.append(
@@ -397,14 +513,45 @@ async def process_agent_intake(
         )
         edges.append(GraphEdge(source="node-agent", target=tid, label="invokes"))
 
-    # Backend target system nodes based on extracted dependencies
+    # B. Workflow Nodes (for CLI / functional flow agents without explicit tool declarations)
+    for wf_node in behavior_profile.workflow_graph.nodes:
+        if not any(n.id == f"node-wf-{wf_node.id}" or n.label == f"{wf_node.id}()" for n in nodes):
+            w_id = f"node-wf-{wf_node.id}"
+            nodes.append(
+                GraphNode(
+                    id=w_id,
+                    label=f"{wf_node.name}()",
+                    type="tool" if wf_node.node_type == "node" else "agent",
+                    risk="low",
+                    details=f"Workflow function: {wf_node.name} (Dependencies: {', '.join(wf_node.external_dependencies) or 'None'})"
+                )
+            )
+            edges.append(GraphEdge(source="node-agent", target=w_id, label="executes"))
+
+    # C. External Service & Backend Nodes
+    for ext in behavior_profile.external_calls:
+        ext_name = ext.get("capability") or ext.get("class_name") or "External API"
+        ext_id = f"node-ext-{ext_name.lower().replace(' ', '_')}"
+        if not any(n.id == ext_id for n in nodes):
+            nodes.append(
+                GraphNode(
+                    id=ext_id,
+                    label=ext_name,
+                    type="backend",
+                    risk="medium",
+                    details=ext.get("evidence") or f"External Service Integration: {ext_name}"
+                )
+            )
+            edges.append(GraphEdge(source="node-agent", target=ext_id, label="calls"))
+
+    # D. Backend target system nodes based on extracted dependencies
     for dep in norm_spec.dependencies:
         dep_node_id = f"node-{dep.id}"
-        nodes.append(GraphNode(id=dep_node_id, label=dep.name, type=dep.type, risk="medium", details=f"External dependency: {dep.type}"))
-        # Link relevant tools
-        for tool in dedup_tools:
-            tid = f"node-tool-{tool.name}"
-            edges.append(GraphEdge(source=tid, target=dep_node_id, label="uses"))
+        if not any(n.id == dep_node_id for n in nodes):
+            nodes.append(GraphNode(id=dep_node_id, label=dep.name, type=dep.type, risk="medium", details=f"External dependency: {dep.type}"))
+            for tool in dedup_tools:
+                tid = f"node-tool-{tool.name}"
+                edges.append(GraphEdge(source=tid, target=dep_node_id, label="uses"))
 
     t4_dur = (time.time() - t4_start) * 1000.0
     if tracker:
@@ -414,11 +561,13 @@ async def process_agent_intake(
         artifact=artifact_record,
         normalized_spec=norm_spec,
         conflicts=conflicts,
-        confidence_score=96.4,
+        confidence_score=96.4 if analysis_status == "COMPLETE" else 75.0,
         ambiguities=[
             "Exact managerial authorization workflow for refunds above ₹10,000 is unstated in source code.",
             "Address update customer verification policy is unstated."
         ],
         graph_nodes=nodes,
-        graph_edges=edges
+        graph_edges=edges,
+        semantic_status=semantic_status,
+        analysis_status=analysis_status
     )

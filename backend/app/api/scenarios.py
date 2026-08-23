@@ -25,7 +25,8 @@ from app.core.scenarios.coverage_engine import compute_coverage_gaps
 import logging
 import uuid
 import datetime as dt
-from app.core.llm.gemini_provider import GeminiProvider, LLMGenerationError, LLMQuotaExhaustedError
+from app.core.llm.gemini_provider import LLMGenerationError, LLMQuotaExhaustedError
+from app.core.llm.providers import get_platform_provider
 
 logger = logging.getLogger(__name__)
 
@@ -67,13 +68,17 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
     run_id = f"gen-run-{uuid.uuid4().hex[:8]}"
-    llm = GeminiProvider()
+    llm = get_platform_provider()
     
     # 1. Deterministic Plan
     plan = build_deterministic_scenario_plan(agent, payload)
     
     # 2. Batch Generation
     generated: List[Scenario] = []
+    generation_method = "ai"
+    ai_status = "success"
+    failure_reason = None
+
     try:
         generated = await generate_scenarios_for_agent(
             agent=agent,
@@ -81,8 +86,18 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
             scenario_plan=plan,
             request=payload
         )
+        # Check if fallback was used inside generate_scenarios_for_agent
+        if any(sc.provenance.get("generated_by") == "deterministic_builder" for sc in generated):
+            generation_method = "deterministic"
+            ai_status = "quota_exhausted"
+            failure_reason = "Gemini API unavailable or quota exhausted. Fell back to deterministic builder."
     except Exception as e:
         logger.warning(f"Batch scenario generation error: {e}")
+        from app.core.scenarios.scenario_generator import generate_scenarios_deterministically
+        generated = generate_scenarios_deterministically(agent, plan)
+        generation_method = "deterministic"
+        ai_status = "failed"
+        failure_reason = f"Gemini error: {e}. Fell back to deterministic builder."
 
     # 3. Deterministic Feasibility Validation
     validated = validate_scenarios_deterministically(generated, agent)
@@ -102,6 +117,9 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
         elif sc.status == "REJECTED":
             rejected_count += 1
 
+    # Status is PARTIAL if fallback/deterministic builder was used, FAILED only if generated is 0
+    run_status = "COMPLETED" if (ready_count > 0 and ai_status == "success") else ("PARTIAL" if ready_count > 0 else "FAILED")
+
     return ScenarioGenerationRun(
         id=run_id,
         agent_id=agent.id,
@@ -112,10 +130,13 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
         ready_count=ready_count,
         rejected_count=rejected_count,
         blocked_count=blocked_count,
-        provider="gemini",
-        model=llm.model_name,
+        provider="gemini" if ai_status == "success" else "deterministic_builder",
+        model=llm.model_name if ai_status == "success" else "rule_based_fallback",
         prompt_version="v2",
-        status="COMPLETED" if ready_count > 0 else ("PARTIAL" if generated else "FAILED"),
+        status=run_status,
+        generation_method=generation_method,
+        ai_status=ai_status,
+        failure_reason=failure_reason,
         scenarios=validated,
         created_at=dt.datetime.utcnow().isoformat() + "Z"
     )
