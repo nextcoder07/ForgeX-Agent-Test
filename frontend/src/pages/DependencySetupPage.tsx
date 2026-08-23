@@ -37,6 +37,7 @@ import {
   getPlatformResources,
   getAgentBindings,
   updateAgentBindings,
+  fetchAgents,
 } from '../api/client';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
@@ -95,10 +96,14 @@ const STATUS_CONFIG = {
 
 interface DependencySetupPageProps {
   onNavigate: (page: PageId) => void;
-  agent: AgentRecord;
+  agent?: AgentRecord;
 }
 
-export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavigate, agent }) => {
+export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavigate, agent: initialAgent }) => {
+  const [agentsList, setAgentsList] = useState<AgentRecord[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(initialAgent?.id || '');
+  const [currentAgent, setCurrentAgent] = useState<AgentRecord | null>(initialAgent || null);
+  
   const [dependencies, setDependencies] = useState<AgentDependency[]>([]);
   const [resources, setResources] = useState<PlatformResource[]>([]);
   const [bindings, setBindings] = useState<DependencyBindingType[]>([]);
@@ -107,17 +112,36 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
   const [userInputs, setUserInputs] = useState<Record<string, string>>({});
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Fetch agents list on mount
   useEffect(() => {
-    loadData();
-  }, [agent.id]);
+    fetchAgents().then(list => {
+      setAgentsList(list);
+      if (!selectedAgentId && list.length > 0) {
+        setSelectedAgentId(list[0].id);
+        setCurrentAgent(list[0]);
+      } else if (selectedAgentId) {
+        const found = list.find(a => a.id === selectedAgentId);
+        if (found) setCurrentAgent(found);
+      }
+    }).catch(console.error);
+  }, []);
 
-  const loadData = async () => {
+  // Reload dependency data whenever selectedAgentId changes
+  useEffect(() => {
+    if (selectedAgentId) {
+      const found = agentsList.find(a => a.id === selectedAgentId);
+      if (found) setCurrentAgent(found);
+      loadData(selectedAgentId);
+    }
+  }, [selectedAgentId]);
+
+  const loadData = async (agentId: string) => {
     setLoading(true);
     try {
       const [deps, res, binds] = await Promise.all([
-        getAgentDependencies(agent.id),
+        getAgentDependencies(agentId),
         getPlatformResources(),
-        getAgentBindings(agent.id),
+        getAgentBindings(agentId),
       ]);
       setDependencies(deps);
       setResources(res);
@@ -163,6 +187,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
   };
 
   const handleSaveBindings = async () => {
+    if (!selectedAgentId) return;
     setSaving(true);
     try {
       // Update bindings that have user input
@@ -177,7 +202,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
         }
         return b;
       });
-      const result = await updateAgentBindings(agent.id, updatedBindings);
+      const result = await updateAgentBindings(selectedAgentId, updatedBindings);
       setBindings(result);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -209,7 +234,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
   const resolvedDeps = bindings.filter(b => b.status === 'ready').length;
   const progressPct = totalDeps > 0 ? Math.round((resolvedDeps / totalDeps) * 100) : 0;
 
-  if (loading) {
+  if (loading && !currentAgent) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center space-y-4">
@@ -228,19 +253,37 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header */}
+      {/* Header & Agent Selector */}
       <div className="space-y-3">
-        <div className="flex items-center space-x-3">
-          <div className="p-2.5 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-violet-500 p-0.5">
-            <div className="w-9 h-9 bg-slate-950 rounded-[10px] flex items-center justify-center">
-              <Shield className="w-5 h-5 text-cyan-400" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-violet-500 p-0.5">
+              <div className="w-9 h-9 bg-slate-950 rounded-[10px] flex items-center justify-center">
+                <Shield className="w-5 h-5 text-cyan-400" />
+              </div>
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold text-slate-100">Agent Dependency Setup</h1>
+              <p className="text-xs text-slate-400 mt-0.5 font-mono">
+                {currentAgent ? `${currentAgent.display_name || currentAgent.name} · ${currentAgent.id}` : 'Select an agent to inspect dependencies'}
+              </p>
             </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-extrabold text-slate-100">Agent Dependency Setup</h1>
-            <p className="text-xs text-slate-400 mt-0.5 font-mono">
-              {agent.display_name || agent.name} · {agent.id}
-            </p>
+
+          {/* Agent Selection Dropdown */}
+          <div className="flex items-center space-x-3">
+            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Select Agent:</label>
+            <select
+              value={selectedAgentId}
+              onChange={(e) => setSelectedAgentId(e.target.value)}
+              className="bg-slate-900 border border-slate-700 text-slate-100 text-xs font-mono rounded-xl px-3 py-2 focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+            >
+              {agentsList.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.display_name || a.name} ({a.id})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

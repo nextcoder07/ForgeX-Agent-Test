@@ -1006,5 +1006,13 @@
     "dependency_type": "package",
     "required": true,
     "detected_from": "07-github-issue-triager/requirements.txt"
+  },
+  "dep-rt-test-rep": {
+    "id": "dep-rt-test-rep",
+    "agent_id": "test-repair-agent-001",
+    "dependency_name": "Python 3.12 Runtime",
+    "dependency_type": "runtime",
+    "required": true,
+    "detected_from": "platform_config"
   }
 }
