@@ -152,13 +152,13 @@ export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
 
         {/* Mobile Full Dropdown Navigation Drawer */}
         {mobileMenuOpen && (
-          <div className="py-4 border-t border-slate-800/80 space-y-2 animate-in slide-in-from-top duration-200">
-            <div className="px-2 py-1 flex items-center justify-between text-xs font-mono text-slate-400 uppercase tracking-wider">
+          <div className="absolute top-full left-0 right-0 py-3 px-4 border-b border-slate-800/90 bg-[#030712]/95 backdrop-blur-2xl shadow-xl shadow-black/50 space-y-1 animate-in slide-in-from-top duration-200">
+            <div className="px-1 py-1 flex items-center justify-between text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">
               <span>Platform Navigation</span>
-              <span className="text-[10px] text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-500/30">13 Modules</span>
+              <span className="text-[9px] text-cyan-400 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30">13 Modules</span>
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 pb-2">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activePage === item.id;
@@ -166,15 +166,15 @@ export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
                   <button
                     key={item.id}
                     onClick={() => handleMobileNav(item.id)}
-                    className={`w-full p-3 rounded-xl text-xs font-semibold flex items-center justify-between transition-all duration-200 ${
+                    className={`w-full p-2 rounded-lg text-[11px] font-semibold flex items-center justify-between transition-all duration-200 ${
                       isActive
-                        ? 'bg-cyan-950/80 text-cyan-300 border border-cyan-500/50 shadow-md shadow-cyan-500/10'
+                        ? 'bg-cyan-950/80 text-cyan-300 border border-cyan-500/50 shadow-sm shadow-cyan-500/10'
                         : 'bg-slate-900/40 text-slate-300 border border-slate-800/60 hover:border-slate-700 hover:bg-slate-900'
                     }`}
                   >
-                    <div className="flex items-center space-x-2.5">
-                      <div className={`p-1.5 rounded-lg ${isActive ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-400'}`}>
-                        <Icon className="w-4 h-4" />
+                    <div className="flex items-center space-x-2">
+                      <div className={`p-1 rounded-md ${isActive ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-400'}`}>
+                        <Icon className="w-3.5 h-3.5" />
                       </div>
                       <span className="text-left">{item.label}</span>
                     </div>
