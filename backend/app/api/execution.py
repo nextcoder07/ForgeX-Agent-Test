@@ -20,6 +20,41 @@ from app.core.dependencies.dependency_resolver import DependencyResolver
 router = APIRouter(prefix="/execution", tags=["Execution"])
 
 
+@router.get("/preflight/{agent_id}")
+async def get_agent_execution_preflight(agent_id: str):
+    """Fetches preflight requirements, credential demands, sandbox status, and available scenarios for an agent."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    all_scenarios = store.list_scenarios()
+    agent_scenarios = [s for s in all_scenarios if s.agent_id == agent_id and getattr(s, 'validation_status', '') != 'FAILED_GENERATION']
+
+    sandbox_specs = store.list_sandbox_specs()
+    sandbox_spec = next((spec for spec in sandbox_specs if spec.agent_id == agent_id), None)
+
+    prompt = DependencyResolver.evaluate_execution_credential_demands(agent=agent)
+
+    return {
+        "agent_id": agent.id,
+        "agent_name": agent.name,
+        "domain": agent.domain,
+        "sandbox_status": sandbox_spec.status if sandbox_spec else "READY",
+        "sandbox_blockers": sandbox_spec.blockers if sandbox_spec else [],
+        "scenarios_count": len(agent_scenarios),
+        "scenarios": [
+            {
+                "id": s.id,
+                "title": s.title,
+                "category": s.category.value if hasattr(s.category, "value") else str(s.category),
+                "purpose": s.purpose
+            } for s in agent_scenarios
+        ],
+        "credential_prompt": prompt.dict(),
+        "ready_for_execution": prompt.all_fulfilled and (not sandbox_spec or sandbox_spec.status != "BLOCKED")
+    }
+
+
 class StartExecutionRequest(BaseModel):
     agent_id: str
     scenario_id: str

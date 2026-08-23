@@ -222,7 +222,8 @@ class SandboxManager:
         trace = run_scenario_in_sandbox(
             agent=agent,
             scenario=scenario,
-            is_counterfactual=False
+            is_counterfactual=False,
+            provided_secrets=instance.env_vars
         )
 
         trace.events.insert(0, TraceEvent(

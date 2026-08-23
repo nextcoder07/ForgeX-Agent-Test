@@ -124,7 +124,7 @@ def run_scenario_in_sandbox(
     use_subprocess = sandbox_spec.runtime.get("isolation_mode") == "subprocess"
     if code_content and use_subprocess and not any(k in code_content for k in ["ToolLoopVulnerableAgent", "PromptInjectionUnsafeAgent"]):
         try:
-            sp_trace = run_scenario_in_subprocess(agent, scenario, code_content, gateway)
+            sp_trace = run_scenario_in_subprocess(agent, scenario, code_content, gateway, provided_secrets=provided_secrets)
             sp_trace.is_counterfactual = is_counterfactual
             sp_trace.counterfactual_of = counterfactual_of
             return sp_trace

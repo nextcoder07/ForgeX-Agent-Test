@@ -1,1 +1,1082 @@
-{"bind-913f61fb": {"id": "bind-913f61fb", "agent_id": "agent-5675ad0a", "dependency_name": "Exa_Search_Ipl Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:03:30.135904"}, "bind-135edd86": {"id": "bind-135edd86", "agent_id": "agent-5675ad0a", "dependency_name": "Tavily_Search_Hn Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:03:30.525168"}, "bind-1db67e58": {"id": "bind-1db67e58", "agent_id": "agent-5675ad0a", "dependency_name": "Run_News_Pipeline Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:03:30.833885"}, "bind-5ffa59b2": {"id": "bind-5ffa59b2", "agent_id": "agent-5675ad0a", "dependency_name": "CUSTOMER_LOOKUP", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:03:31.197754"}, "bind-7b9c6745": {"id": "bind-7b9c6745", "agent_id": "agent-5675ad0a", "dependency_name": "ORDER_LOOKUP", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:03:31.721605"}, "bind-cd930aa9": {"id": "bind-cd930aa9", "agent_id": "agent-5675ad0a", "dependency_name": "REFUND_TRANSACTION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:03:32.122563"}, "bind-23fcbcf6": {"id": "bind-23fcbcf6", "agent_id": "agent-5675ad0a", "dependency_name": "ORDER_CANCELLATION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:03:32.443914"}, "bind-c20eb417": {"id": "bind-c20eb417", "agent_id": "agent-5675ad0a", "dependency_name": "ADDRESS_UPDATE", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:03:32.984900"}, "bind-b59f1d9f": {"id": "bind-b59f1d9f", "agent_id": "agent-5675ad0a", "dependency_name": "EMAIL_NOTIFICATION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:03:33.314036"}, "bind-f41c6d47": {"id": "bind-f41c6d47", "agent_id": "agent-5675ad0a", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:03:33.632898"}, "bind-dfa11d2b": {"id": "bind-dfa11d2b", "agent_id": "agent-c70ce861", "dependency_name": "Exa_Search_Ipl Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:14:06.121823"}, "bind-d9167b18": {"id": "bind-d9167b18", "agent_id": "agent-c70ce861", "dependency_name": "Tavily_Search_Hn Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:14:06.420171"}, "bind-9b6bde09": {"id": "bind-9b6bde09", "agent_id": "agent-c70ce861", "dependency_name": "Run_News_Pipeline Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:14:06.731933"}, "bind-a4e3f900": {"id": "bind-a4e3f900", "agent_id": "agent-c70ce861", "dependency_name": "CUSTOMER_LOOKUP", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:14:07.040832"}, "bind-e30b2d9a": {"id": "bind-e30b2d9a", "agent_id": "agent-c70ce861", "dependency_name": "ORDER_LOOKUP", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:14:07.338410"}, "bind-93b7b183": {"id": "bind-93b7b183", "agent_id": "agent-c70ce861", "dependency_name": "REFUND_TRANSACTION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:14:07.707805"}, "bind-54839022": {"id": "bind-54839022", "agent_id": "agent-c70ce861", "dependency_name": "ORDER_CANCELLATION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:14:08.137273"}, "bind-43570540": {"id": "bind-43570540", "agent_id": "agent-c70ce861", "dependency_name": "ADDRESS_UPDATE", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:14:08.473912"}, "bind-b423568d": {"id": "bind-b423568d", "agent_id": "agent-c70ce861", "dependency_name": "EMAIL_NOTIFICATION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:14:08.781396"}, "bind-46bb9a0d": {"id": "bind-46bb9a0d", "agent_id": "agent-c70ce861", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:14:09.293906"}, "bind-fa378fde": {"id": "bind-fa378fde", "agent_id": "agent-8f7486fb", "dependency_name": "Exa_Search_Ipl Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:31:03.254054"}, "bind-946fd11d": {"id": "bind-946fd11d", "agent_id": "agent-8f7486fb", "dependency_name": "Tavily_Search_Hn Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:31:03.665667"}, "bind-215e3f6b": {"id": "bind-215e3f6b", "agent_id": "agent-8f7486fb", "dependency_name": "Run_News_Pipeline Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:31:04.120551"}, "bind-148aeff3": {"id": "bind-148aeff3", "agent_id": "agent-8f7486fb", "dependency_name": "CUSTOMER_LOOKUP", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:31:04.482626"}, "bind-270812dc": {"id": "bind-270812dc", "agent_id": "agent-8f7486fb", "dependency_name": "ORDER_LOOKUP", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:31:04.944099"}, "bind-b2d8ed35": {"id": "bind-b2d8ed35", "agent_id": "agent-8f7486fb", "dependency_name": "REFUND_TRANSACTION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:31:05.251441"}, "bind-1c7a3db9": {"id": "bind-1c7a3db9", "agent_id": "agent-8f7486fb", "dependency_name": "ORDER_CANCELLATION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:31:05.660305"}, "bind-846ce075": {"id": "bind-846ce075", "agent_id": "agent-8f7486fb", "dependency_name": "ADDRESS_UPDATE", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:31:05.997034"}, "bind-bbfe2eca": {"id": "bind-bbfe2eca", "agent_id": "agent-8f7486fb", "dependency_name": "EMAIL_NOTIFICATION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T06:31:06.297583"}, "bind-ac4d2ed6": {"id": "bind-ac4d2ed6", "agent_id": "agent-8f7486fb", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T06:31:06.837154"}, "bind-16fbcc2b": {"id": "bind-16fbcc2b", "agent_id": "agent-e3314c00", "dependency_name": "Exa_Search_Ai Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T07:58:03.836949"}, "bind-19e61225": {"id": "bind-19e61225", "agent_id": "agent-e3314c00", "dependency_name": "Tavily_Search_Ai_Analysis Subsystem", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T07:58:04.156311"}, "bind-be465bf0": {"id": "bind-be465bf0", "agent_id": "agent-e3314c00", "dependency_name": "Firecrawl_Scrape_Nebius Subsystem", "resolution_type": "block", "status": "unsupported", "user_value": null, "created_at": "2026-08-23T07:58:04.458644"}, "bind-8f5a6bfc": {"id": "bind-8f5a6bfc", "agent_id": "agent-e3314c00", "dependency_name": "CUSTOMER_LOOKUP", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T07:58:04.795673"}, "bind-74ca8f11": {"id": "bind-74ca8f11", "agent_id": "agent-e3314c00", "dependency_name": "ORDER_LOOKUP", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T07:58:05.096575"}, "bind-fbb83528": {"id": "bind-fbb83528", "agent_id": "agent-e3314c00", "dependency_name": "REFUND_TRANSACTION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T07:58:05.434087"}, "bind-481ddd12": {"id": "bind-481ddd12", "agent_id": "agent-e3314c00", "dependency_name": "ORDER_CANCELLATION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T07:58:05.748817"}, "bind-f37f5505": {"id": "bind-f37f5505", "agent_id": "agent-e3314c00", "dependency_name": "ADDRESS_UPDATE", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T07:58:06.064434"}, "bind-b3aee65b": {"id": "bind-b3aee65b", "agent_id": "agent-e3314c00", "dependency_name": "EMAIL_NOTIFICATION", "resolution_type": "user_credential", "status": "user_credential_required", "user_value": null, "created_at": "2026-08-23T07:58:06.353545"}, "bind-286231c2": {"id": "bind-286231c2", "agent_id": "agent-e3314c00", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T07:58:06.656763"}, "bind-e3f993a5": {"id": "bind-e3f993a5", "agent_id": "agent-89132be8", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:02:41.950820"}, "bind-b7d29c8d": {"id": "bind-b7d29c8d", "agent_id": "agent-89132be8", "dependency_name": "langchain==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:02:42.300309"}, "bind-709d9433": {"id": "bind-709d9433", "agent_id": "agent-89132be8", "dependency_name": "langchain-core==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:02:42.812930"}, "bind-7793290e": {"id": "bind-7793290e", "agent_id": "agent-89132be8", "dependency_name": "langchain-openai==0.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:02:43.416398"}, "bind-b6ea1a9a": {"id": "bind-b6ea1a9a", "agent_id": "agent-89132be8", "dependency_name": "requests==2.32.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:02:44.145365"}, "bind-c9a763bb": {"id": "bind-c9a763bb", "agent_id": "agent-89132be8", "dependency_name": "python-dotenv==1.0.1", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:02:44.509228"}, "bind-d05bcd90": {"id": "bind-d05bcd90", "agent_id": "agent-560ec9a7", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:17:10.575221"}, "bind-c987e491": {"id": "bind-c987e491", "agent_id": "agent-560ec9a7", "dependency_name": "crewai==0.80.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:17:11.731329"}, "bind-ffaac4f6": {"id": "bind-ffaac4f6", "agent_id": "agent-560ec9a7", "dependency_name": "langchain-openai==0.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:17:12.247479"}, "bind-a8e4a1db": {"id": "bind-a8e4a1db", "agent_id": "agent-560ec9a7", "dependency_name": "python-dotenv==1.0.1", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:17:14.094231"}, "bind-eb59feaa": {"id": "bind-eb59feaa", "agent_id": "agent-6a1442b4", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:22:41.390486"}, "bind-73e84735": {"id": "bind-73e84735", "agent_id": "agent-6a1442b4", "dependency_name": "langchain==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:22:41.974752"}, "bind-059620d2": {"id": "bind-059620d2", "agent_id": "agent-6a1442b4", "dependency_name": "langchain-core==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:22:42.460518"}, "bind-8675c504": {"id": "bind-8675c504", "agent_id": "agent-6a1442b4", "dependency_name": "langchain-openai==0.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:22:42.974533"}, "bind-8f9e5237": {"id": "bind-8f9e5237", "agent_id": "agent-6a1442b4", "dependency_name": "requests==2.32.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:22:43.388658"}, "bind-82ed75fd": {"id": "bind-82ed75fd", "agent_id": "agent-6a1442b4", "dependency_name": "python-dotenv==1.0.1", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T10:22:43.732057"}, "bind-0a94ddfb": {"id": "bind-0a94ddfb", "agent_id": "agent-e460f547", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:33:20.717321"}, "bind-3198fb93": {"id": "bind-3198fb93", "agent_id": "agent-ded71ac4", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:35:31.194057"}, "bind-96348ba8": {"id": "bind-96348ba8", "agent_id": "agent-ded71ac4", "dependency_name": "langchain==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:35:31.535534"}, "bind-8216531f": {"id": "bind-8216531f", "agent_id": "agent-ded71ac4", "dependency_name": "langchain-core==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:35:31.837743"}, "bind-3e85be44": {"id": "bind-3e85be44", "agent_id": "agent-ded71ac4", "dependency_name": "langchain-openai==0.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:35:32.172798"}, "bind-51a4087e": {"id": "bind-51a4087e", "agent_id": "agent-ded71ac4", "dependency_name": "requests==2.32.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:35:32.489735"}, "bind-e04d1dd7": {"id": "bind-e04d1dd7", "agent_id": "agent-ded71ac4", "dependency_name": "python-dotenv==1.0.1", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:35:32.814490"}, "bind-fbd3553c": {"id": "bind-fbd3553c", "agent_id": "agent-270d0c7c", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:37:17.161700"}, "bind-7024c196": {"id": "bind-7024c196", "agent_id": "agent-270d0c7c", "dependency_name": "langchain==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:37:17.671819"}, "bind-cb7dd955": {"id": "bind-cb7dd955", "agent_id": "agent-270d0c7c", "dependency_name": "langchain-core==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:37:18.123057"}, "bind-199cafe9": {"id": "bind-199cafe9", "agent_id": "agent-270d0c7c", "dependency_name": "langchain-openai==0.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:37:18.593703"}, "bind-b9593470": {"id": "bind-b9593470", "agent_id": "agent-270d0c7c", "dependency_name": "yfinance==0.2.44", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:37:19.106316"}, "bind-6fec7cb7": {"id": "bind-6fec7cb7", "agent_id": "agent-270d0c7c", "dependency_name": "python-dotenv==1.0.1", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:37:19.544208"}, "bind-f2375f19": {"id": "bind-f2375f19", "agent_id": "agent-0c75dce2", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:46:55.614389"}, "bind-0226e4dd": {"id": "bind-0226e4dd", "agent_id": "agent-0c75dce2", "dependency_name": "requests==2.31.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:46:55.939952"}, "bind-0e10adfe": {"id": "bind-0e10adfe", "agent_id": "agent-0c75dce2", "dependency_name": "pydantic==2.5.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:46:56.257584"}, "bind-bf72e8ba": {"id": "bind-bf72e8ba", "agent_id": "agent-0c75dce2", "dependency_name": "sqlalchemy==2.0.25", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:46:56.587648"}, "bind-c18f89e8": {"id": "bind-c18f89e8", "agent_id": "agent-0c75dce2", "dependency_name": "cryptography==42.0.2", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:46:56.899522"}, "bind-95bd400f": {"id": "bind-95bd400f", "agent_id": "agent-0c75dce2", "dependency_name": "pandas==2.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:46:57.209934"}, "bind-71e3683f": {"id": "bind-71e3683f", "agent_id": "agent-c48217da", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:47:51.954218"}, "bind-c2a5300c": {"id": "bind-c2a5300c", "agent_id": "agent-c48217da", "dependency_name": "requests==2.31.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:47:52.260525"}, "bind-3d3b8332": {"id": "bind-3d3b8332", "agent_id": "agent-c48217da", "dependency_name": "pydantic==2.5.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:47:52.670796"}, "bind-9fda58d9": {"id": "bind-9fda58d9", "agent_id": "agent-c48217da", "dependency_name": "sqlalchemy==2.0.25", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:47:52.985153"}, "bind-978632b8": {"id": "bind-978632b8", "agent_id": "agent-c48217da", "dependency_name": "cryptography==42.0.2", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:47:53.310564"}, "bind-faac76f5": {"id": "bind-faac76f5", "agent_id": "agent-c48217da", "dependency_name": "pandas==2.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:47:53.643534"}, "bind-b0667c0c": {"id": "bind-b0667c0c", "agent_id": "agent-56dfadf6", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:49:55.946466"}, "bind-3a54a121": {"id": "bind-3a54a121", "agent_id": "agent-56dfadf6", "dependency_name": "requests==2.31.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:49:56.335779"}, "bind-3b1d0d2a": {"id": "bind-3b1d0d2a", "agent_id": "agent-56dfadf6", "dependency_name": "pydantic==2.5.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:49:56.678574"}, "bind-75a88116": {"id": "bind-75a88116", "agent_id": "agent-56dfadf6", "dependency_name": "sqlalchemy==2.0.25", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:49:56.994605"}, "bind-27aeef41": {"id": "bind-27aeef41", "agent_id": "agent-56dfadf6", "dependency_name": "cryptography==42.0.2", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:49:57.391592"}, "bind-eca44677": {"id": "bind-eca44677", "agent_id": "agent-56dfadf6", "dependency_name": "pandas==2.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T11:49:58.191163"}, "bind-e8e862c4": {"id": "bind-e8e862c4", "agent_id": "agent-1e6f7946", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:09.712235"}, "bind-6aa72863": {"id": "bind-6aa72863", "agent_id": "agent-1e6f7946", "dependency_name": "requests==2.31.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:10.052604"}, "bind-fb2e153b": {"id": "bind-fb2e153b", "agent_id": "agent-1e6f7946", "dependency_name": "pydantic==2.5.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:10.349562"}, "bind-0489de5a": {"id": "bind-0489de5a", "agent_id": "agent-1e6f7946", "dependency_name": "sqlalchemy==2.0.25", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:10.696307"}, "bind-b519f0fa": {"id": "bind-b519f0fa", "agent_id": "agent-1e6f7946", "dependency_name": "cryptography==42.0.2", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:11.068700"}, "bind-07e901e5": {"id": "bind-07e901e5", "agent_id": "agent-1e6f7946", "dependency_name": "pandas==2.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:11.413882"}, "bind-2259e7ab": {"id": "bind-2259e7ab", "agent_id": "agent-1e6f7946", "dependency_name": "langchain==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:11.796835"}, "bind-79cd5326": {"id": "bind-79cd5326", "agent_id": "agent-1e6f7946", "dependency_name": "langchain-openai==0.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:12.133171"}, "bind-58e14df3": {"id": "bind-58e14df3", "agent_id": "agent-1e6f7946", "dependency_name": "langchain-experimental==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:12.425662"}, "bind-15ec17ea": {"id": "bind-15ec17ea", "agent_id": "agent-1e6f7946", "dependency_name": "openpyxl==3.1.5", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:12.761179"}, "bind-70f82e70": {"id": "bind-70f82e70", "agent_id": "agent-1e6f7946", "dependency_name": "python-dotenv==1.0.1", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:45:13.152240"}, "bind-187fbabb": {"id": "bind-187fbabb", "agent_id": "agent-8f455048", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:46:36.541548"}, "bind-6ed7303e": {"id": "bind-6ed7303e", "agent_id": "agent-8f455048", "dependency_name": "langchain==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:46:36.991302"}, "bind-49bfae66": {"id": "bind-49bfae66", "agent_id": "agent-8f455048", "dependency_name": "langchain-core==0.3.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:46:37.345078"}, "bind-836964c4": {"id": "bind-836964c4", "agent_id": "agent-8f455048", "dependency_name": "langchain-openai==0.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:46:37.683126"}, "bind-33ddfd9e": {"id": "bind-33ddfd9e", "agent_id": "agent-8f455048", "dependency_name": "requests==2.32.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:46:38.044434"}, "bind-38dd870a": {"id": "bind-38dd870a", "agent_id": "agent-8f455048", "dependency_name": "python-dotenv==1.0.1", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:46:38.377165"}, "bind-5b32111c": {"id": "bind-5b32111c", "agent_id": "agent-d1c19ceb", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:53:59.947994"}, "bind-7a3d2bf3": {"id": "bind-7a3d2bf3", "agent_id": "agent-d1c19ceb", "dependency_name": "requests==2.31.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:54:00.291852"}, "bind-ddc7a6b7": {"id": "bind-ddc7a6b7", "agent_id": "agent-d1c19ceb", "dependency_name": "pydantic==2.5.3", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:54:00.584067"}, "bind-6cfd881a": {"id": "bind-6cfd881a", "agent_id": "agent-d1c19ceb", "dependency_name": "sqlalchemy==2.0.25", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:54:00.897206"}, "bind-471b6c34": {"id": "bind-471b6c34", "agent_id": "agent-d1c19ceb", "dependency_name": "cryptography==42.0.2", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:54:01.225569"}, "bind-a5960541": {"id": "bind-a5960541", "agent_id": "agent-d1c19ceb", "dependency_name": "pandas==2.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:54:01.563640"}, "bind-dc2f31e4": {"id": "bind-dc2f31e4", "agent_id": "agent-aa973214", "dependency_name": "Python 3.12 Runtime", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:58:55.873192"}, "bind-c282daf3": {"id": "bind-c282daf3", "agent_id": "agent-aa973214", "dependency_name": "crewai==0.80.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:58:56.228634"}, "bind-59247bca": {"id": "bind-59247bca", "agent_id": "agent-aa973214", "dependency_name": "langchain-openai==0.2.0", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:58:56.679313"}, "bind-c0c281eb": {"id": "bind-c0c281eb", "agent_id": "agent-aa973214", "dependency_name": "python-dotenv==1.0.1", "resolution_type": "platform_sandbox", "status": "ready", "user_value": null, "created_at": "2026-08-23T12:58:57.007744"}}
+{
+  "bind-913f61fb": {
+    "id": "bind-913f61fb",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "Exa_Search_Ipl Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:30.135904"
+  },
+  "bind-135edd86": {
+    "id": "bind-135edd86",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "Tavily_Search_Hn Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:30.525168"
+  },
+  "bind-1db67e58": {
+    "id": "bind-1db67e58",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "Run_News_Pipeline Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:30.833885"
+  },
+  "bind-5ffa59b2": {
+    "id": "bind-5ffa59b2",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "CUSTOMER_LOOKUP",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:31.197754"
+  },
+  "bind-7b9c6745": {
+    "id": "bind-7b9c6745",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "ORDER_LOOKUP",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:31.721605"
+  },
+  "bind-cd930aa9": {
+    "id": "bind-cd930aa9",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "REFUND_TRANSACTION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:32.122563"
+  },
+  "bind-23fcbcf6": {
+    "id": "bind-23fcbcf6",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "ORDER_CANCELLATION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:32.443914"
+  },
+  "bind-c20eb417": {
+    "id": "bind-c20eb417",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "ADDRESS_UPDATE",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:32.984900"
+  },
+  "bind-b59f1d9f": {
+    "id": "bind-b59f1d9f",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "EMAIL_NOTIFICATION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:33.314036"
+  },
+  "bind-f41c6d47": {
+    "id": "bind-f41c6d47",
+    "agent_id": "agent-5675ad0a",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:03:33.632898"
+  },
+  "bind-dfa11d2b": {
+    "id": "bind-dfa11d2b",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "Exa_Search_Ipl Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:06.121823"
+  },
+  "bind-d9167b18": {
+    "id": "bind-d9167b18",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "Tavily_Search_Hn Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:06.420171"
+  },
+  "bind-9b6bde09": {
+    "id": "bind-9b6bde09",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "Run_News_Pipeline Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:06.731933"
+  },
+  "bind-a4e3f900": {
+    "id": "bind-a4e3f900",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "CUSTOMER_LOOKUP",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:07.040832"
+  },
+  "bind-e30b2d9a": {
+    "id": "bind-e30b2d9a",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "ORDER_LOOKUP",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:07.338410"
+  },
+  "bind-93b7b183": {
+    "id": "bind-93b7b183",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "REFUND_TRANSACTION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:07.707805"
+  },
+  "bind-54839022": {
+    "id": "bind-54839022",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "ORDER_CANCELLATION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:08.137273"
+  },
+  "bind-43570540": {
+    "id": "bind-43570540",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "ADDRESS_UPDATE",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:08.473912"
+  },
+  "bind-b423568d": {
+    "id": "bind-b423568d",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "EMAIL_NOTIFICATION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:08.781396"
+  },
+  "bind-46bb9a0d": {
+    "id": "bind-46bb9a0d",
+    "agent_id": "agent-c70ce861",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:14:09.293906"
+  },
+  "bind-fa378fde": {
+    "id": "bind-fa378fde",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "Exa_Search_Ipl Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:03.254054"
+  },
+  "bind-946fd11d": {
+    "id": "bind-946fd11d",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "Tavily_Search_Hn Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:03.665667"
+  },
+  "bind-215e3f6b": {
+    "id": "bind-215e3f6b",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "Run_News_Pipeline Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:04.120551"
+  },
+  "bind-148aeff3": {
+    "id": "bind-148aeff3",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "CUSTOMER_LOOKUP",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:04.482626"
+  },
+  "bind-270812dc": {
+    "id": "bind-270812dc",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "ORDER_LOOKUP",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:04.944099"
+  },
+  "bind-b2d8ed35": {
+    "id": "bind-b2d8ed35",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "REFUND_TRANSACTION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:05.251441"
+  },
+  "bind-1c7a3db9": {
+    "id": "bind-1c7a3db9",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "ORDER_CANCELLATION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:05.660305"
+  },
+  "bind-846ce075": {
+    "id": "bind-846ce075",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "ADDRESS_UPDATE",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:05.997034"
+  },
+  "bind-bbfe2eca": {
+    "id": "bind-bbfe2eca",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "EMAIL_NOTIFICATION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:06.297583"
+  },
+  "bind-ac4d2ed6": {
+    "id": "bind-ac4d2ed6",
+    "agent_id": "agent-8f7486fb",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T06:31:06.837154"
+  },
+  "bind-16fbcc2b": {
+    "id": "bind-16fbcc2b",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "Exa_Search_Ai Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:03.836949"
+  },
+  "bind-19e61225": {
+    "id": "bind-19e61225",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "Tavily_Search_Ai_Analysis Subsystem",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:04.156311"
+  },
+  "bind-be465bf0": {
+    "id": "bind-be465bf0",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "Firecrawl_Scrape_Nebius Subsystem",
+    "resolution_type": "block",
+    "status": "unsupported",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:04.458644"
+  },
+  "bind-8f5a6bfc": {
+    "id": "bind-8f5a6bfc",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "CUSTOMER_LOOKUP",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:04.795673"
+  },
+  "bind-74ca8f11": {
+    "id": "bind-74ca8f11",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "ORDER_LOOKUP",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:05.096575"
+  },
+  "bind-fbb83528": {
+    "id": "bind-fbb83528",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "REFUND_TRANSACTION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:05.434087"
+  },
+  "bind-481ddd12": {
+    "id": "bind-481ddd12",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "ORDER_CANCELLATION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:05.748817"
+  },
+  "bind-f37f5505": {
+    "id": "bind-f37f5505",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "ADDRESS_UPDATE",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:06.064434"
+  },
+  "bind-b3aee65b": {
+    "id": "bind-b3aee65b",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "EMAIL_NOTIFICATION",
+    "resolution_type": "user_credential",
+    "status": "user_credential_required",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:06.353545"
+  },
+  "bind-286231c2": {
+    "id": "bind-286231c2",
+    "agent_id": "agent-e3314c00",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T07:58:06.656763"
+  },
+  "bind-e3f993a5": {
+    "id": "bind-e3f993a5",
+    "agent_id": "agent-89132be8",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:02:41.950820"
+  },
+  "bind-b7d29c8d": {
+    "id": "bind-b7d29c8d",
+    "agent_id": "agent-89132be8",
+    "dependency_name": "langchain==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:02:42.300309"
+  },
+  "bind-709d9433": {
+    "id": "bind-709d9433",
+    "agent_id": "agent-89132be8",
+    "dependency_name": "langchain-core==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:02:42.812930"
+  },
+  "bind-7793290e": {
+    "id": "bind-7793290e",
+    "agent_id": "agent-89132be8",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:02:43.416398"
+  },
+  "bind-b6ea1a9a": {
+    "id": "bind-b6ea1a9a",
+    "agent_id": "agent-89132be8",
+    "dependency_name": "requests==2.32.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:02:44.145365"
+  },
+  "bind-c9a763bb": {
+    "id": "bind-c9a763bb",
+    "agent_id": "agent-89132be8",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:02:44.509228"
+  },
+  "bind-d05bcd90": {
+    "id": "bind-d05bcd90",
+    "agent_id": "agent-560ec9a7",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:17:10.575221"
+  },
+  "bind-c987e491": {
+    "id": "bind-c987e491",
+    "agent_id": "agent-560ec9a7",
+    "dependency_name": "crewai==0.80.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:17:11.731329"
+  },
+  "bind-ffaac4f6": {
+    "id": "bind-ffaac4f6",
+    "agent_id": "agent-560ec9a7",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:17:12.247479"
+  },
+  "bind-a8e4a1db": {
+    "id": "bind-a8e4a1db",
+    "agent_id": "agent-560ec9a7",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:17:14.094231"
+  },
+  "bind-eb59feaa": {
+    "id": "bind-eb59feaa",
+    "agent_id": "agent-6a1442b4",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:22:41.390486"
+  },
+  "bind-73e84735": {
+    "id": "bind-73e84735",
+    "agent_id": "agent-6a1442b4",
+    "dependency_name": "langchain==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:22:41.974752"
+  },
+  "bind-059620d2": {
+    "id": "bind-059620d2",
+    "agent_id": "agent-6a1442b4",
+    "dependency_name": "langchain-core==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:22:42.460518"
+  },
+  "bind-8675c504": {
+    "id": "bind-8675c504",
+    "agent_id": "agent-6a1442b4",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:22:42.974533"
+  },
+  "bind-8f9e5237": {
+    "id": "bind-8f9e5237",
+    "agent_id": "agent-6a1442b4",
+    "dependency_name": "requests==2.32.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:22:43.388658"
+  },
+  "bind-82ed75fd": {
+    "id": "bind-82ed75fd",
+    "agent_id": "agent-6a1442b4",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T10:22:43.732057"
+  },
+  "bind-0a94ddfb": {
+    "id": "bind-0a94ddfb",
+    "agent_id": "agent-e460f547",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:33:20.717321"
+  },
+  "bind-3198fb93": {
+    "id": "bind-3198fb93",
+    "agent_id": "agent-ded71ac4",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:35:31.194057"
+  },
+  "bind-96348ba8": {
+    "id": "bind-96348ba8",
+    "agent_id": "agent-ded71ac4",
+    "dependency_name": "langchain==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:35:31.535534"
+  },
+  "bind-8216531f": {
+    "id": "bind-8216531f",
+    "agent_id": "agent-ded71ac4",
+    "dependency_name": "langchain-core==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:35:31.837743"
+  },
+  "bind-3e85be44": {
+    "id": "bind-3e85be44",
+    "agent_id": "agent-ded71ac4",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:35:32.172798"
+  },
+  "bind-51a4087e": {
+    "id": "bind-51a4087e",
+    "agent_id": "agent-ded71ac4",
+    "dependency_name": "requests==2.32.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:35:32.489735"
+  },
+  "bind-e04d1dd7": {
+    "id": "bind-e04d1dd7",
+    "agent_id": "agent-ded71ac4",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:35:32.814490"
+  },
+  "bind-fbd3553c": {
+    "id": "bind-fbd3553c",
+    "agent_id": "agent-270d0c7c",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:37:17.161700"
+  },
+  "bind-7024c196": {
+    "id": "bind-7024c196",
+    "agent_id": "agent-270d0c7c",
+    "dependency_name": "langchain==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:37:17.671819"
+  },
+  "bind-cb7dd955": {
+    "id": "bind-cb7dd955",
+    "agent_id": "agent-270d0c7c",
+    "dependency_name": "langchain-core==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:37:18.123057"
+  },
+  "bind-199cafe9": {
+    "id": "bind-199cafe9",
+    "agent_id": "agent-270d0c7c",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:37:18.593703"
+  },
+  "bind-b9593470": {
+    "id": "bind-b9593470",
+    "agent_id": "agent-270d0c7c",
+    "dependency_name": "yfinance==0.2.44",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:37:19.106316"
+  },
+  "bind-6fec7cb7": {
+    "id": "bind-6fec7cb7",
+    "agent_id": "agent-270d0c7c",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:37:19.544208"
+  },
+  "bind-f2375f19": {
+    "id": "bind-f2375f19",
+    "agent_id": "agent-0c75dce2",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:46:55.614389"
+  },
+  "bind-0226e4dd": {
+    "id": "bind-0226e4dd",
+    "agent_id": "agent-0c75dce2",
+    "dependency_name": "requests==2.31.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:46:55.939952"
+  },
+  "bind-0e10adfe": {
+    "id": "bind-0e10adfe",
+    "agent_id": "agent-0c75dce2",
+    "dependency_name": "pydantic==2.5.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:46:56.257584"
+  },
+  "bind-bf72e8ba": {
+    "id": "bind-bf72e8ba",
+    "agent_id": "agent-0c75dce2",
+    "dependency_name": "sqlalchemy==2.0.25",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:46:56.587648"
+  },
+  "bind-c18f89e8": {
+    "id": "bind-c18f89e8",
+    "agent_id": "agent-0c75dce2",
+    "dependency_name": "cryptography==42.0.2",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:46:56.899522"
+  },
+  "bind-95bd400f": {
+    "id": "bind-95bd400f",
+    "agent_id": "agent-0c75dce2",
+    "dependency_name": "pandas==2.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:46:57.209934"
+  },
+  "bind-71e3683f": {
+    "id": "bind-71e3683f",
+    "agent_id": "agent-c48217da",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:47:51.954218"
+  },
+  "bind-c2a5300c": {
+    "id": "bind-c2a5300c",
+    "agent_id": "agent-c48217da",
+    "dependency_name": "requests==2.31.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:47:52.260525"
+  },
+  "bind-3d3b8332": {
+    "id": "bind-3d3b8332",
+    "agent_id": "agent-c48217da",
+    "dependency_name": "pydantic==2.5.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:47:52.670796"
+  },
+  "bind-9fda58d9": {
+    "id": "bind-9fda58d9",
+    "agent_id": "agent-c48217da",
+    "dependency_name": "sqlalchemy==2.0.25",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:47:52.985153"
+  },
+  "bind-978632b8": {
+    "id": "bind-978632b8",
+    "agent_id": "agent-c48217da",
+    "dependency_name": "cryptography==42.0.2",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:47:53.310564"
+  },
+  "bind-faac76f5": {
+    "id": "bind-faac76f5",
+    "agent_id": "agent-c48217da",
+    "dependency_name": "pandas==2.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:47:53.643534"
+  },
+  "bind-b0667c0c": {
+    "id": "bind-b0667c0c",
+    "agent_id": "agent-56dfadf6",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:49:55.946466"
+  },
+  "bind-3a54a121": {
+    "id": "bind-3a54a121",
+    "agent_id": "agent-56dfadf6",
+    "dependency_name": "requests==2.31.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:49:56.335779"
+  },
+  "bind-3b1d0d2a": {
+    "id": "bind-3b1d0d2a",
+    "agent_id": "agent-56dfadf6",
+    "dependency_name": "pydantic==2.5.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:49:56.678574"
+  },
+  "bind-75a88116": {
+    "id": "bind-75a88116",
+    "agent_id": "agent-56dfadf6",
+    "dependency_name": "sqlalchemy==2.0.25",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:49:56.994605"
+  },
+  "bind-27aeef41": {
+    "id": "bind-27aeef41",
+    "agent_id": "agent-56dfadf6",
+    "dependency_name": "cryptography==42.0.2",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:49:57.391592"
+  },
+  "bind-eca44677": {
+    "id": "bind-eca44677",
+    "agent_id": "agent-56dfadf6",
+    "dependency_name": "pandas==2.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T11:49:58.191163"
+  },
+  "bind-e8e862c4": {
+    "id": "bind-e8e862c4",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:09.712235"
+  },
+  "bind-6aa72863": {
+    "id": "bind-6aa72863",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "requests==2.31.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:10.052604"
+  },
+  "bind-fb2e153b": {
+    "id": "bind-fb2e153b",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "pydantic==2.5.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:10.349562"
+  },
+  "bind-0489de5a": {
+    "id": "bind-0489de5a",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "sqlalchemy==2.0.25",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:10.696307"
+  },
+  "bind-b519f0fa": {
+    "id": "bind-b519f0fa",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "cryptography==42.0.2",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:11.068700"
+  },
+  "bind-07e901e5": {
+    "id": "bind-07e901e5",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "pandas==2.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:11.413882"
+  },
+  "bind-2259e7ab": {
+    "id": "bind-2259e7ab",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "langchain==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:11.796835"
+  },
+  "bind-79cd5326": {
+    "id": "bind-79cd5326",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:12.133171"
+  },
+  "bind-58e14df3": {
+    "id": "bind-58e14df3",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "langchain-experimental==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:12.425662"
+  },
+  "bind-15ec17ea": {
+    "id": "bind-15ec17ea",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "openpyxl==3.1.5",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:12.761179"
+  },
+  "bind-70f82e70": {
+    "id": "bind-70f82e70",
+    "agent_id": "agent-1e6f7946",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:45:13.152240"
+  },
+  "bind-187fbabb": {
+    "id": "bind-187fbabb",
+    "agent_id": "agent-8f455048",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:46:36.541548"
+  },
+  "bind-6ed7303e": {
+    "id": "bind-6ed7303e",
+    "agent_id": "agent-8f455048",
+    "dependency_name": "langchain==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:46:36.991302"
+  },
+  "bind-49bfae66": {
+    "id": "bind-49bfae66",
+    "agent_id": "agent-8f455048",
+    "dependency_name": "langchain-core==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:46:37.345078"
+  },
+  "bind-836964c4": {
+    "id": "bind-836964c4",
+    "agent_id": "agent-8f455048",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:46:37.683126"
+  },
+  "bind-33ddfd9e": {
+    "id": "bind-33ddfd9e",
+    "agent_id": "agent-8f455048",
+    "dependency_name": "requests==2.32.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:46:38.044434"
+  },
+  "bind-38dd870a": {
+    "id": "bind-38dd870a",
+    "agent_id": "agent-8f455048",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:46:38.377165"
+  },
+  "bind-5b32111c": {
+    "id": "bind-5b32111c",
+    "agent_id": "agent-d1c19ceb",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:53:59.947994"
+  },
+  "bind-7a3d2bf3": {
+    "id": "bind-7a3d2bf3",
+    "agent_id": "agent-d1c19ceb",
+    "dependency_name": "requests==2.31.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:54:00.291852"
+  },
+  "bind-ddc7a6b7": {
+    "id": "bind-ddc7a6b7",
+    "agent_id": "agent-d1c19ceb",
+    "dependency_name": "pydantic==2.5.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:54:00.584067"
+  },
+  "bind-6cfd881a": {
+    "id": "bind-6cfd881a",
+    "agent_id": "agent-d1c19ceb",
+    "dependency_name": "sqlalchemy==2.0.25",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:54:00.897206"
+  },
+  "bind-471b6c34": {
+    "id": "bind-471b6c34",
+    "agent_id": "agent-d1c19ceb",
+    "dependency_name": "cryptography==42.0.2",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:54:01.225569"
+  },
+  "bind-a5960541": {
+    "id": "bind-a5960541",
+    "agent_id": "agent-d1c19ceb",
+    "dependency_name": "pandas==2.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:54:01.563640"
+  },
+  "bind-dc2f31e4": {
+    "id": "bind-dc2f31e4",
+    "agent_id": "agent-aa973214",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:58:55.873192"
+  },
+  "bind-c282daf3": {
+    "id": "bind-c282daf3",
+    "agent_id": "agent-aa973214",
+    "dependency_name": "crewai==0.80.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:58:56.228634"
+  },
+  "bind-59247bca": {
+    "id": "bind-59247bca",
+    "agent_id": "agent-aa973214",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:58:56.679313"
+  },
+  "bind-c0c281eb": {
+    "id": "bind-c0c281eb",
+    "agent_id": "agent-aa973214",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:58:57.007744"
+  },
+  "bind-f74fc3b2": {
+    "id": "bind-f74fc3b2",
+    "agent_id": "agent-4366922b",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:24:52.972725"
+  },
+  "bind-bc0f3945": {
+    "id": "bind-bc0f3945",
+    "agent_id": "agent-4366922b",
+    "dependency_name": "requests==2.31.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:24:53.437100"
+  },
+  "bind-d85b99c7": {
+    "id": "bind-d85b99c7",
+    "agent_id": "agent-4366922b",
+    "dependency_name": "pydantic==2.5.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:24:53.792641"
+  },
+  "bind-bababc88": {
+    "id": "bind-bababc88",
+    "agent_id": "agent-4366922b",
+    "dependency_name": "sqlalchemy==2.0.25",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:24:54.122597"
+  },
+  "bind-41383bac": {
+    "id": "bind-41383bac",
+    "agent_id": "agent-4366922b",
+    "dependency_name": "cryptography==42.0.2",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:24:54.933712"
+  },
+  "bind-26ad21a4": {
+    "id": "bind-26ad21a4",
+    "agent_id": "agent-4366922b",
+    "dependency_name": "pandas==2.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T12:24:55.575539"
+  }
+}

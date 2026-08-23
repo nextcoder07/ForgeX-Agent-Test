@@ -67,9 +67,9 @@ async def generate_scenarios_for_agent(
     **kwargs: Any
 ) -> List[Scenario]:
     """Generates concrete 5-layer test scenarios from deterministic ScenarioPlan items using batch LLM intelligence."""
-    from app.core.llm.gemini_provider import GeminiProvider
+    from app.core.llm.providers import get_platform_provider
     if llm is None:
-        llm = GeminiProvider()
+        llm = get_platform_provider()
 
     # 1. Deterministic Planning First
     if scenario_plan is None:

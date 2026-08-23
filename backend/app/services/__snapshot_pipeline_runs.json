@@ -1,1 +1,142 @@
-{"pipe-7389f629": {"id": "pipe-7389f629", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T06:03:08.947062", "completed_at": null}, "pipe-41ea1f30": {"id": "pipe-41ea1f30", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T06:13:56.336611", "completed_at": null}, "pipe-6633b62c": {"id": "pipe-6633b62c", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T06:30:52.466745", "completed_at": null}, "pipe-93a206d4": {"id": "pipe-93a206d4", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T07:56:46.742934", "completed_at": null}, "pipe-a9747101": {"id": "pipe-a9747101", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T07:57:30.283024", "completed_at": null}, "pipe-0ca4ebf2": {"id": "pipe-0ca4ebf2", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T10:01:01.230539", "completed_at": null}, "pipe-1aaba2ec": {"id": "pipe-1aaba2ec", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T10:16:41.708270", "completed_at": null}, "pipe-abc5e257": {"id": "pipe-abc5e257", "pipeline_type": "agent_intake", "status": "partial", "started_at": "2026-08-23T11:08:33.300498", "completed_at": null}, "pipe-478e5bc8": {"id": "pipe-478e5bc8", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T11:32:42.896822", "completed_at": null}, "pipe-112ea389": {"id": "pipe-112ea389", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T11:34:50.265737", "completed_at": null}, "pipe-ad16c6ee": {"id": "pipe-ad16c6ee", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T11:36:49.158768", "completed_at": null}, "pipe-30948d88": {"id": "pipe-30948d88", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T11:49:24.333555", "completed_at": null}, "pipe-4905886a": {"id": "pipe-4905886a", "pipeline_type": "agent_intake", "status": "partial", "started_at": "2026-08-23T12:09:37.969980", "completed_at": null}, "pipe-2c843758": {"id": "pipe-2c843758", "pipeline_type": "agent_intake", "status": "partial", "started_at": "2026-08-23T12:43:09.602136", "completed_at": null}, "pipe-0fd531fc": {"id": "pipe-0fd531fc", "pipeline_type": "agent_intake", "status": "partial", "started_at": "2026-08-23T12:46:30.602001", "completed_at": null}, "pipe-5db63b89": {"id": "pipe-5db63b89", "pipeline_type": "agent_intake", "status": "partial", "started_at": "2026-08-23T12:53:16.880887", "completed_at": null}, "pipe-b913a2fa": {"id": "pipe-b913a2fa", "pipeline_type": "agent_intake", "status": "partial", "started_at": "2026-08-23T12:55:42.013207", "completed_at": null}, "pipe-c00c32d1": {"id": "pipe-c00c32d1", "pipeline_type": "agent_intake", "status": "partial", "started_at": "2026-08-23T13:16:49.703895", "completed_at": null}, "pipe-396f2fb1": {"id": "pipe-396f2fb1", "pipeline_type": "agent_intake", "status": "running", "started_at": "2026-08-23T13:21:11.425713", "completed_at": null}}
+{
+  "pipe-7389f629": {
+    "id": "pipe-7389f629",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T06:03:08.947062",
+    "completed_at": null
+  },
+  "pipe-41ea1f30": {
+    "id": "pipe-41ea1f30",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T06:13:56.336611",
+    "completed_at": null
+  },
+  "pipe-6633b62c": {
+    "id": "pipe-6633b62c",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T06:30:52.466745",
+    "completed_at": null
+  },
+  "pipe-93a206d4": {
+    "id": "pipe-93a206d4",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T07:56:46.742934",
+    "completed_at": null
+  },
+  "pipe-a9747101": {
+    "id": "pipe-a9747101",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T07:57:30.283024",
+    "completed_at": null
+  },
+  "pipe-0ca4ebf2": {
+    "id": "pipe-0ca4ebf2",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T10:01:01.230539",
+    "completed_at": null
+  },
+  "pipe-1aaba2ec": {
+    "id": "pipe-1aaba2ec",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T10:16:41.708270",
+    "completed_at": null
+  },
+  "pipe-abc5e257": {
+    "id": "pipe-abc5e257",
+    "pipeline_type": "agent_intake",
+    "status": "partial",
+    "started_at": "2026-08-23T11:08:33.300498",
+    "completed_at": null
+  },
+  "pipe-478e5bc8": {
+    "id": "pipe-478e5bc8",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T11:32:42.896822",
+    "completed_at": null
+  },
+  "pipe-112ea389": {
+    "id": "pipe-112ea389",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T11:34:50.265737",
+    "completed_at": null
+  },
+  "pipe-ad16c6ee": {
+    "id": "pipe-ad16c6ee",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T11:36:49.158768",
+    "completed_at": null
+  },
+  "pipe-30948d88": {
+    "id": "pipe-30948d88",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T11:49:24.333555",
+    "completed_at": null
+  },
+  "pipe-4905886a": {
+    "id": "pipe-4905886a",
+    "pipeline_type": "agent_intake",
+    "status": "partial",
+    "started_at": "2026-08-23T12:09:37.969980",
+    "completed_at": null
+  },
+  "pipe-2c843758": {
+    "id": "pipe-2c843758",
+    "pipeline_type": "agent_intake",
+    "status": "partial",
+    "started_at": "2026-08-23T12:43:09.602136",
+    "completed_at": null
+  },
+  "pipe-0fd531fc": {
+    "id": "pipe-0fd531fc",
+    "pipeline_type": "agent_intake",
+    "status": "partial",
+    "started_at": "2026-08-23T12:46:30.602001",
+    "completed_at": null
+  },
+  "pipe-5db63b89": {
+    "id": "pipe-5db63b89",
+    "pipeline_type": "agent_intake",
+    "status": "partial",
+    "started_at": "2026-08-23T12:53:16.880887",
+    "completed_at": null
+  },
+  "pipe-b913a2fa": {
+    "id": "pipe-b913a2fa",
+    "pipeline_type": "agent_intake",
+    "status": "partial",
+    "started_at": "2026-08-23T12:55:42.013207",
+    "completed_at": null
+  },
+  "pipe-c00c32d1": {
+    "id": "pipe-c00c32d1",
+    "pipeline_type": "agent_intake",
+    "status": "partial",
+    "started_at": "2026-08-23T13:16:49.703895",
+    "completed_at": null
+  },
+  "pipe-396f2fb1": {
+    "id": "pipe-396f2fb1",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T13:21:11.425713",
+    "completed_at": null
+  },
+  "pipe-9e50bf92": {
+    "id": "pipe-9e50bf92",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T12:24:30.548180",
+    "completed_at": null
+  }
+}

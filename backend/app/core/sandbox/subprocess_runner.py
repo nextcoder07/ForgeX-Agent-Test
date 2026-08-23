@@ -38,14 +38,40 @@ SENSITIVE_ENV_KEYS = {
 }
 
 
-def create_sanitized_environment() -> Dict[str, str]:
-    """Creates a sanitized environment dictionary for child sandbox processes."""
+def create_sanitized_environment(
+    provided_secrets: Optional[Dict[str, str]] = None,
+    agent: Optional[AgentRecord] = None
+) -> Dict[str, str]:
+    """Creates a sanitized environment dictionary for child sandbox processes, preserving test agent keys, user secrets, and auto-mocking missing tool credentials."""
     env = dict(os.environ)
     for key in list(env.keys()):
         if any(s in key.upper() for s in ["KEY", "SECRET", "TOKEN", "PASS", "CREDENTIAL"]):
             env.pop(key, None)
         elif key.upper() in SENSITIVE_ENV_KEYS:
             env.pop(key, None)
+
+    # 1. Inject active dedicated Test Agent keys (OPENAI_API_KEY, GEMINI_API_KEY, etc.)
+    try:
+        from app.core.llm.key_manager import TestAgentKeyManager
+        test_creds = TestAgentKeyManager().get_active_test_credentials()
+        for k, v in test_creds.items():
+            if v:
+                env[k] = v
+    except Exception as e:
+        pass
+
+    # 2. Inject explicit user-provided secrets
+    if provided_secrets:
+        for k, v in provided_secrets.items():
+            if v:
+                env[k] = str(v)
+
+    # 3. Auto-mock any missing agent tool credentials (e.g. WHO_CLINICAL_API_KEY, NEWS_API_KEY)
+    if agent and agent.dependencies:
+        for d in agent.dependencies:
+            if d.name and d.name not in env:
+                env[d.name] = f"mock-{d.name.lower().replace('_', '-')}"
+
     env["SANDBOX_MODE"] = "isolated_subprocess"
     env["PYTHONUNBUFFERED"] = "1"
     return env
@@ -56,14 +82,15 @@ def run_scenario_in_subprocess(
     scenario: Scenario,
     code_content: str,
     gateway: ToolGateway,
-    timeout_seconds: float = 10.0
+    timeout_seconds: float = 10.0,
+    provided_secrets: Optional[Dict[str, str]] = None
 ) -> ExecutionTrace:
     """Executes an agent scenario inside an isolated child process with real file staging and CLI/Chat support."""
     start_time = time.time()
     trace_id = f"trc-{uuid.uuid4().hex[:10]}"
     events: List[TraceEvent] = []
     tool_calls: List[ToolCallRecord] = []
-    sanitized_env = create_sanitized_environment()
+    sanitized_env = create_sanitized_environment(provided_secrets=provided_secrets, agent=agent)
 
     interface = (scenario.interface_type or "CHAT").upper()
     manifest = agent.runtime_manifest or {}
