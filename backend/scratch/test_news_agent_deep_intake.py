@@ -17,7 +17,7 @@ from app.services.store import store
 
 
 async def run_verification():
-    agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "test-agents", "09-news-summarizer-agent"))
+    agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "test-agents", "10-comprehensive-agent"))
     if not os.path.exists(agent_dir):
         agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "500-AI-Agents-Projects", "agents", "06-news-summarizer-agent"))
 
@@ -32,16 +32,17 @@ async def run_verification():
     payload = AgentIntakePayload(
         files=files,
         input_type="folder",
-        agent_name_hint="News-summary"
+        agent_name_hint="Comprehensive-Medical"
     )
-    llm = GeminiProvider()
+    from app.core.llm.providers import get_platform_provider
+    llm = get_platform_provider()
     print("[TEST] Running process_agent_intake...")
     result = await process_agent_intake(payload, llm)
 
     # Register to store
     reg_req = RegisterSpecRequest(
         normalized_spec=result.normalized_spec,
-        display_name="News-summary",
+        display_name="Comprehensive-Medical",
         artifact=result.artifact,
         source_files=files
     )

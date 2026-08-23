@@ -1,0 +1,12 @@
+title: Comprehensive Medical AI
+description: An autonomous agent for securely analyzing patient health records and providing diagnostic suggestions.
+language: python
+framework: custom
+version: 1.0.0
+author: platform-tester
+industry: healthcare
+capabilities:
+  - DIAGNOSTIC_ANALYSIS
+  - DATA_ANONYMIZATION
+  - COMPLIANCE_CHECKING
+entrypoint: agent.py
