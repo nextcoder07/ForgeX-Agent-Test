@@ -57,12 +57,12 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({ on
     if (!selectedAgentId) return;
     setLoadingGenerate(true);
     try {
-      const newScenarios = await generateScenarios(selectedAgentId, targetCount);
-      setScenarios((prev) => {
-        const ids = new Set(prev.map(s => s.id));
-        return [...prev, ...newScenarios.filter(s => !ids.has(s.id))];
-      });
-      const cov = await fetchCoverageReport(selectedAgentId);
+      await generateScenarios(selectedAgentId, targetCount);
+      const [updatedScenarios, cov] = await Promise.all([
+        fetchScenarioLibrary(selectedAgentId),
+        fetchCoverageReport(selectedAgentId),
+      ]);
+      setScenarios(updatedScenarios);
       setCoverage(cov);
     } catch (e) {
       console.error(e);

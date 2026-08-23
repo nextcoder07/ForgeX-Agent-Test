@@ -102,7 +102,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </div>
             <div className="p-4 rounded-2xl bg-slate-900/80 border border-amber-500/20 text-center">
               <p className="text-2xl font-extrabold text-amber-300 font-mono">
-                {loading || !calibration ? '–' : `${(calibration.agreement_rate * 100).toFixed(0)}%`}
+                {loading || !calibration ? '–' : `${(calibration.agreement_rate > 1 ? calibration.agreement_rate : calibration.agreement_rate * 100).toFixed(2)}%`}
               </p>
               <p className="text-[10px] font-mono uppercase text-slate-400 mt-0.5">Judge Agreement</p>
             </div>
