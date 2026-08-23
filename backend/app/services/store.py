@@ -17,7 +17,10 @@ from app.models.agent import AgentRecord, ToolDefinition, ToolRisk, DependencyDe
 from app.models.scenario import Scenario, ScenarioCategory
 from app.models.evaluation import EvaluationJob, ReliabilityScorecard, RegressionTest
 from app.models.failure import RunVerdict, FailureCluster, FailureFinding
-from app.models.execution import ExecutionTrace, ExecutionJob, ExecutionSession, ExecutionStep, ExecutionMetrics, BenchmarkRecord
+from app.models.execution import (
+    ExecutionTrace, ExecutionJob, ExecutionSession, ExecutionStep, ExecutionMetrics, 
+    BenchmarkRecord, ExecutionPreflight, ExecutionRun, ExecutionAction, ExecutionArtifact
+)
 from app.models.pipeline import PipelineRun, PipelineStage, AIGenerationRun
 from app.models.intake import AgentTestSpecification, SandboxSpecification, AgentDependency, PlatformResource, DependencyBinding
 from app.models.agent_behavior import AgentBehaviorProfile
@@ -269,6 +272,7 @@ def _serialize_job(key: str, job: EvaluationJob) -> Dict[str, Any]:
     }
     return {
         "id": job.id,
+        "agent_id": job.agent_id,
         "agent_version_id": job.agent_version_id or job.agent_id,
         "name": job.agent_name,
         "mode": job.execution_mode,
@@ -819,6 +823,29 @@ def _deserialize_regression_test(row: Dict[str, Any]) -> RegressionTest:
     )
 
 
+def _serialize_execution_preflight(key: str, p: Any) -> Dict[str, Any]:
+    return p.model_dump() if hasattr(p, "model_dump") else p.dict()
+
+def _deserialize_execution_preflight(row: Dict[str, Any]) -> Any:
+    return ExecutionPreflight(**row)
+
+def _serialize_execution_run(key: str, p: Any) -> Dict[str, Any]:
+    return p.model_dump() if hasattr(p, "model_dump") else p.dict()
+
+def _deserialize_execution_run(row: Dict[str, Any]) -> Any:
+    return ExecutionRun(**row)
+
+def _serialize_execution_action(key: str, p: Any) -> Dict[str, Any]:
+    return p.model_dump() if hasattr(p, "model_dump") else p.dict()
+
+def _deserialize_execution_action(row: Dict[str, Any]) -> Any:
+    return ExecutionAction(**row)
+
+def _serialize_execution_artifact(key: str, p: Any) -> Dict[str, Any]:
+    return p.model_dump() if hasattr(p, "model_dump") else p.dict()
+
+def _deserialize_execution_artifact(row: Dict[str, Any]) -> Any:
+    return ExecutionArtifact(**row)
 # ---------------------------------------------------------------------------
 # Global Store Implementation
 # ---------------------------------------------------------------------------
@@ -840,15 +867,15 @@ class Store:
         self.dependency_bindings = SyncedDict("dependency_bindings", _serialize_dependency_binding, _deserialize_dependency_binding)
         self.execution_jobs = SyncedDict("execution_jobs", _serialize_execution_job, _deserialize_execution_job)
         self.ai_generation_runs = SyncedDict("ai_generation_runs", _serialize_ai_generation_run, _deserialize_ai_generation_run)
-        self.execution_sessions = SyncedDict("execution_sessions", _serialize_execution_session, _deserialize_execution_session)
-        self.execution_steps = SyncedDict("execution_steps", _serialize_execution_step, _deserialize_execution_step)
-        self.execution_metrics = SyncedDict("execution_metrics", _serialize_execution_metrics, _deserialize_execution_metrics)
+        self.execution_sessions = SyncedDict("runtime.execution_sessions", _serialize_execution_session, _deserialize_execution_session)
+        self.execution_steps = SyncedDict("runtime.execution_steps", _serialize_execution_step, _deserialize_execution_step)
+        self.execution_metrics = SyncedDict("runtime.execution_metrics", _serialize_execution_metrics, _deserialize_execution_metrics)
         self.benchmark_records = SyncedDict("benchmark_records", _serialize_benchmark_record, _deserialize_benchmark_record)
         self.agent_behavior_profiles = SyncedDict("agent_behavior_profiles", _serialize_behavior_profile, _deserialize_behavior_profile)
-        self.execution_preflights: Dict[str, Any] = {}
-        self.execution_runs: Dict[str, Any] = {}
-        self.execution_artifacts: Dict[str, Any] = {}
-        self.execution_actions: Dict[str, Any] = {}
+        self.execution_preflights = SyncedDict("runtime.execution_preflights", _serialize_execution_preflight, _deserialize_execution_preflight)
+        self.execution_runs = SyncedDict("runtime.execution_runs", _serialize_execution_run, _deserialize_execution_run)
+        self.execution_artifacts = SyncedDict("runtime.execution_artifacts", _serialize_execution_artifact, _deserialize_execution_artifact)
+        self.execution_actions = SyncedDict("runtime.execution_actions", _serialize_execution_action, _deserialize_execution_action)
         self.repair_sessions = SyncedDict("repair_sessions", _serialize_repair_session, _deserialize_repair_session)
         self.regression_tests = SyncedDict("regression_tests", _serialize_regression_test, _deserialize_regression_test)
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
@@ -1227,6 +1254,23 @@ class Store:
 
     def list_scenarios(self) -> List[Scenario]:
         return list(self.scenarios.values())
+
+    def save_verdicts(self, job_id: str, verdicts: List[RunVerdict]):
+        import uuid
+        self.verdicts[job_id] = verdicts
+        if self.verdicts._sb:
+            for v in verdicts:
+                try:
+                    row = {
+                        "id": v.id or f"verd-{uuid.uuid4().hex[:8]}",
+                        "evaluation_run_id": job_id,
+                        "scenario_id": v.scenario_id,
+                        "status": v.status or "completed",
+                        "evidence": v.model_dump() if hasattr(v, "model_dump") else v.dict()
+                    }
+                    self.verdicts._sb.table("evaluation_results").upsert(row).execute()
+                except Exception as e:
+                    logger.error(f"Supabase error inserting into evaluation_results: {e}")
 
     def get_scorecard(self, eval_id: str) -> Optional[ReliabilityScorecard]:
         return self.scorecards.get(eval_id)

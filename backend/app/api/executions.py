@@ -59,7 +59,26 @@ def check_execution_preflight(payload: PreflightExecutionRequest):
         raise HTTPException(status_code=404, detail="No valid scenarios found for preflight check")
 
     preflight_results = []
-    overall_ready = True
+    
+    # 1. Dependency Mode Check
+    res_result = DependencyResolver.resolve_mode(
+        agent=agent,
+        requested_mode=None, # Will auto-select best mode
+        provided_secrets=payload.secrets
+    )
+    overall_ready = res_result.execution_dependency_binding.all_fulfilled
+    missing = [s.credential_bound or s.capability for s in res_result.execution_dependency_binding.service_bindings if s.status == "MISSING"]
+    
+    if not overall_ready:
+        return {
+            "agent_id": agent.id,
+            "overall_status": "BLOCKED",
+            "scenarios_checked": 0,
+            "preflight_results": [],
+            "missing_credentials": missing
+        }
+
+    # 2. Scenario Variable Check
     for sc in scenarios:
         pf_res = run_scenario_preflight(
             scenario=sc,
@@ -308,6 +327,17 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
         provided_secrets=payload.secrets,
         execution_id=job_id
     )
+    
+    if not res_result.execution_dependency_binding.all_fulfilled:
+        missing = [s.credential_bound or s.capability for s in res_result.execution_dependency_binding.service_bindings if s.status == "MISSING"]
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "message": f"Cannot start execution. Missing required credentials for mode {req_mode_enum.value if req_mode_enum else 'faithful'}.",
+                "missing_credentials": missing
+            }
+        )
+
     binding = res_result.active_binding
     store.save_execution_model_binding(binding)
 

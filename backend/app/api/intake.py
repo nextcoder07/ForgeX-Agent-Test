@@ -162,14 +162,25 @@ def _resolve_dependencies_for_agent(agent_id: str, spec: NormalizedAgentSpec):
                 created_at=_now(),
             )
         else:
-            binding = DependencyBinding(
-                id=f"bind-{uuid.uuid4().hex[:8]}",
-                agent_id=agent_id,
-                dependency_name=sec_name,
-                resolution_type="user_credential",
-                status="user_credential_required",
-                created_at=_now(),
-            )
+            default_val = os.getenv(sec_name)
+            if default_val:
+                binding = DependencyBinding(
+                    id=f"bind-{uuid.uuid4().hex[:8]}",
+                    agent_id=agent_id,
+                    dependency_name=sec_name,
+                    resolution_type="system_default",
+                    status="ready",
+                    created_at=_now(),
+                )
+            else:
+                binding = DependencyBinding(
+                    id=f"bind-{uuid.uuid4().hex[:8]}",
+                    agent_id=agent_id,
+                    dependency_name=sec_name,
+                    resolution_type="user_credential",
+                    status="user_credential_required",
+                    created_at=_now(),
+                )
         store.save_dependency_binding(binding)
 
 

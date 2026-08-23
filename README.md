@@ -167,6 +167,28 @@ The final two intentionally demonstrate known reliability and safety failures.
 - The frontend currently uses local page state rather than a client-side router.
 - The backend CORS policy is open for local development and should be restricted before production deployment.
 
+## Deployment
+
+The project is structured to be easily deployed to modern cloud providers like Render (for the backend) and Netlify (for the frontend).
+
+### Backend (Render)
+When creating a new Web Service on Render:
+- **Root Directory**: `backend`
+- **Build Command**: `pip install -r requirements.txt`
+- **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+
+Ensure you add your Environment Variables (e.g. `GEMINI_API_KEY`, `SUPABASE_URL`, etc.) in the Render dashboard.
+
+### Frontend (Netlify)
+When deploying a new site on Netlify:
+- **Base directory**: `frontend`
+- **Build command**: `npm run build`
+- **Publish directory**: `frontend/dist`
+
+Add the environment variable `VITE_API_URL` pointing to your deployed Render backend URL (e.g., `https://your-backend-app.onrender.com/api`).
+
+Note: A `netlify.toml` file is already included in the `frontend` directory to handle React single-page application routing natively.
+
 ## License
 
 This project is released under the [MIT License](LICENSE).

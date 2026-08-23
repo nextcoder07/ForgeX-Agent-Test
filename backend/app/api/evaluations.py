@@ -147,7 +147,7 @@ def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List
             job.current_step = f"Evaluating scenario trace #{idx + 1} of {len(traces)} ({sc.title})..."
             store.jobs[job_id] = job
 
-        store.verdicts[job_id] = verdicts
+        store.save_verdicts(job_id, verdicts)
         store.traces[job_id] = traces
 
         # Phase 3: AGGREGATING — do NOT show 100% completed here
