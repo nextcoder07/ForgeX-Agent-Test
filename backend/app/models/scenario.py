@@ -118,6 +118,8 @@ class Scenario(BaseModel):
     expected_state: Dict[str, Any] = Field(default_factory=dict)
     prohibited_actions: List[str] = Field(default_factory=list)
     assertions: List[ScenarioAssertion] = Field(default_factory=list)
+    failure_conditions: List[str] = Field(default_factory=list)
+    risk_level: str = "medium"
     
     # 5. PROVENANCE & LIFECYCLE
     fingerprint: Optional[str] = None

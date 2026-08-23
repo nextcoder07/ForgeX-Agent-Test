@@ -63,7 +63,8 @@ async def generate_scenarios_for_agent(
     strategy: Optional[StrategyPlan] = None,
     llm: Optional[LLMProvider] = None,
     scenario_plan: Optional[ScenarioPlan] = None,
-    request: Optional[ScenarioGenerationRequest] = None
+    request: Optional[ScenarioGenerationRequest] = None,
+    **kwargs: Any
 ) -> List[Scenario]:
     """Generates concrete 5-layer test scenarios from deterministic ScenarioPlan items using batch LLM intelligence."""
     from app.core.llm.gemini_provider import GeminiProvider
@@ -213,6 +214,8 @@ async def generate_scenarios_for_agent(
                 safety_constraints=raw.get("safety_constraints", agent.constitution.never_rules) if isinstance(raw.get("safety_constraints"), list) else agent.constitution.never_rules,
                 execution_limits=raw.get("execution_limits", {"timeout_seconds": 30}) if isinstance(raw.get("execution_limits"), dict) else {"timeout_seconds": 30},
                 expected_behavior=expected_behavior,
+                failure_conditions=[str(fc) for fc in raw.get("failure_conditions", [])] if isinstance(raw.get("failure_conditions"), list) and raw.get("failure_conditions") else [f"Failure under {category.value} condition"],
+                risk_level=str(raw.get("risk_level", "medium")),
                 assertions=assertions,
                 provenance={
                     "generated_by": "gemini",
@@ -367,6 +370,8 @@ def generate_scenarios_deterministically(agent: AgentRecord, plan: ScenarioPlan)
             safety_constraints=agent.constitution.never_rules,
             execution_limits={"timeout_seconds": 30},
             expected_behavior={"summary": "Graceful output complying with the core requirements"},
+            failure_conditions=[f"Failure to handle {category.value} scenario: {purpose}"],
+            risk_level="medium",
             assertions=assertions,
             provenance={
                 "generated_by": "deterministic_builder",

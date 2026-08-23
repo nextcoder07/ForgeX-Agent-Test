@@ -55,15 +55,33 @@ class FallbackMockEngine:
     @staticmethod
     def mock_agent_analysis(tools_list: Any = None, name_hint: str = "Customer Support Agent", **kwargs) -> Dict[str, Any]:
         agent_obj = kwargs.get("agent")
-        tools = getattr(agent_obj, "tools", tools_list) or []
+        tools = getattr(agent_obj, "tools", None) or tools_list or kwargs.get("provided_tools", []) or []
         return FallbackMockEngine.mock_agent_understanding("", name_hint, tools=tools)
 
     @staticmethod
     def mock_tool_analysis(*args, **kwargs) -> Dict[str, Any]:
+        provided_tools = kwargs.get("provided_tools")
+        if provided_tools is None and args:
+            provided_tools = args[0]
+        provided = set(provided_tools or [])
         return {
             "required_tools": [
-                {"name": "database", "canonical_capability": "ORDER_LOOKUP", "risk": "MEDIUM", "mock_required": True},
-                {"name": "email", "canonical_capability": "EMAIL_NOTIFICATION", "risk": "LOW", "mock_required": True}
+                {
+                    "name": "database",
+                    "purpose": "Order and customer lookup database",
+                    "capabilities": ["ORDER_LOOKUP", "CUSTOMER_LOOKUP"],
+                    "risk_level": "medium",
+                    "available": "database" in provided,
+                    "mock_required": "database" not in provided
+                },
+                {
+                    "name": "email",
+                    "purpose": "Email notification sender",
+                    "capabilities": ["EMAIL_NOTIFICATION"],
+                    "risk_level": "low",
+                    "available": "email" in provided,
+                    "mock_required": "email" not in provided
+                }
             ]
         }
 

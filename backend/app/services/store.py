@@ -89,20 +89,10 @@ class SyncedDict:
                 self._sb.table(self.table_name).upsert(row).execute()
             except Exception as e:
                 err_msg = str(e)
-                if self.table_name == "sandbox_specifications" and ("PGRST204" in err_msg or "schema cache" in err_msg):
-                    try:
-                        logger.warning(f"Schema cache mismatch for {self.table_name}. Retrying insert after omitting status/blockers/runtime_version columns.")
-                        row = self.serialize_fn(key, value)
-                        for field in ["status", "blockers", "runtime_version"]:
-                            row.pop(field, None)
-                        self._sb.table(self.table_name).upsert(row).execute()
-                        logger.info(f"Successfully saved sandbox spec {key} using schema cache fallback.")
-                        return
-                    except Exception as retry_err:
-                        logger.error(f"Fallback save failed for {self.table_name}: {retry_err}")
-                        raise retry_err
-                logger.error(f"Supabase error saving to {self.table_name} for key {key}: {e}")
-                raise e
+                if "PGRST204" in err_msg or "PGRST205" in err_msg or "schema cache" in err_msg:
+                    logger.warning(f"Supabase table or column schema mismatch for '{self.table_name}' ({e}). Preserved in local JSON snapshot.")
+                else:
+                    logger.error(f"Supabase error saving to {self.table_name} for key {key}: {e}")
 
     def __delitem__(self, key: str) -> None:
         if key in self._local_data:
@@ -636,16 +626,18 @@ def _deserialize_ai_generation_run(row: Dict[str, Any]) -> AIGenerationRun:
     )
 
 
-def _serialize_execution_session(key: str, s: ExecutionSession) -> Dict[str, Any]:
+def _serialize_execution_session(key: str, s: Any) -> Dict[str, Any]:
+    if isinstance(s, dict):
+        return s
     return {
-        "id": s.id,
-        "evaluation_run_id": s.evaluation_run_id,
-        "agent_version_id": s.agent_version_id,
-        "scenario_id": s.scenario_id,
-        "sandbox_session_id": s.sandbox_session_id,
-        "status": s.status,
-        "started_at": s.started_at,
-        "completed_at": s.completed_at,
+        "id": getattr(s, "id", key),
+        "execution_run_id": getattr(s, "execution_run_id", getattr(s, "evaluation_run_id", None)),
+        "agent_version_id": getattr(s, "agent_version_id", None),
+        "scenario_id": getattr(s, "scenario_id", None),
+        "sandbox_session_id": getattr(s, "sandbox_session_id", None),
+        "status": getattr(s, "status", "active"),
+        "started_at": getattr(s, "started_at", None),
+        "completed_at": getattr(s, "completed_at", None),
     }
 
 
@@ -867,6 +859,14 @@ class Store:
 
     def get_execution_run(self, run_id: str) -> Optional[Any]:
         return self.execution_runs.get(run_id)
+
+    def save_execution_session(self, session: Any) -> None:
+        sid = getattr(session, "id", None) or (session.get("id") if isinstance(session, dict) else None)
+        if sid:
+            self.execution_sessions[sid] = session
+
+    def get_execution_session(self, session_id: str) -> Optional[Any]:
+        return self.execution_sessions.get(session_id)
 
     def save_execution_artifact(self, artifact: Any) -> None:
         self.execution_artifacts[artifact.id] = artifact

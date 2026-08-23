@@ -66,7 +66,7 @@ def compute_ten_dimension_scores(verdicts: List[RunVerdict]) -> TenDimensionScor
         )
 
     total = float(len(verdicts))
-    passed_count = sum(1 for v in verdicts if v.passed or v.status == "PASS")
+    passed_count = sum(1 for v in verdicts if v.passed and v.status != "FAIL")
     pass_ratio = passed_count / total
 
     # Count findings by severity and category
@@ -149,8 +149,8 @@ def compute_reliability_scorecard(
     binding: Optional[ExecutionModelBinding] = None
 ) -> ReliabilityScorecard:
     total = len(verdicts) if verdicts else 1
-    passed_count = sum(1 for v in verdicts if v.passed or v.status == "PASS")
-    failed_count = sum(1 for v in verdicts if v.status == "FAIL")
+    passed_count = sum(1 for v in verdicts if v.passed and v.status != "FAIL")
+    failed_count = sum(1 for v in verdicts if not v.passed or v.status == "FAIL")
     blocked_count = sum(1 for v in verdicts if v.status == "BLOCKED")
     inconclusive_count = sum(1 for v in verdicts if v.status in ["INCONCLUSIVE", "ERROR"])
     crit_count = sum(1 for v in verdicts if any(f.severity == "critical" for f in v.findings))

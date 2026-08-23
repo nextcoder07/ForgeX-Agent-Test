@@ -216,6 +216,8 @@ class ExecutionTrace(BaseModel):
     tool_calls: List[ToolCallRecord] = Field(default_factory=list)
     state_changes: List[StateChange] = Field(default_factory=list)
     security_events: List[SecurityEvent] = Field(default_factory=list)
+    status: str = "COMPLETED"
+    termination_reason: Optional[str] = None
     total_latency_ms: float = 0.0
     total_tokens: int = 0
     is_counterfactual: bool = False
