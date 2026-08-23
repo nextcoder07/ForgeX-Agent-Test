@@ -90,6 +90,41 @@ class AnthropicProvider(LLMProvider):
         return FallbackMockEngine.mock_judge_verdict(trace_json, constraints)
 
 
+def _clean_and_parse_json(raw: str) -> Any:
+    """Strips markdown fences, extracts JSON substring, and parses JSON robustly."""
+    cleaned = (raw or "").strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        # Fallback substring extraction between first '[' or '{' and last ']' or '}'
+        start_arr = cleaned.find("[")
+        start_obj = cleaned.find("{")
+        
+        start = -1
+        if start_arr != -1 and start_obj != -1:
+            start = min(start_arr, start_obj)
+        elif start_arr != -1:
+            start = start_arr
+        elif start_obj != -1:
+            start = start_obj
+            
+        if start != -1:
+            end_arr = cleaned.rfind("]")
+            end_obj = cleaned.rfind("}")
+            end = max(end_arr, end_obj)
+            if end > start:
+                candidate = cleaned[start:end+1]
+                return json.loads(candidate)
+        raise
+
 class OllamaProvider(LLMProvider):
     """Local model provider (Ollama) — NO API Key required."""
     def __init__(self, endpoint: Optional[str] = None, model_name: Optional[str] = None):
@@ -126,7 +161,7 @@ class OllamaProvider(LLMProvider):
             'Return JSON with name, domain, goals, instructions, capabilities, risks, never_rules, always_rules, state_management, architecture_components.',
             stage="AGENT_INTAKE",
         )
-        return json.loads(raw)
+        return _clean_and_parse_json(raw)
 
     async def analyze_evidence_packet(self, evidence_packet: Dict[str, Any]) -> Dict[str, Any]:
         prompt = (
@@ -139,7 +174,7 @@ class OllamaProvider(LLMProvider):
             prompt,
             stage="AGENT_INTAKE",
         )
-        return json.loads(raw)
+        return _clean_and_parse_json(raw)
 
     async def critique(self, scenario_json: Dict[str, Any], agent_spec: Dict[str, Any]) -> Dict[str, Any]:
         prompt = (
@@ -152,7 +187,7 @@ class OllamaProvider(LLMProvider):
             prompt,
             stage="CRITIQUE",
         )
-        return json.loads(raw)
+        return _clean_and_parse_json(raw)
 
     async def generate_scenarios(self, agent_spec: Dict[str, Any], strategy_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
         prompt = (
@@ -165,7 +200,10 @@ class OllamaProvider(LLMProvider):
             prompt,
             stage="SCENARIO_GENERATION",
         )
-        return json.loads(raw)
+        res = _clean_and_parse_json(raw)
+        if isinstance(res, dict) and "scenarios" in res:
+            return res["scenarios"]
+        return res if isinstance(res, list) else []
 
     async def judge_trace(self, trace_json: Dict[str, Any], constraints: List[str]) -> Dict[str, Any]:
         prompt = (
@@ -178,7 +216,7 @@ class OllamaProvider(LLMProvider):
             prompt,
             stage="EVALUATION",
         )
-        return json.loads(raw)
+        return _clean_and_parse_json(raw)
 
 
 
