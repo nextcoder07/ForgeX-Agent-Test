@@ -7,10 +7,12 @@ without leaking sensitive API key secrets.
 from __future__ import annotations
 
 import time
+import os
 from typing import Any, Dict
 from fastapi import APIRouter
-from app.core.llm.gemini_provider import GeminiProvider, LLMGenerationError
-from app.core.llm.key_manager import GeminiKeyManager
+from app.core.llm.gemini_provider import LLMGenerationError
+from app.core.llm.key_manager import GeminiKeyManager, OtherAIKeyManager
+from app.core.llm.providers import get_platform_provider
 
 router = APIRouter(prefix="/llm", tags=["LLM Health"])
 
@@ -18,9 +20,10 @@ router = APIRouter(prefix="/llm", tags=["LLM Health"])
 @router.get("/health")
 async def get_llm_health() -> Dict[str, Any]:
     """Probes the Google Gemini API to verify active model and key validity."""
-    key_mgr = GeminiKeyManager()
+    provider_name = os.getenv("PLATFORM_LLM_PROVIDER", "gemini").lower()
+    key_mgr = OtherAIKeyManager() if provider_name in ("openrouter", "otherai", "open-router") else GeminiKeyManager()
     keys_status = key_mgr.get_all_keys_status()
-    provider = GeminiProvider()
+    provider = get_platform_provider()
 
     available_keys = [k for k in keys_status if k["status"] == "AVAILABLE"]
     cooldown_keys = [k for k in keys_status if k["status"] == "COOLDOWN"]
@@ -28,7 +31,7 @@ async def get_llm_health() -> Dict[str, Any]:
 
     health_info: Dict[str, Any] = {
         "status": "UNHEALTHY",
-        "provider": "google_gemini",
+        "provider": provider_name,
         "configured_model": provider.model_name,
         "total_keys_configured": len(keys_status),
         "available_keys_count": len(available_keys),
@@ -40,7 +43,7 @@ async def get_llm_health() -> Dict[str, Any]:
     }
 
     if not key_mgr.keys:
-        health_info["probe_error"] = "No Gemini API keys configured in environment"
+        health_info["probe_error"] = f"No API keys configured for provider '{provider_name}'"
         return health_info
 
     # Perform minimal ping probe

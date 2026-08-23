@@ -10,6 +10,7 @@ Enforces truthful execution:
 from __future__ import annotations
 
 import os
+import re
 import json
 import logging
 import time
@@ -194,6 +195,32 @@ def _response_token_counts(response: Any) -> tuple[int, int]:
     )
 
 
+def _extract_json_block(text: str) -> str:
+    """Safely extracts JSON from markdown-fenced codeblocks or raw text."""
+    if not text:
+        return "{}"
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def safe_json_loads(text: str) -> Any:
+    """Parses JSON safely, handling markdown fences and fixing unescaped backslashes."""
+    cleaned = _extract_json_block(text)
+    try:
+        return json.loads(cleaned, strict=False)
+    except Exception:
+        # Fix unescaped backslashes that are not valid JSON escape sequences (\", \\, \/, \b, \f, \n, \r, \t, \uXXXX)
+        fixed = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', cleaned)
+        return json.loads(fixed, strict=False)
+
+
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str = "", model_name: str = ""):
         self._is_custom_key = bool(api_key)
@@ -319,14 +346,28 @@ class GeminiProvider(LLMProvider):
 
             except Exception as e:
                 last_exception = e
-                error_type = classify_error(e)
+                from app.core.llm.key_manager import classify_error, is_rotation_eligible, ErrorCategory
+                error_type, error_category = classify_error(e)
                 error_msg = str(e)
-                logger.warning(f"Gemini error on {key_id}: {error_msg} (Type: {error_type})")
+                logger.warning(f"Gemini error on {key_id}: {error_msg} (Type: {error_type}, Category: {error_category})")
 
                 # Map to structured LLMErrorCode
-                if error_type == "MODEL_NOT_FOUND":
+                if error_category == ErrorCategory.PROJECT_QUOTA:
+                    last_error_code = LLMErrorCode.QUOTA_EXCEEDED
+                    if not self._is_custom_key:
+                        GeminiKeyManager().mark_key_failed(key_id, "QUOTA_EXHAUSTED", error_msg)
+                    activity_log.emit(
+                        category="LLM",
+                        action="PROJECT_QUOTA_EXHAUSTED",
+                        detail=f"Shared Project/Daily Quota exhausted on {key_id}. Stopping key rotation to trigger fallback.",
+                        request_summary=f"Quota Metric: {error_msg[:120]}",
+                        status="warning"
+                    )
+                    # Stop rotating immediately: Keys on the same project share this exhausted quota
+                    break
+
+                elif error_type == "MODEL_NOT_FOUND":
                     last_error_code = LLMErrorCode.MODEL_NOT_FOUND
-                    # Non-retryable: Fail immediately without wasting remaining keys
                     activity_log.emit(
                         category="LLM",
                         action="MODEL_NOT_FOUND",
@@ -355,13 +396,13 @@ class GeminiProvider(LLMProvider):
                     if not self._is_custom_key:
                         GeminiKeyManager().mark_key_failed(key_id, error_type, error_msg)
 
-                if is_rotation_eligible(error_type) and not self._is_custom_key:
+                if is_rotation_eligible(error_category) and not self._is_custom_key:
                     next_key_id = GeminiKeyManager().peek_next_key_id()
                     if next_key_id:
                         activity_log.emit(
                             category="LLM",
                             action="REQUEST",
-                            detail=f"Rotating to {next_key_id}...",
+                            detail=f"Rotating to {next_key_id} (in-flight request continues)...",
                             status="warning"
                         )
                 else:
@@ -409,7 +450,7 @@ class GeminiProvider(LLMProvider):
         )
         raw = await self.generate(system=MASTER_AGENT_ANALYZER_SYSTEM_PROMPT, user=prompt, stage="AGENT_INTAKE")
         try:
-            return json.loads(raw)
+            return safe_json_loads(raw)
         except Exception as e:
             raise LLMGenerationError(f"Invalid JSON returned from Gemini: {e}", code=LLMErrorCode.INVALID_JSON)
 
@@ -424,7 +465,7 @@ class GeminiProvider(LLMProvider):
         )
         raw = await self.generate(system=MASTER_AGENT_ANALYZER_SYSTEM_PROMPT, user=prompt, stage="AGENT_INTAKE")
         try:
-            return json.loads(raw)
+            return safe_json_loads(raw)
         except Exception as e:
             raise LLMGenerationError(f"Invalid JSON returned from Gemini: {e}", code=LLMErrorCode.INVALID_JSON)
 
@@ -438,7 +479,7 @@ class GeminiProvider(LLMProvider):
         )
         raw = await self.generate(system="You are an adversarial scenario critic.", user=prompt, stage="SCENARIO_CRITIC")
         try:
-            return json.loads(raw)
+            return safe_json_loads(raw)
         except Exception as e:
             raise LLMGenerationError(f"Invalid JSON from critic: {e}", code=LLMErrorCode.INVALID_JSON)
 
@@ -487,7 +528,7 @@ class GeminiProvider(LLMProvider):
             stage="SCENARIO_GENERATION"
         )
         try:
-            parsed = json.loads(raw)
+            parsed = safe_json_loads(raw)
             if isinstance(parsed, list):
                 return parsed
             elif isinstance(parsed, dict) and "scenarios" in parsed and isinstance(parsed["scenarios"], list):
@@ -506,6 +547,6 @@ class GeminiProvider(LLMProvider):
         )
         raw = await self.generate(system="You are an objective evaluation judge.", user=prompt, stage="JUDGE_EVALUATION")
         try:
-            return json.loads(raw)
+            return safe_json_loads(raw)
         except Exception as e:
             raise LLMGenerationError(f"Invalid judge JSON response: {e}", code=LLMErrorCode.INVALID_JSON)

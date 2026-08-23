@@ -88,7 +88,21 @@ class SyncedDict:
                 row = self.serialize_fn(key, value)
                 self._sb.table(self.table_name).upsert(row).execute()
             except Exception as e:
+                err_msg = str(e)
+                if self.table_name == "sandbox_specifications" and ("PGRST204" in err_msg or "schema cache" in err_msg):
+                    try:
+                        logger.warning(f"Schema cache mismatch for {self.table_name}. Retrying insert after omitting status/blockers/runtime_version columns.")
+                        row = self.serialize_fn(key, value)
+                        for field in ["status", "blockers", "runtime_version"]:
+                            row.pop(field, None)
+                        self._sb.table(self.table_name).upsert(row).execute()
+                        logger.info(f"Successfully saved sandbox spec {key} using schema cache fallback.")
+                        return
+                    except Exception as retry_err:
+                        logger.error(f"Fallback save failed for {self.table_name}: {retry_err}")
+                        raise retry_err
                 logger.error(f"Supabase error saving to {self.table_name} for key {key}: {e}")
+                raise e
 
     def __delitem__(self, key: str) -> None:
         if key in self._local_data:
@@ -451,29 +465,47 @@ def _deserialize_agent_test_spec(row: Dict[str, Any]) -> AgentTestSpecification:
 
 
 def _serialize_sandbox_spec(key: str, spec: SandboxSpecification) -> Dict[str, Any]:
+    runtime = spec.runtime or {}
     return {
         "id": spec.id,
         "agent_id": spec.agent_id,
-        "runtime": spec.runtime,
+        "language": runtime.get("language") or "python",
+        "runtime_version": runtime.get("version") or "3.12",
+        "base_image": runtime.get("base_image") or "python:3.12-slim",
+        "entrypoint": runtime.get("entrypoint") or "agent.py",
+        "runtime": runtime,
         "dependencies": spec.dependencies,
         "filesystem": spec.filesystem,
         "network": spec.network,
         "tools": spec.tools,
         "credentials": spec.credentials,
+        "status": spec.status or "READY",
+        "blockers": spec.blockers or [],
         "created_at": spec.created_at,
     }
 
 
 def _deserialize_sandbox_spec(row: Dict[str, Any]) -> SandboxSpecification:
+    runtime = row.get("runtime") or {}
+    if "language" not in runtime and row.get("language"):
+        runtime["language"] = row.get("language")
+    if "version" not in runtime and row.get("runtime_version"):
+        runtime["version"] = row.get("runtime_version")
+    if "entrypoint" not in runtime and row.get("entrypoint"):
+        runtime["entrypoint"] = row.get("entrypoint")
+    if "base_image" not in runtime and row.get("base_image"):
+        runtime["base_image"] = row.get("base_image")
     return SandboxSpecification(
         id=row["id"],
         agent_id=row["agent_id"],
-        runtime=row.get("runtime", {}),
+        runtime=runtime,
         dependencies=row.get("dependencies", []),
         filesystem=row.get("filesystem", {}),
         network=row.get("network", {}),
         tools=row.get("tools", []),
         credentials=row.get("credentials", []),
+        status=row.get("status", "READY"),
+        blockers=row.get("blockers", []),
         created_at=str(row.get("created_at", _now())),
     )
 

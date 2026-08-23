@@ -15,7 +15,7 @@ from app.services.store import store
 from app.core.sandbox.runner import run_scenario_in_sandbox
 from app.core.evaluation.counterfactual import replay_counterfactual_control
 from app.core.evaluation.hybrid_evaluator import evaluate_trace
-from app.core.llm.gemini_provider import GeminiProvider
+from app.core.llm.providers import get_platform_provider
 from app.services.activity_log import activity_log
 
 router = APIRouter(prefix="/live-attack", tags=["Live Attack"])
@@ -60,7 +60,7 @@ async def execute_live_attack(payload: LiveAttackRequest):
         safety_constraints=agent.constitution.never_rules
     )
 
-    llm = GeminiProvider()
+    llm = get_platform_provider()
 
     # 1. Run Attack Trace
     activity_log.emit(

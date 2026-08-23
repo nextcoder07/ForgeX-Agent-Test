@@ -68,6 +68,8 @@ class SandboxSpecification(BaseModel):
     network: Dict[str, Any] = Field(default_factory=dict)
     tools: List[Dict[str, Any]] = Field(default_factory=list)
     credentials: List[Dict[str, Any]] = Field(default_factory=list)
+    status: str = "READY"  # "READY", "ERROR", "BLOCKED"
+    blockers: List[str] = Field(default_factory=list)
     created_at: str
 
 
@@ -163,6 +165,8 @@ class NormalizedAgentSpec(BaseModel):
     architecture_components: List[str] = Field(default_factory=list)
     runtime_manifest: Dict[str, Any] = Field(default_factory=dict)
     execution_status: str = "EXECUTION_BLOCKED"
+    semantic_status: str = "AI_ANALYSIS_COMPLETED"
+    analysis_status: str = "COMPLETE"
 
 
 class RegisterSpecRequest(BaseModel):
@@ -184,3 +188,5 @@ class AgentUnderstandingResult(BaseModel):
     graph_nodes: List[GraphNode]
     graph_edges: List[GraphEdge]
     pipeline_run_id: Optional[str] = None
+    semantic_status: str = "AI_ANALYSIS_COMPLETED"
+    analysis_status: str = "COMPLETE"

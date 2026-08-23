@@ -147,6 +147,23 @@ class GeminiKeyManager:
                         k.status = "AVAILABLE"
                     break
 
+
+class OtherAIKeyManager(GeminiKeyManager):
+    """Numbered key manager for OpenRouter and other OpenAI-compatible APIs."""
+    _instance = None
+
+    def load_keys(self):
+        self.keys.clear()
+        key_names = ["OTHERAI_API_KEY"] + [f"OTHERAI_API_KEY_{idx}" for idx in range(1, 20)]
+        for env_var_name in key_names:
+            key_val = os.getenv(env_var_name, "").strip()
+            if key_val and not any(k.value == key_val for k in self.keys):
+                display_id = f"OtherAI API Key {len(self.keys) + 1}"
+                self.keys.append(GeminiKey(key_id=display_id, value=key_val))
+                logger.info(f"Registered {env_var_name} as '{display_id}'")
+        if not self.keys:
+            logger.warning("No OTHERAI_API_KEY values configured in environment!")
+
 class GeminiConversationSession:
     def __init__(self, conversation_id: str, system_prompt: str = ""):
         self.conversation_id = conversation_id
@@ -194,36 +211,66 @@ class GeminiSessionManager:
                 self.sessions[conversation_id] = GeminiConversationSession(conversation_id, system_prompt)
             return self.sessions[conversation_id]
 
-def classify_error(e: Exception) -> str:
+class ErrorCategory:
+    KEY_SPECIFIC = "KEY_SPECIFIC"       # Transient per-key issue: rotate key and continue
+    PROJECT_QUOTA = "PROJECT_QUOTA"     # Shared project/daily quota limit: stop rotation, fail fast/fallback
+    PERMANENT_ERROR = "PERMANENT_ERROR" # Non-retryable request error: fail fast immediately
+
+
+def classify_error(e: Exception) -> tuple[str, str]:
+    """
+    Returns (error_type, error_category).
+    error_category is one of:
+      - KEY_SPECIFIC: Rotate to next key and continue
+      - PROJECT_QUOTA: Daily/project shared quota exhausted across keys; stop rotation
+      - PERMANENT_ERROR: Non-retryable syntax/model error; fail fast
+    """
     err_str = str(e).lower()
     status_code = getattr(e, "code", getattr(e, "status_code", None))
-    
+
+    # 1. Project / Account Shared Quota Exhaustion
+    if (
+        "generaterequestsperday" in err_str
+        or "perproject" in err_str
+        or "daily" in err_str
+        or "free_tier_requests" in err_str
+        or "quota exceeded for metric" in err_str
+    ):
+        return "PROJECT_QUOTA_EXHAUSTED", ErrorCategory.PROJECT_QUOTA
+
+    # 2. Key-specific 429 Rate Limit (e.g. per-minute transient burst)
     if status_code == 429 or "429" in err_str or "resource_exhausted" in err_str or "rate limit" in err_str or "quota" in err_str:
-        return "QUOTA_EXHAUSTED"
+        return "QUOTA_EXHAUSTED", ErrorCategory.KEY_SPECIFIC
+
+    # 3. Key-specific Authentication & Invalid Keys
     elif status_code == 401 or "401" in err_str or "unauthenticated" in err_str or "invalid authentication" in err_str or "api key not valid" in err_str:
-        return "INVALID_KEY"
+        return "INVALID_KEY", ErrorCategory.KEY_SPECIFIC
+
     elif status_code == 403 or "403" in err_str or "permission denied" in err_str:
-        return "AUTHENTICATION_ERROR"
+        return "AUTHENTICATION_ERROR", ErrorCategory.KEY_SPECIFIC
+
+    # 4. Permanent Non-Retryable Errors
     elif status_code == 400 or "400" in err_str or "invalid argument" in err_str:
         if "safety" in err_str or "blocked" in err_str:
-            return "SAFETY_POLICY_ERROR"
-        return "INVALID_REQUEST"
-    elif status_code == 404 or "404" in err_str or "not found" in err_str:
-        return "MODEL_NOT_FOUND"
-    elif status_code in (500, 502, 503, 504) or "500" in err_str or "503" in err_str or "unavailable" in err_str or "internal error" in err_str:
-        return "TEMPORARY_SERVER_ERROR"
-    elif "timeout" in err_str or "connection" in err_str or "network" in err_str:
-        return "NETWORK_ERROR"
-    return "UNKNOWN_ERROR"
+            return "SAFETY_POLICY_ERROR", ErrorCategory.PERMANENT_ERROR
+        return "INVALID_REQUEST", ErrorCategory.PERMANENT_ERROR
 
-def is_rotation_eligible(error_type: str) -> bool:
-    return error_type in (
-        "QUOTA_EXHAUSTED",
-        "INVALID_KEY",
-        "AUTHENTICATION_ERROR",
-        "TEMPORARY_SERVER_ERROR",
-        "NETWORK_ERROR"
-    )
+    elif status_code == 404 or "404" in err_str or "not found" in err_str:
+        return "MODEL_NOT_FOUND", ErrorCategory.PERMANENT_ERROR
+
+    # 5. Key-specific Temporary Server / Network Errors
+    elif status_code in (500, 502, 503, 504) or "500" in err_str or "503" in err_str or "unavailable" in err_str or "internal error" in err_str:
+        return "TEMPORARY_SERVER_ERROR", ErrorCategory.KEY_SPECIFIC
+
+    elif "timeout" in err_str or "connection" in err_str or "network" in err_str:
+        return "NETWORK_ERROR", ErrorCategory.KEY_SPECIFIC
+
+    return "UNKNOWN_ERROR", ErrorCategory.KEY_SPECIFIC
+
+
+def is_rotation_eligible(error_category: str) -> bool:
+    """Only rotate for key-specific problems. Stop immediately on project quotas or permanent errors."""
+    return error_category == ErrorCategory.KEY_SPECIFIC
 
 
 class TestAgentKeyManager:

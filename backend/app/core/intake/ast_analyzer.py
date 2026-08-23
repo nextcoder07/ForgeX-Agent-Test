@@ -108,8 +108,8 @@ def analyze_python_source(code: str, filename: str = "agent.py") -> Dict[str, An
                 }
                 functions.append(fn_info)
 
-                # Explicitly decorated functions or top-level tool functions (non-main/non-helper) are tools
-                if is_explicit_tool or (not node.name.startswith("_") and node.name not in ["main", "run", "cli", "parse_args", "get_agent"] and any(kw in node.name.lower() for kw in ["calculate", "convert", "format", "search", "lookup", "fetch", "get_", "create_", "update_", "delete_"])):
+                # Only explicitly decorated tool functions or class methods on dedicated Tool classes are external tools
+                if is_explicit_tool:
                     tools.append(
                         ToolDefinition(
                             name=node.name,
@@ -145,6 +145,45 @@ def analyze_python_source(code: str, filename: str = "agent.py") -> Dict[str, An
     except Exception as e:
         logger.warning(f"Python AST analysis error in {filename}: {e}")
 
+    # 5. Extract CLI Arguments (argparse / sys.argv)
+    cli_arguments: List[Dict[str, Any]] = []
+    try:
+        tree = ast.parse(code)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument":
+                arg_name = ""
+                default_val = None
+                arg_type = "string"
+                help_text = ""
+                required = False
+
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value.startswith("-"):
+                        arg_name = arg.value
+                        break
+
+                for kw in node.keywords:
+                    if kw.arg == "default" and isinstance(kw.value, ast.Constant):
+                        default_val = kw.value.value
+                    elif kw.arg == "type":
+                        if isinstance(kw.value, ast.Name):
+                            arg_type = "integer" if kw.value.id == "int" else ("float" if kw.value.id == "float" else "string")
+                    elif kw.arg == "help" and isinstance(kw.value, ast.Constant):
+                        help_text = str(kw.value.value)
+                    elif kw.arg == "required" and isinstance(kw.value, ast.Constant):
+                        required = bool(kw.value.value)
+
+                if arg_name:
+                    cli_arguments.append({
+                        "name": arg_name,
+                        "type": arg_type,
+                        "default": default_val,
+                        "help": help_text,
+                        "required": required
+                    })
+    except Exception:
+        pass
+
     return {
         "classes": classes,
         "functions": functions,
@@ -152,7 +191,8 @@ def analyze_python_source(code: str, filename: str = "agent.py") -> Dict[str, An
         "dependencies": dependencies,
         "docstrings": docstrings,
         "imports": imports,
-        "constants": constants
+        "constants": constants,
+        "cli_arguments": cli_arguments
     }
 
 

@@ -18,6 +18,8 @@ from app.models.agent_behavior import (
     FailureSurface,
     DeclaredVsImplementedConflict,
     ReadinessBreakdown,
+    InterfaceContract,
+    OutputContract,
 )
 from app.models.dependency_model import DetectedSecret
 
@@ -44,6 +46,9 @@ class ProfileBuilder:
         outputs: Optional[List[Dict[str, Any]]] = None,
         security_surfaces: Optional[List[Dict[str, Any]]] = None,
         conflicts: Optional[List[DeclaredVsImplementedConflict]] = None,
+        interface_contract: Optional[InterfaceContract] = None,
+        output_contract: Optional[OutputContract] = None,
+        dependency_requirements: Optional[List[Dict[str, Any]]] = None,
         agent_version_id: Optional[str] = None,
         analysis_run_id: Optional[str] = None
     ) -> AgentBehaviorProfile:
@@ -78,6 +83,15 @@ class ProfileBuilder:
                 "entrypoint": workflow_graph.entrypoint
             },
             goal=f"Execute {domain} tasks using discovered workflow nodes and external capabilities.",
+            interface_contract=interface_contract or InterfaceContract(
+                entrypoint=workflow_graph.entrypoint,
+                interface_type="CLI" if (workflow_graph.entrypoint and workflow_graph.entrypoint.endswith(".py")) else "UNKNOWN"
+            ),
+            output_contract=output_contract or OutputContract(
+                stdout_format="TEXT",
+                exit_codes={0: "SUCCESS"}
+            ),
+            dependency_requirements=dependency_requirements or [],
             workflow_graph=workflow_graph,
             inputs=inputs or [],
             outputs=outputs or [],

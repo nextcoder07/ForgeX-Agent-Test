@@ -5,9 +5,17 @@ Constructs targeted 8-category evaluation plans based on Normalized Agent Specif
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import uuid
+from typing import Any, Dict, List, Optional
 from app.models.agent import AgentRecord
-from app.models.scenario import StrategyPlan, StrategyCategoryTarget, ScenarioCategory
+from app.models.scenario import (
+    StrategyPlan,
+    StrategyCategoryTarget,
+    ScenarioCategory,
+    ScenarioPlan,
+    ScenarioPlanItem,
+    ScenarioGenerationRequest,
+)
 
 
 def build_test_strategy(agent: AgentRecord, desired_count: int = 25) -> StrategyPlan:
@@ -63,15 +71,13 @@ def build_test_strategy(agent: AgentRecord, desired_count: int = 25) -> Strategy
         ),
     ]
 
-import uuid
-from app.models.scenario import (
-    StrategyPlan,
-    StrategyCategoryTarget,
-    ScenarioCategory,
-    ScenarioPlan,
-    ScenarioPlanItem,
-    ScenarioGenerationRequest
-)
+    return StrategyPlan(
+        agent_id=agent.id,
+        agent_name=agent.display_name or agent.name,
+        total_target=desired_count,
+        category_distribution=targets,
+        summary=f"Tailored 8-category test strategy targeting {len(targets)} focus areas with {desired_count} scenarios."
+    )
 
 
 def build_deterministic_scenario_plan(

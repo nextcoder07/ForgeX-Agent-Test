@@ -204,6 +204,9 @@ class ScenarioGenerationRun(BaseModel):
     model: Optional[str] = None
     prompt_version: str = "v2"
     status: str = "COMPLETED"  # "COMPLETED", "PARTIAL", "FAILED"
+    generation_method: str = "ai"  # "ai", "deterministic", "hybrid"
+    ai_status: str = "success"  # "success", "failed", "quota_exhausted", "unavailable"
+    failure_reason: Optional[str] = None
     scenarios: List[Scenario] = Field(default_factory=list)
     created_at: str
 

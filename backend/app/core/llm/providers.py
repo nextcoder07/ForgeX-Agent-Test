@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from app.core.llm.base import LLMProvider
 from app.core.llm.gemini_provider import GeminiProvider
+from app.core.llm.openrouter_provider import OpenRouterProvider
 from app.core.llm.mock_llm import MockLLM
 from app.core.llm.fallback_mock import FallbackMockEngine
 
@@ -132,7 +133,9 @@ def get_provider(provider_name: str, model_name: str = "", api_key: str = "", mo
     if p_lower == "openai":
         return OpenAIProvider(api_key=api_key, model_name=model_name or "gpt-5")
     elif p_lower in ["google", "gemini"]:
-        return GeminiProvider(api_key=api_key, model_name=model_name or LLMConfig.GEMINI_MODEL)
+        return GeminiProvider(api_key=api_key, model_name=model_name or LLMConfig.MODEL)
+    elif p_lower in ["openrouter", "otherai", "open-router"]:
+        return OpenRouterProvider(api_key=api_key, model_name=model_name)
     elif p_lower == "anthropic":
         return AnthropicProvider(api_key=api_key, model_name=model_name or "claude-3-5-sonnet")
     elif p_lower in ["ollama", "local"]:
@@ -142,3 +145,10 @@ def get_provider(provider_name: str, model_name: str = "", api_key: str = "", mo
     
     # Default to GeminiProvider
     return GeminiProvider(api_key=api_key, model_name=model_name or LLMConfig.GEMINI_MODEL)
+
+
+def get_platform_provider() -> LLMProvider:
+    """Build the configured platform provider; Gemini remains the default."""
+    provider = os.getenv("PLATFORM_LLM_PROVIDER", LLMConfig.PROVIDER)
+    model = os.getenv("PLATFORM_LLM_MODEL", "")
+    return get_provider(provider, model_name=model)
