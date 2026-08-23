@@ -54,6 +54,7 @@ class ProfileBuilder:
         # Execution is blocked until sandbox and credentials are valid -> execution_ready = False
         has_creds = len(credential_references) == 0
 
+        cred_names = [c.name if hasattr(c, "name") else c.get("name", "") for c in credential_references]
         readiness = ReadinessBreakdown(
             analysis_ready=True,
             runtime_ready=True,
@@ -61,7 +62,7 @@ class ProfileBuilder:
             credentials_ready=has_creds,
             sandbox_ready=False,
             execution_ready=False,
-            blocked_reasons=[f"Missing required API credentials: {[c.name for c in credential_references]}"] if not has_creds else ["Sandbox environment not yet built"]
+            blocked_reasons=[f"Missing required API credentials: {cred_names}"] if not has_creds else ["Sandbox environment not yet built"]
         )
 
         profile_id = f"abp-{uuid.uuid4().hex[:8]}"

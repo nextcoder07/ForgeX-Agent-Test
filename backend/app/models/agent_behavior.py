@@ -47,7 +47,7 @@ class DataTransformation(BaseModel):
     field: str                                   # e.g. "search_results[].content"
     operation: str                               # e.g. "truncate", "format", "normalize"
     parameters: Dict[str, Any] = Field(default_factory=dict) # e.g. {"max_length": 500}
-    evidence: str                                # Source code line/snippet
+    evidence: str = ""                           # Source code line/snippet
 
 
 class CodeInvariant(BaseModel):

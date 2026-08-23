@@ -4,9 +4,36 @@ Agent Intake, Universal Ingestion, and Normalized Specification Models.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 from pydantic import BaseModel, Field
 from app.models.agent import ToolDefinition, DependencyDefinition, AgentConstitution
+
+
+class EvidenceFact(BaseModel):
+    classification: Literal["OBSERVED", "DECLARED", "INFERRED", "UNKNOWN"] = "INFERRED"
+    value: Any
+    evidence: List[str] = Field(default_factory=list)
+    confidence: float = 1.0
+
+
+class AgentAnalysisResponse(BaseModel):
+    name: str = "Discovered Agent"
+    domain: str = "general"
+    archetypes: List[str] = Field(default_factory=list)
+    goals: List[str] = Field(default_factory=list)
+    instructions: List[str] = Field(default_factory=list)
+    capabilities: List[str] = Field(default_factory=list)
+    never_rules: List[str] = Field(default_factory=list)
+    always_rules: List[str] = Field(default_factory=list)
+    escalation_rules: List[str] = Field(default_factory=list)
+    data_policies: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
+    state_management: str = "In-memory session"
+    architecture_components: List[str] = Field(default_factory=list)
+    invariants: List[Dict[str, Any]] = Field(default_factory=list)
+    transformations: List[Dict[str, Any]] = Field(default_factory=list)
+    conflicts: List[Dict[str, Any]] = Field(default_factory=list)
+    readiness: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CanonicalAgentInput(BaseModel):

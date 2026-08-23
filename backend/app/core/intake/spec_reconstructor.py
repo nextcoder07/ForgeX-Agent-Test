@@ -299,30 +299,51 @@ async def process_agent_intake(
             "input_type": payload.input_type,
             "agent_name_hint": payload.agent_name_hint
         },
+        "analysis_contract": {
+            "required_outputs": [
+                "identity",
+                "interface_contract",
+                "output_contract",
+                "workflow",
+                "capabilities",
+                "dependencies",
+                "credentials",
+                "dataflows",
+                "invariants",
+                "failure_surfaces",
+                "security_surfaces",
+                "fallbacks",
+                "readiness"
+            ]
+        },
         "source_files": typed_source_files,
         "deterministic_evidence": deterministic_evidence,
         "user_instructions": payload.pasted_prompt or None
     }
 
     t2_start = time.time()
-    # 4. LLM Semantic Understanding via Structured Evidence Packet
+    # 4. LLM Semantic Understanding via Structured Evidence Packet & Pydantic Validation
     try:
         if hasattr(llm, "analyze_evidence_packet"):
-            semantic_data = await llm.analyze_evidence_packet(evidence_packet)
+            semantic_raw = await llm.analyze_evidence_packet(evidence_packet)
         else:
-            semantic_data = await llm.analyze(all_code, all_docs)
+            semantic_raw = await llm.analyze(all_code, all_docs)
+        
+        # Strict Pydantic Schema Validation
+        from app.models.intake import AgentAnalysisResponse
+        validated_response = AgentAnalysisResponse.model_validate(semantic_raw)
         semantic_status = "AI_ANALYSIS_COMPLETED"
     except Exception as e:
-        logger.warning(f"LLM semantic analysis unavailable: {e}")
-        semantic_data = {
-            "name": payload.agent_name_hint or "Discovered Agent",
-            "domain": "General AI Agent",
-            "archetypes": ["UTILITY", "LLM_POWERED"] if agent_category.value == "llm_powered" else ["UTILITY"],
-            "goals": [],
-            "instructions": [],
-            "status": "AI_ANALYSIS_FAILED"
-        }
-        semantic_status = "AI_ANALYSIS_FAILED"
+        logger.warning(f"LLM semantic analysis schema error / failure: {e}")
+        from app.models.intake import AgentAnalysisResponse
+        validated_response = AgentAnalysisResponse(
+            name=payload.agent_name_hint or "Discovered Agent",
+            domain="General AI Agent",
+            archetypes=["UTILITY", "LLM_POWERED"] if agent_category.value == "llm_powered" else ["UTILITY"],
+            goals=[],
+            instructions=[]
+        )
+        semantic_status = "AI_ANALYSIS_SCHEMA_ERROR" if "validation" in str(e).lower() else "AI_ANALYSIS_FAILED"
 
     t2_dur = (time.time() - t2_start) * 1000.0
     if tracker:
@@ -335,79 +356,18 @@ async def process_agent_intake(
         tracker.start_stage(3, {"tools_extracted": len(dedup_tools)})
 
     t3_start = time.time()
-    constitution = AgentConstitution(
-        goals=semantic_data.get("goals", []),
-        never_rules=semantic_data.get("never_rules", []),
-        always_rules=semantic_data.get("always_rules", []),
-        escalation_rules=semantic_data.get("escalation_rules", []),
-        data_policies=semantic_data.get("data_policies", [])
+    # 5. Profile Merger: Precedence (Observed Deterministic > Declared Documentation > Gemini Inference)
+    from app.core.intake.profile_merger import ProfileMerger
+    norm_spec, behavior_profile, merged_conflicts = ProfileMerger.merge_profiles(
+        deterministic_evidence=deterministic_evidence,
+        semantic_response=validated_response,
+        artifact_id=artifact_record.artifact_id,
+        agent_version_id=agent_id_temp,
+        input_type=payload.input_type,
+        agent_name_hint=payload.agent_name_hint,
+        custom_instructions=payload.pasted_prompt
     )
-
-    # 4. Assemble AgentBehaviorProfile
-    agent_name = semantic_data.get("name") or payload.agent_name_hint or "Discovered Agent"
-    domain_name = semantic_data.get("domain") or "General AI Agent"
-
-    behavior_profile = ProfileBuilder.build_behavior_profile(
-        agent_id=agent_id_temp,
-        agent_name=agent_name,
-        domain=domain_name,
-        workflow_graph=workflow_graph,
-        capabilities=service_facts.get("capabilities", []),
-        external_calls=service_facts.get("external_calls", []),
-        credential_references=detected_secrets,
-        transformations=behavioral_facts.get("transformations", []),
-        invariants=behavioral_facts.get("invariants", []),
-        failure_surfaces=behavioral_facts.get("failure_surfaces", []),
-        state_model=behavioral_facts.get("state_model", {}),
-        inputs=behavioral_facts.get("inputs", []),
-        outputs=behavioral_facts.get("outputs", []),
-        security_surfaces=behavioral_facts.get("security_surfaces", []),
-        conflicts=behavioral_facts.get("conflicts", [])
-    )
-
-    # Compute derived execution status from behavior profile readiness breakdown
-    derived_exec_status = "EXECUTION_READY" if behavior_profile.readiness.execution_ready else "EXECUTION_BLOCKED"
-
-    # Attach detected secrets and model dependencies to runtime manifest
-    runtime_manifest = _infer_runtime(analysis_files, payload.endpoint_url)
-    runtime_manifest["agent_category"] = agent_category.value
-    runtime_manifest["detected_model_dependencies"] = [m.model_dump() for m in detected_model_deps]
-    runtime_manifest["detected_secrets"] = [s.model_dump() for s in detected_secrets]
-    runtime_manifest["execution_status"] = derived_exec_status
-    runtime_manifest["interface_contract"] = _infer_interface_contract(
-        runtime_manifest, ast_trees, behavioral_facts, payload.endpoint_url
-    )
-    runtime_manifest["output_contract"] = _build_output_contract(behavioral_facts)
-
-    # Combine canonical capabilities from ServiceDetector with LLM semantic capabilities
-    canonical_caps = service_facts.get("capabilities", [])
-    semantic_caps = semantic_data.get("capabilities", [])
-    merged_caps = list(dict.fromkeys(canonical_caps + semantic_caps))
-
-    norm_spec = NormalizedAgentSpec(
-        identity={
-            "name": agent_name,
-            "domain": domain_name,
-            "framework": framework_name,
-            "language": runtime_manifest.get("runtime") or "python",
-            "entrypoint": runtime_manifest.get("entrypoint") or "unknown",
-            "category": agent_category.value
-        },
-        agent_description=f"Agent '{agent_name}' ({domain_name}) with {len(workflow_graph.nodes)} workflow nodes, {len(merged_caps)} capabilities ({', '.join(merged_caps)}), and {len(behavioral_facts.get('invariants', []))} invariants.",
-        behavior_profile=behavior_profile,
-        goals=constitution.goals,
-        instructions=semantic_data.get("instructions", []),
-        tools=dedup_tools,
-        dependencies=extracted_deps,
-        constitution=constitution,
-        capabilities=merged_caps,
-        archetypes=semantic_data.get("archetypes", ["UTILITY", "LLM_POWERED"] if agent_category.value == "llm_powered" else ["UTILITY"]),
-        risks=semantic_data.get("risks", []),
-        state_management="In-memory session state" if behavioral_facts.get("state_model") else "Stateless",
-        architecture_components=semantic_data.get("architecture_components", [n.name for n in workflow_graph.nodes] if workflow_graph.nodes else []),
-        runtime_manifest=runtime_manifest,
-        execution_status=derived_exec_status,
-    )
+    constitution = norm_spec.constitution
 
     t3_dur = (time.time() - t3_start) * 1000.0
     if tracker:

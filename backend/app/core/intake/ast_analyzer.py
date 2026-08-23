@@ -48,6 +48,28 @@ def analyze_python_source(code: str, filename: str = "agent.py") -> Dict[str, An
                     "line": getattr(node, "lineno", 1)
                 })
 
+                # Extract public methods on Agent / Tool classes as ToolDefinitions
+                is_agent_or_tool_class = any(kw in node.name.lower() for kw in ["agent", "tool", "service", "executor"])
+                if is_agent_or_tool_class:
+                    for item in node.body:
+                        if isinstance(item, ast.FunctionDef) and not item.name.startswith("_") and item.name not in ["run", "execute", "main"]:
+                            doc = ast.get_docstring(item) or ""
+                            params = [arg.arg for arg in item.args.args if arg.arg != "self"]
+                            param_schema = {p: "string" for p in params}
+                            tools.append(
+                                ToolDefinition(
+                                    name=item.name,
+                                    description=doc or f"Executes {item.name}({', '.join(params)})",
+                                    parameters_schema=param_schema,
+                                    risk=ToolRisk.HIGH if any(kw in item.name.lower() for kw in ["refund", "cancel", "delete", "execute", "drop"]) else ToolRisk.LOW,
+                                    is_destructive=any(kw in item.name.lower() for kw in ["delete", "cancel", "drop", "destroy"]),
+                                    requires_confirmation=any(kw in item.name.lower() for kw in ["cancel", "delete", "refund"]),
+                                    requires_authorization=any(kw in item.name.lower() for kw in ["refund", "payment", "transfer"]),
+                                    canonical_capability="CUSTOM_TOOL",
+                                    side_effect_type="WRITE" if any(kw in item.name.lower() for kw in ["refund", "cancel", "update", "send", "write", "post"]) else "READ"
+                                )
+                            )
+
             # 2. Function Definitions
             elif isinstance(node, ast.FunctionDef):
                 doc = ast.get_docstring(node) or ""
@@ -86,8 +108,8 @@ def analyze_python_source(code: str, filename: str = "agent.py") -> Dict[str, An
                 }
                 functions.append(fn_info)
 
-                # ONLY explicitly decorated functions or explicit tool classes are exposed as external tools
-                if is_explicit_tool:
+                # Explicitly decorated functions or top-level tool functions (non-main/non-helper) are tools
+                if is_explicit_tool or (not node.name.startswith("_") and node.name not in ["main", "run", "cli", "parse_args", "get_agent"] and any(kw in node.name.lower() for kw in ["calculate", "convert", "format", "search", "lookup", "fetch", "get_", "create_", "update_", "delete_"])):
                     tools.append(
                         ToolDefinition(
                             name=node.name,
