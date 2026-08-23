@@ -43,6 +43,21 @@ def _compute_scenario_fingerprint(sc: Scenario) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def deduplicate_scenarios(scenarios: List[Scenario], threshold: float = 0.88) -> List[Scenario]:
+    """Deduplicates scenarios based on fingerprint and purpose similarity."""
+    seen_fingerprints = set()
+    unique_scenarios = []
+    for sc in scenarios:
+        fp = _compute_scenario_fingerprint(sc)
+        purpose_key = sc.purpose.strip().lower()
+        key = (fp, purpose_key)
+        if key not in seen_fingerprints:
+            seen_fingerprints.add(key)
+            unique_scenarios.append(sc)
+    return unique_scenarios
+
+
+
 async def generate_scenarios_for_agent(
     agent: AgentRecord,
     strategy: Optional[StrategyPlan] = None,

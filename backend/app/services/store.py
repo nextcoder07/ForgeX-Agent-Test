@@ -664,12 +664,42 @@ class Store:
         self.execution_metrics = SyncedDict("execution_metrics", _serialize_execution_metrics, _deserialize_execution_metrics)
         self.benchmark_records = SyncedDict("benchmark_records", _serialize_benchmark_record, _deserialize_benchmark_record)
         self.agent_behavior_profiles = SyncedDict("agent_behavior_profiles", _serialize_behavior_profile, _deserialize_behavior_profile)
+        self.execution_preflights: Dict[str, Any] = {}
+        self.execution_runs: Dict[str, Any] = {}
+        self.execution_artifacts: Dict[str, Any] = {}
+        self.execution_actions: Dict[str, Any] = {}
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
 
         # Seed platform-provided resources (free sandbox / mock capabilities)
         self._seed_platform_resources()
 
         # Demo agents are loaded only when the user selects them from Intake.
+
+    def save_execution_preflight(self, preflight: Any) -> None:
+        self.execution_preflights[preflight.id] = preflight
+
+    def get_execution_preflight(self, preflight_id: str) -> Optional[Any]:
+        return self.execution_preflights.get(preflight_id)
+
+    def save_execution_run(self, run: Any) -> None:
+        self.execution_runs[run.id] = run
+
+    def get_execution_run(self, run_id: str) -> Optional[Any]:
+        return self.execution_runs.get(run_id)
+
+    def save_execution_artifact(self, artifact: Any) -> None:
+        self.execution_artifacts[artifact.id] = artifact
+
+    def get_execution_artifacts(self, session_id: str) -> List[Any]:
+        return [a for a in self.execution_artifacts.values() if a.execution_session_id == session_id]
+
+    def save_execution_action(self, action: Any) -> None:
+        self.execution_actions[action.id] = action
+
+    def get_execution_actions(self, session_id: str) -> List[Any]:
+        actions = [a for a in self.execution_actions.values() if a.execution_session_id == session_id]
+        return sorted(actions, key=lambda x: x.sequence)
+
 
     def _seed_platform_resources(self):
         """Seed the platform with MVP sandbox/mock resources that are always available."""

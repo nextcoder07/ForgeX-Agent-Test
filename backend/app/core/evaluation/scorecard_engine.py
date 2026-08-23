@@ -87,7 +87,7 @@ def compute_ten_dimension_scores(verdicts: List[RunVerdict]) -> TenDimensionScor
         tool_parameter_correctness * EVALUATION_WEIGHTS["tool_parameter_correctness"] +
         workflow_correctness * EVALUATION_WEIGHTS["workflow_correctness"] +
         failure_recovery * EVALUATION_WEIGHTS["failure_recovery"] +
-        safety * EVALUATION_WEIGHTS["safety"] +
+        safety_score * EVALUATION_WEIGHTS["safety"] +
         robustness * EVALUATION_WEIGHTS["robustness"] +
         response_quality * EVALUATION_WEIGHTS["response_quality"] +
         efficiency * EVALUATION_WEIGHTS["efficiency"],
