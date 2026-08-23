@@ -108,7 +108,7 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onNavigate }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Agent Sidebar List */}
-        <div className="lg:col-span-1 space-y-2">
+        <div className="lg:col-span-1 space-y-2 lg:max-h-[calc(100vh-12rem)] lg:overflow-y-auto lg:sticky lg:top-24 lg:pr-1 scrollbar-thin">
           {loading ? (
             <div className="p-4 text-center text-xs text-slate-400">
               <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1" />

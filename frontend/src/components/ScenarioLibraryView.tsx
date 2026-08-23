@@ -113,82 +113,84 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
       </div>
 
       {/* Scenario Table / Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {filteredScenarios.map((sc) => {
-          const isFailedGen = sc.validation_status === 'FAILED_GENERATION';
-          const isRunnable = !isFailedGen;
-          const isSelected = selectedIds.has(sc.id);
+      <div className="max-h-[calc(100vh-18rem)] overflow-y-auto scrollbar-thin rounded-2xl border border-slate-800/50 p-1">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filteredScenarios.map((sc) => {
+            const isFailedGen = sc.validation_status === 'FAILED_GENERATION';
+            const isRunnable = !isFailedGen;
+            const isSelected = selectedIds.has(sc.id);
 
-          return (
-            <div
-              key={sc.id}
-              onClick={() => toggleSelectOne(sc.id, isRunnable)}
-              className={`p-4 rounded-xl border transition-all flex flex-col justify-between space-y-3 ${
-                isFailedGen
-                  ? 'bg-slate-950/30 border-rose-950/40 cursor-not-allowed opacity-50'
-                  : isSelected
-                  ? 'bg-slate-900/90 border-cyan-500/50 shadow-md shadow-cyan-500/10 cursor-pointer'
-                  : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 opacity-70 cursor-pointer'
-              }`}
-            >
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    {!isFailedGen && (
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={() => toggleSelectOne(sc.id, isRunnable)}
-                        className="rounded border-slate-700 text-cyan-500 focus:ring-0 cursor-pointer"
-                      />
-                    )}
-                    <span className="font-mono text-[10px] text-slate-400">{sc.id}</span>
+            return (
+              <div
+                key={sc.id}
+                onClick={() => toggleSelectOne(sc.id, isRunnable)}
+                className={`p-4 rounded-xl border transition-all flex flex-col justify-between space-y-3 ${
+                  isFailedGen
+                    ? 'bg-slate-950/30 border-rose-950/40 cursor-not-allowed opacity-50'
+                    : isSelected
+                    ? 'bg-slate-900/90 border-cyan-500/50 shadow-md shadow-cyan-500/10 cursor-pointer'
+                    : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 opacity-70 cursor-pointer'
+                }`}
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      {!isFailedGen && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={() => toggleSelectOne(sc.id, isRunnable)}
+                          className="rounded border-slate-700 text-cyan-500 focus:ring-0 cursor-pointer"
+                        />
+                      )}
+                      <span className="font-mono text-[10px] text-slate-400">{sc.id}</span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 text-[9px] font-mono uppercase font-bold rounded ${
+                        isFailedGen
+                          ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                          : sc.category === 'safety' || sc.category === 'security'
+                          ? 'bg-rose-950 text-rose-300 border border-rose-500/30'
+                          : sc.category === 'recovery' || sc.category === 'chaos'
+                          ? 'bg-indigo-950 text-indigo-300 border border-indigo-500/30'
+                          : 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
+                      }`}
+                    >
+                      {sc.category}
+                    </span>
                   </div>
-                  <span
-                    className={`px-2 py-0.5 text-[9px] font-mono uppercase font-bold rounded ${
-                      isFailedGen
-                        ? 'bg-slate-800 text-slate-400 border border-slate-700'
-                        : sc.category === 'safety' || sc.category === 'security'
-                        ? 'bg-rose-950 text-rose-300 border border-rose-500/30'
-                        : sc.category === 'recovery' || sc.category === 'chaos'
-                        ? 'bg-indigo-950 text-indigo-300 border border-indigo-500/30'
-                        : 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
-                    }`}
-                  >
-                    {sc.category}
-                  </span>
+
+                  <h4 className="text-xs font-bold text-slate-100 line-clamp-1">{sc.title}</h4>
+                  <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{sc.purpose}</p>
                 </div>
 
-                <h4 className="text-xs font-bold text-slate-100 line-clamp-1">{sc.title}</h4>
-                <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{sc.purpose}</p>
-              </div>
+                <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                  {/* Rationale Card */}
+                  {sc.rationale && (
+                    <p className="text-[10px] text-slate-400 font-sans italic leading-tight">
+                      {sc.rationale}
+                    </p>
+                  )}
 
-              <div className="space-y-2 pt-2 border-t border-slate-800/80">
-                {/* Rationale Card */}
-                {sc.rationale && (
-                  <p className="text-[10px] text-slate-400 font-sans italic leading-tight">
-                    {sc.rationale}
-                  </p>
-                )}
-
-                <div className="flex items-center justify-between text-[10px] font-mono">
-                  <span className="text-slate-400">
-                    Capabilities: {sc.required_capabilities.join(', ') || 'NONE'}
-                  </span>
-                  <span
-                    className={`flex items-center space-x-1 font-bold ${
-                      sc.validation_status === 'VALIDATED' ? 'text-emerald-400' : isFailedGen ? 'text-rose-500' : 'text-amber-400'
-                    }`}
-                  >
-                    {isFailedGen ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
-                    <span>{sc.validation_status}</span>
-                  </span>
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-slate-400">
+                      Capabilities: {sc.required_capabilities.join(', ') || 'NONE'}
+                    </span>
+                    <span
+                      className={`flex items-center space-x-1 font-bold ${
+                        sc.validation_status === 'VALIDATED' ? 'text-emerald-400' : isFailedGen ? 'text-rose-500' : 'text-amber-400'
+                      }`}
+                    >
+                      {isFailedGen ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
+                      <span>{sc.validation_status}</span>
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
