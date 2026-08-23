@@ -24,7 +24,8 @@ async def critique_scenarios(
     Updates the critic_status, critic_feedback, and critic_confidence of each scenario.
     """
     critiqued = []
-    llm = GeminiProvider(api_key=api_key) if (api_key or os.getenv("GEMINI_API_KEY")) else None
+    from app.core.llm.providers import get_platform_provider
+    llm = get_platform_provider()
 
     # Check duplicates dynamically
     seen_messages = set()

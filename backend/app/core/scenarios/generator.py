@@ -66,7 +66,8 @@ async def _generate_via_llm(
     api_key: Optional[str]
 ) -> List[ScenarioDefinition]:
     """Generates scenarios using Gemini structured JSON prompt."""
-    provider = GeminiProvider(api_key=api_key)
+    from app.core.llm.providers import get_platform_provider
+    provider = get_platform_provider()
     
     # Prepare agent summary context
     agent_spec_dict = {

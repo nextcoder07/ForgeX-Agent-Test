@@ -127,7 +127,8 @@ async def analyze_agent(agent_path: str, api_key: Optional[str] = None) -> Agent
     name_hint = metadata.get("title") or metadata.get("name") or os.path.basename(os.path.normpath(agent_path))
     
     # Try calling LLM Provider
-    provider = GeminiProvider(api_key=api_key)
+    from app.core.llm.providers import get_platform_provider
+    provider = get_platform_provider()
     
     # Check if Gemini key is available or fallback
     if api_key or os.getenv("GEMINI_API_KEY"):
