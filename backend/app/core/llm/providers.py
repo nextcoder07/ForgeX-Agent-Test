@@ -92,9 +92,9 @@ class AnthropicProvider(LLMProvider):
 
 class OllamaProvider(LLMProvider):
     """Local model provider (Ollama) — NO API Key required."""
-    def __init__(self, endpoint: str = "http://localhost:11434", model_name: str = "llama3"):
-        self.endpoint = endpoint
-        self.model_name = model_name
+    def __init__(self, endpoint: Optional[str] = None, model_name: Optional[str] = None):
+        self.endpoint = (endpoint or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
+        self.model_name = model_name or os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
 
     async def generate(
         self,

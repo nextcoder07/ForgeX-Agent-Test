@@ -98,25 +98,39 @@ class UnifiedKeyManager:
                     model_name=os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
                 ))
 
-        # 3. Legacy fallback for OTHERAI_API_KEY and OTHERAI_API_KEY_n
-        other_main = os.getenv("OTHERAI_API_KEY", "").strip()
-        if other_main and not any(k.value == other_main for k in self.keys):
+        # 3. Legacy / explicit fallback for OPENROUTER_API_KEY or OTHERAI_API_KEY
+        openrouter_main = os.getenv("OPENROUTER_API_KEY", "").strip() or os.getenv("OTHERAI_API_KEY", "").strip()
+        openrouter_model = os.getenv("OPENROUTER_MODEL", "").strip() or os.getenv("OTHERAI_MODEL", "openai/gpt-4o-mini")
+        if openrouter_main and not any(k.value == openrouter_main for k in self.keys):
             self.keys.append(AIKey(
-                key_id="OtherAI Legacy Key Main",
-                value=other_main,
+                key_id="OpenRouter Main Key",
+                value=openrouter_main,
                 api_name="openrouter",
-                model_name=os.getenv("OTHERAI_MODEL", "openai/gpt-4o-mini")
+                model_name=openrouter_model
             ))
-            
+            logger.info(f"Registered OpenRouter Key ('{openrouter_model}')")
+
         for idx in range(1, 10):
-            other_val = os.getenv(f"OTHERAI_API_KEY_{idx}", "").strip()
+            other_val = os.getenv(f"OPENROUTER_API_KEY_{idx}", "").strip() or os.getenv(f"OTHERAI_API_KEY_{idx}", "").strip()
             if other_val and not any(k.value == other_val for k in self.keys):
                 self.keys.append(AIKey(
-                    key_id=f"OtherAI Legacy Key {idx}",
+                    key_id=f"OpenRouter Secondary Key {idx}",
                     value=other_val,
                     api_name="openrouter",
-                    model_name=os.getenv("OTHERAI_MODEL", "openai/gpt-4o-mini")
+                    model_name=openrouter_model
                 ))
+
+        # 4. Standalone / local Ollama registration (OLLAMA_BASE_URL & OLLAMA_MODEL)
+        ollama_url = os.getenv("OLLAMA_BASE_URL", "").strip() or "http://localhost:11434"
+        ollama_model = os.getenv("OLLAMA_MODEL", "").strip() or "qwen2.5-coder:7b"
+        if (os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_MODEL")) and not any(k.api_name == "ollama" and k.value == ollama_url for k in self.keys):
+            self.keys.append(AIKey(
+                key_id="Ollama Local Server",
+                value=ollama_url,
+                api_name="ollama",
+                model_name=ollama_model
+            ))
+            logger.info(f"Registered Ollama Local Server ({ollama_url} - {ollama_model})")
 
         if not self.keys:
             logger.warning("No API keys configured in environment!")
