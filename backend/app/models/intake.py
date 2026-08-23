@@ -130,6 +130,7 @@ class NormalizedAgentSpec(BaseModel):
     dependencies: List[DependencyDefinition] = Field(default_factory=list)
     constitution: AgentConstitution = Field(default_factory=AgentConstitution)
     capabilities: List[str] = Field(default_factory=list)
+    archetypes: List[str] = Field(default_factory=list)
     risks: List[str] = Field(default_factory=list)
     state_management: str = "In-memory session"
     architecture_components: List[str] = Field(default_factory=list)

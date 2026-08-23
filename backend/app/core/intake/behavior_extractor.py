@@ -56,18 +56,40 @@ class BehaviorExtractor:
                             out_field = next(f for f in fields if f in ["report", "output", "result", "response"])
                             outputs.append({"name": out_field, "type": "string", "source": f"state_model.{out_field}"})
 
-                # Detect String Truncation (Subscript Slice [:500])
+                # Detect Subscript Slices (e.g., articles[:5] or content[:500])
                 elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
                     if isinstance(node.slice.upper, ast.Constant) and isinstance(node.slice.upper.value, int):
                         limit = node.slice.upper.value
-                        transformations.append(
-                            DataTransformation(
-                                field="retrieved_content",
-                                operation="truncate",
-                                parameters={"max_length": limit},
-                                evidence=f"Content sliced with upper bound {limit} in {fname}"
+                        var_name = node.value.id if isinstance(node.value, ast.Name) else "items"
+                        if any(kw in var_name.lower() for kw in ["article", "item", "result", "doc", "message", "record", "chunk"]):
+                            transformations.append(
+                                DataTransformation(
+                                    field=var_name,
+                                    operation="limit_items",
+                                    parameters={"max_items": limit},
+                                    evidence=f"Collection '{var_name}' limited to {limit} items in {fname}"
+                                )
                             )
-                        )
+                            invariants.append(
+                                CodeInvariant(
+                                    statement=f"max_{var_name}_passed_to_llm = {limit}",
+                                    type="observed",
+                                    enforcement_level="hard",
+                                    testability="deterministic",
+                                    source_file=fname,
+                                    evidence=f"{var_name}[:{limit}]",
+                                    confidence=1.0
+                                )
+                            )
+                        else:
+                            transformations.append(
+                                DataTransformation(
+                                    field=var_name,
+                                    operation="truncate",
+                                    parameters={"max_length": limit},
+                                    evidence=f"Content '{var_name}' sliced with upper bound {limit} in {fname}"
+                                )
+                            )
 
                 # Detect Invariants (e.g. max_results = 5, temperature = 0, model = "gpt-4o-mini")
                 elif isinstance(node, ast.keyword):

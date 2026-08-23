@@ -75,19 +75,37 @@ _CREDENTIAL_KEYWORDS = {
 def _resolve_dependencies_for_agent(agent_id: str, spec: NormalizedAgentSpec):
     """Auto-extract dependencies from a NormalizedAgentSpec and resolve them.
 
-    Priority:
-      1. Platform sandbox/resource (free)
-      2. Free API/provider
-      3. Adapter/mock/replay
-      4. User test credential (ask user)
-      5. Block execution
+    Resolution Policy:
+      1. Platform Runtime (Python 3.12 Sandbox) -> READY
+      2. Python Packages (requirements.txt packages) -> PLATFORM_SANDBOX (READY via pip install)
+      3. Secrets & API Credentials:
+         - If required (e.g. OPENAI_API_KEY) -> USER_CREDENTIAL (user_credential_required)
+         - If optional with code fallback (e.g. NEWS_API_KEY) -> OPTIONAL_CREDENTIAL (ready_with_fallback)
     """
-    platform_resources = store.list_platform_resources()
-    capability_map = {r.capability: r for r in platform_resources}
-
     seen_names: set = set()
 
-    # 1. Extract from spec.dependencies
+    # 1. Always add the platform runtime dependency
+    runtime_name = "Python 3.12 Runtime"
+    dep_rt = AgentDependency(
+        id=f"dep-{uuid.uuid4().hex[:8]}",
+        agent_id=agent_id,
+        dependency_name=runtime_name,
+        dependency_type="runtime",
+        required=True,
+        detected_from="config",
+    )
+    store.save_agent_dependency(dep_rt)
+    store.save_dependency_binding(DependencyBinding(
+        id=f"bind-{uuid.uuid4().hex[:8]}",
+        agent_id=agent_id,
+        dependency_name=runtime_name,
+        resolution_type="platform_sandbox",
+        status="ready",
+        created_at=_now(),
+    ))
+    seen_names.add(runtime_name)
+
+    # 2. Extract and resolve declared Python packages from spec.dependencies
     for dep_def in spec.dependencies:
         dep_name = dep_def.name
         if dep_name in seen_names:
@@ -98,137 +116,61 @@ def _resolve_dependencies_for_agent(agent_id: str, spec: NormalizedAgentSpec):
             id=f"dep-{uuid.uuid4().hex[:8]}",
             agent_id=agent_id,
             dependency_name=dep_name,
-            dependency_type=dep_def.type,
+            dependency_type=dep_def.type or "package",
             required=dep_def.required,
             detected_from=dep_def.detected_from,
         )
         store.save_agent_dependency(dep)
 
-        # Try to match to a platform capability
-        cap_key = _DEP_TYPE_TO_CAPABILITY.get(dep_def.type.lower())
-        if cap_key and cap_key in capability_map:
-            binding = DependencyBinding(
-                id=f"bind-{uuid.uuid4().hex[:8]}",
-                agent_id=agent_id,
-                dependency_name=dep_name,
-                resolution_type="platform_sandbox",
-                status="ready",
-                created_at=_now(),
-            )
-        elif any(kw in dep_name.lower() for kw in _CREDENTIAL_KEYWORDS):
-            binding = DependencyBinding(
-                id=f"bind-{uuid.uuid4().hex[:8]}",
-                agent_id=agent_id,
-                dependency_name=dep_name,
-                resolution_type="user_credential",
-                status="user_credential_required",
-                created_at=_now(),
-            )
-        else:
-            # Attempt generic match by scanning name keywords
-            resolved = False
-            for keyword, cap in _DEP_TYPE_TO_CAPABILITY.items():
-                if keyword in dep_name.lower() and cap in capability_map:
-                    binding = DependencyBinding(
-                        id=f"bind-{uuid.uuid4().hex[:8]}",
-                        agent_id=agent_id,
-                        dependency_name=dep_name,
-                        resolution_type="platform_sandbox",
-                        status="ready",
-                        created_at=_now(),
-                    )
-                    resolved = True
-                    break
-            if not resolved:
-                binding = DependencyBinding(
-                    id=f"bind-{uuid.uuid4().hex[:8]}",
-                    agent_id=agent_id,
-                    dependency_name=dep_name,
-                    resolution_type="block",
-                    status="unsupported",
-                    created_at=_now(),
-                )
-        store.save_dependency_binding(binding)
-        activity_log.emit(
-            category="DEPENDENCY",
-            action="RESOLVE",
-            detail=f"Resolved spec dependency: {dep_name}",
-            response_summary=f"Resolved: {binding.resolution_type} ({binding.status})",
-            status="success" if binding.status == "ready" else "warning"
-        )
-
-    # 2. Extract from capabilities list (e.g. "WEB_SEARCH", "BROWSER")
-    for cap in spec.capabilities:
-        cap_upper = cap.upper().replace(" ", "_")
-        if cap_upper in seen_names:
-            continue
-        seen_names.add(cap_upper)
-
-        dep = AgentDependency(
-            id=f"dep-{uuid.uuid4().hex[:8]}",
-            agent_id=agent_id,
-            dependency_name=cap,
-            dependency_type="tool",
-            required=True,
-            detected_from="capabilities",
-        )
-        store.save_agent_dependency(dep)
-
-        if cap_upper in capability_map:
-            binding = DependencyBinding(
-                id=f"bind-{uuid.uuid4().hex[:8]}",
-                agent_id=agent_id,
-                dependency_name=cap,
-                resolution_type="platform_sandbox",
-                status="ready",
-                created_at=_now(),
-            )
-        else:
-            binding = DependencyBinding(
-                id=f"bind-{uuid.uuid4().hex[:8]}",
-                agent_id=agent_id,
-                dependency_name=cap,
-                resolution_type="user_credential",
-                status="user_credential_required",
-                created_at=_now(),
-            )
-        store.save_dependency_binding(binding)
-        activity_log.emit(
-            category="DEPENDENCY",
-            action="RESOLVE",
-            detail=f"Resolved capability dependency: {cap}",
-            response_summary=f"Resolved: {binding.resolution_type} ({binding.status})",
-            status="success" if binding.status == "ready" else "warning"
-        )
-
-    # 3. Always add a runtime dependency
-    runtime_name = "Python 3.12 Runtime"
-    if runtime_name not in seen_names:
-        dep = AgentDependency(
-            id=f"dep-{uuid.uuid4().hex[:8]}",
-            agent_id=agent_id,
-            dependency_name=runtime_name,
-            dependency_type="runtime",
-            required=True,
-            detected_from="config",
-        )
-        store.save_agent_dependency(dep)
+        # Standard packages and frameworks are installable in the platform sandbox via pip
         binding = DependencyBinding(
             id=f"bind-{uuid.uuid4().hex[:8]}",
             agent_id=agent_id,
-            dependency_name=runtime_name,
+            dependency_name=dep_name,
             resolution_type="platform_sandbox",
             status="ready",
             created_at=_now(),
         )
         store.save_dependency_binding(binding)
-        activity_log.emit(
-            category="DEPENDENCY",
-            action="RESOLVE",
-            detail=f"Resolved runtime: {runtime_name}",
-            response_summary=f"Resolved: {binding.resolution_type} ({binding.status})",
-            status="success"
+
+    # 3. Extract and resolve Detected Secrets / Model Credentials from runtime_manifest
+    detected_secrets = spec.runtime_manifest.get("detected_secrets", []) if isinstance(spec.runtime_manifest, dict) else []
+    for sec in detected_secrets:
+        sec_name = sec.get("name") if isinstance(sec, dict) else getattr(sec, "name", "")
+        is_required = sec.get("required", True) if isinstance(sec, dict) else getattr(sec, "required", True)
+        if not sec_name or sec_name in seen_names:
+            continue
+        seen_names.add(sec_name)
+
+        dep = AgentDependency(
+            id=f"dep-{uuid.uuid4().hex[:8]}",
+            agent_id=agent_id,
+            dependency_name=sec_name,
+            dependency_type="credential",
+            required=is_required,
+            detected_from="environment_variable",
         )
+        store.save_agent_dependency(dep)
+
+        if not is_required:
+            binding = DependencyBinding(
+                id=f"bind-{uuid.uuid4().hex[:8]}",
+                agent_id=agent_id,
+                dependency_name=sec_name,
+                resolution_type="optional_credential",
+                status="ready_with_fallback",
+                created_at=_now(),
+            )
+        else:
+            binding = DependencyBinding(
+                id=f"bind-{uuid.uuid4().hex[:8]}",
+                agent_id=agent_id,
+                dependency_name=sec_name,
+                resolution_type="user_credential",
+                status="user_credential_required",
+                created_at=_now(),
+            )
+        store.save_dependency_binding(binding)
 
 
 @router.get("/local-agents")
@@ -384,6 +326,44 @@ async def register_normalized_spec(payload: RegisterSpecRequest):
     # --- Auto-extract dependencies and resolve bindings ---
     _resolve_dependencies_for_agent(rec.id, spec)
 
+    # --- Build and Persist AgentBehaviorProfile ---
+    try:
+        from app.core.intake.profile_builder import ProfileBuilder
+        from app.models.agent_behavior import (
+            WorkflowGraph,
+            DataTransformation,
+            CodeInvariant,
+            FailureSurface,
+            DeclaredVsImplementedConflict,
+        )
+
+        out_contract = spec.runtime_manifest.get("output_contract", {}) if isinstance(spec.runtime_manifest, dict) else {}
+        transformations = [DataTransformation(**t) for t in out_contract.get("transformations", [])]
+        invariants = [CodeInvariant(**inv) for inv in out_contract.get("observed_invariants", [])]
+
+        wf_graph = WorkflowGraph(
+            entrypoint=spec.runtime_manifest.get("entrypoint", "agent.py") if isinstance(spec.runtime_manifest, dict) else "agent.py",
+            nodes=[],
+            edges=[]
+        )
+
+        bp = ProfileBuilder.build_behavior_profile(
+            agent_id=rec.id,
+            agent_name=rec.display_name or rec.name,
+            domain=rec.domain or "general",
+            workflow_graph=wf_graph,
+            capabilities=spec.capabilities or [],
+            external_calls=[],
+            credential_references=[],
+            transformations=transformations,
+            invariants=invariants,
+            failure_surfaces=[],
+            agent_version_id=rec.id
+        )
+        store.save_behavior_profile(bp)
+    except Exception as e:
+        logger.warning(f"Error building/saving AgentBehaviorProfile for {rec.id}: {e}")
+
     # --- Auto-build and persist SandboxSpecification ---
     try:
         from app.core.sandbox.sandbox_manager import build_sandbox_specification_for_agent
@@ -465,7 +445,7 @@ def get_agent_dependencies(agent_id: str):
     """List all detected dependencies for an agent."""
     agent = store.get_agent(agent_id)
     if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+        return []
     return store.get_agent_dependencies(agent_id)
 
 
@@ -480,7 +460,7 @@ def get_agent_bindings(agent_id: str):
     """List all dependency bindings (resolutions) for an agent."""
     agent = store.get_agent(agent_id)
     if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+        return []
     return store.get_dependency_bindings(agent_id)
 
 

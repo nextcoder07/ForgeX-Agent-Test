@@ -50,18 +50,27 @@ def detect_specification_conflicts(
                 )
             )
 
-    # 3. Check for declared PII/secret protection vs code implementation
-    if "pii" in docs_lower or "redact" in docs_lower or "mask" in docs_lower:
-        has_redaction = any(kw in code_lower for kw in ["redact", "mask", "sanitize", "anonymize"])
-        if not has_redaction:
+    # 4. Check for declared framework vs implemented code imports (e.g. Docstring claims AutoGen, but code uses LangChain)
+    import re
+    framework_list = ["autogen", "crewai", "langchain", "langgraph", "llamaindex", "semantic_kernel"]
+    observed_frameworks = [
+        fw for fw in framework_list
+        if re.search(rf'(?:from|import)\s+{fw}', code_lower)
+    ]
+    declared_frameworks = [
+        fw for fw in framework_list
+        if re.search(rf'\b{fw}\b', docs_lower) or re.search(rf'using\s+{fw}|framework[:\s]+{fw}|with\s+{fw}', code_lower)
+    ]
+    for dfw in declared_frameworks:
+        if observed_frameworks and dfw not in observed_frameworks:
             conflicts.append(
                 SpecConflict(
                     id=f"conf-{uuid.uuid4().hex[:6]}",
-                    title="Missing PII / Data Redaction Logic",
-                    doc_claim="Documentation claims sensitive data/credential protection",
-                    code_reality="No data masking or sanitization logic found in code",
-                    risk_level="high",
-                    explanation="Implement data scrubbing before passing external text to models or logs."
+                    title="Framework Declaration Conflict",
+                    doc_claim=f"Documentation or docstring declares {dfw.title()} framework",
+                    code_reality=f"Source code imports {', '.join(of.title() for of in observed_frameworks)} with no {dfw.title()} imports",
+                    risk_level="medium",
+                    explanation=f"Agent claims to be built with {dfw.title()} but actually executes {', '.join(of.title() for of in observed_frameworks)}."
                 )
             )
 

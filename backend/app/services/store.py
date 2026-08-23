@@ -20,6 +20,7 @@ from app.models.failure import RunVerdict, FailureCluster, FailureFinding
 from app.models.execution import ExecutionTrace, ExecutionJob, ExecutionSession, ExecutionStep, ExecutionMetrics, BenchmarkRecord
 from app.models.pipeline import PipelineRun, PipelineStage, AIGenerationRun
 from app.models.intake import AgentTestSpecification, SandboxSpecification, AgentDependency, PlatformResource, DependencyBinding
+from app.models.agent_behavior import AgentBehaviorProfile
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ def _serialize_agent(key: str, agent: AgentRecord) -> Dict[str, Any]:
         "name": agent.name,
         "description": agent.description,
         "status": "active",
+        "current_version_id": agent.id,
         "agent_spec": spec
     }
 
@@ -617,6 +619,26 @@ def _deserialize_benchmark_record(row: Dict[str, Any]) -> BenchmarkRecord:
     )
 
 
+def _serialize_behavior_profile(key: str, bp: AgentBehaviorProfile) -> Dict[str, Any]:
+    return {
+        "id": bp.id,
+        "agent_id": bp.agent_id,
+        "agent_version_id": bp.agent_version_id or bp.agent_id,
+        "schema_version": bp.schema_version,
+        "profile_json": bp.model_dump() if hasattr(bp, "model_dump") else bp.dict(),
+        "analysis_run_id": bp.analysis_run_id,
+        "confidence": bp.confidence_score,
+        "created_at": bp.created_at or _now(),
+    }
+
+
+def _deserialize_behavior_profile(row: Dict[str, Any]) -> AgentBehaviorProfile:
+    p_json = row.get("profile_json") or {}
+    if not p_json.get("agent_id") and row.get("agent_id"):
+        p_json["agent_id"] = row.get("agent_id")
+    return AgentBehaviorProfile(**p_json)
+
+
 # ---------------------------------------------------------------------------
 # Global Store Implementation
 # ---------------------------------------------------------------------------
@@ -641,6 +663,7 @@ class Store:
         self.execution_steps = SyncedDict("execution_steps", _serialize_execution_step, _deserialize_execution_step)
         self.execution_metrics = SyncedDict("execution_metrics", _serialize_execution_metrics, _deserialize_execution_metrics)
         self.benchmark_records = SyncedDict("benchmark_records", _serialize_benchmark_record, _deserialize_benchmark_record)
+        self.agent_behavior_profiles = SyncedDict("agent_behavior_profiles", _serialize_behavior_profile, _deserialize_behavior_profile)
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
 
         # Seed platform-provided resources (free sandbox / mock capabilities)
@@ -840,6 +863,15 @@ class Store:
                 self.agents._sb.table("agent_versions").upsert(version_row).execute()
             except Exception as e:
                 logger.error(f"Supabase error saving agent_version for {agent.id}: {e}")
+
+    def save_behavior_profile(self, profile: AgentBehaviorProfile) -> None:
+        self.agent_behavior_profiles[profile.id] = profile
+
+    def get_behavior_profile(self, agent_id: str) -> Optional[AgentBehaviorProfile]:
+        for p in self.agent_behavior_profiles.values():
+            if p.agent_id == agent_id:
+                return p
+        return None
 
     def delete_agent(self, agent_id: str) -> None:
         """Deletes the agent and cascades deletion of scenarios, artifacts, results, jobs, and bindings."""

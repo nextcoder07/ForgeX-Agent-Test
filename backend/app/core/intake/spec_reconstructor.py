@@ -246,21 +246,78 @@ async def process_agent_intake(
     detected_model_deps = DependencyDetector.detect_model_dependencies(agent_id_temp, all_code, detected_secrets)
     agent_category = DependencyDetector.classify_agent_category(all_code, detected_model_deps, dedup_tools, extracted_deps)
 
-    t1_dur = (time.time() - t1_start) * 1000.0
-    if tracker:
-        tracker.complete_stage(1, duration_ms=round(t1_dur, 2), input_tokens=0, output_tokens=0)
-        tracker.start_stage(2, {"model": getattr(llm, "model_name", "gemini-3.6-flash")})
+    # 3. Build Structured Evidence Packet
+    typed_source_files = []
+    for fpath, fcontent in analysis_files.items():
+        lower_f = fpath.lower()
+        if lower_f.endswith(".py"):
+            ftype = "python"
+        elif lower_f.endswith((".ts", ".js")):
+            ftype = "javascript"
+        elif lower_f.endswith((".md", ".txt", ".rst")):
+            ftype = "documentation"
+        elif "requirements" in lower_f or lower_f.endswith((".toml", ".lock")):
+            ftype = "dependency_manifest"
+        elif ".env" in lower_f:
+            ftype = "configuration_template"
+        elif lower_f.endswith((".yaml", ".yml", ".json")):
+            ftype = "metadata"
+        else:
+            ftype = "file"
+        typed_source_files.append({
+            "path": fpath,
+            "type": ftype,
+            "content": fcontent
+        })
+
+    deterministic_evidence = {
+        "ast": {
+            "tools_count": len(dedup_tools),
+            "tools": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in dedup_tools],
+        },
+        "framework": {
+            "name": framework_name,
+            "workflow_nodes_count": len(workflow_graph.nodes),
+            "workflow_edges_count": len(workflow_graph.edges),
+        },
+        "services": service_facts,
+        "credentials": [s.model_dump() if hasattr(s, "model_dump") else s.dict() for s in detected_secrets],
+        "dependencies": [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in extracted_deps],
+        "runtime": runtime_manifest,
+        "behavioral_facts": {
+            "transformations": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in behavioral_facts.get("transformations", [])],
+            "invariants": [inv.model_dump() if hasattr(inv, "model_dump") else inv.dict() for inv in behavioral_facts.get("invariants", [])],
+            "failure_surfaces": [f.model_dump() if hasattr(f, "model_dump") else f.dict() for f in behavioral_facts.get("failure_surfaces", [])],
+        }
+    }
+
+    evidence_packet = {
+        "analysis_context": {
+            "analysis_run_id": f"run-{hasher.hexdigest()[:8]}",
+            "artifact_id": artifact_record.artifact_id,
+            "agent_version_id": agent_id_temp,
+            "input_type": payload.input_type,
+            "agent_name_hint": payload.agent_name_hint
+        },
+        "source_files": typed_source_files,
+        "deterministic_evidence": deterministic_evidence,
+        "user_instructions": payload.pasted_prompt or None
+    }
 
     t2_start = time.time()
-    # 3. LLM Semantic Understanding
+    # 4. LLM Semantic Understanding via Structured Evidence Packet
     try:
-        semantic_data = await llm.analyze(all_code, all_docs)
+        if hasattr(llm, "analyze_evidence_packet"):
+            semantic_data = await llm.analyze_evidence_packet(evidence_packet)
+        else:
+            semantic_data = await llm.analyze(all_code, all_docs)
         semantic_status = "AI_ANALYSIS_COMPLETED"
     except Exception as e:
         logger.warning(f"LLM semantic analysis unavailable: {e}")
         semantic_data = {
             "name": payload.agent_name_hint or "Discovered Agent",
             "domain": "General AI Agent",
+            "archetypes": ["UTILITY", "LLM_POWERED"] if agent_category.value == "llm_powered" else ["UTILITY"],
             "goals": [],
             "instructions": [],
             "status": "AI_ANALYSIS_FAILED"
@@ -344,6 +401,7 @@ async def process_agent_intake(
         dependencies=extracted_deps,
         constitution=constitution,
         capabilities=merged_caps,
+        archetypes=semantic_data.get("archetypes", ["UTILITY", "LLM_POWERED"] if agent_category.value == "llm_powered" else ["UTILITY"]),
         risks=semantic_data.get("risks", []),
         state_management="In-memory session state" if behavioral_facts.get("state_model") else "Stateless",
         architecture_components=semantic_data.get("architecture_components", [n.name for n in workflow_graph.nodes] if workflow_graph.nodes else []),

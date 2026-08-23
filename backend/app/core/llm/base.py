@@ -19,6 +19,10 @@ class LLMProvider(ABC):
         """Perform semantic agent understanding and normalized spec extraction."""
         pass
 
+    async def analyze_evidence_packet(self, evidence_packet: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze a complete structured evidence packet using the master analyzer instruction."""
+        return await self.analyze(str(evidence_packet.get("source_files", "")), str(evidence_packet.get("deterministic_evidence", "")))
+
     @abstractmethod
     async def critique(self, scenario_json: Dict[str, Any], agent_spec: Dict[str, Any]) -> Dict[str, Any]:
         """2nd-pass scenario critic verifying relevance, executability, and safety."""

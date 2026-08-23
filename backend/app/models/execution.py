@@ -18,9 +18,24 @@ class ToolCallRecord(BaseModel):
     result: Any = Field(default_factory=dict)
     latency_ms: float = 0.0
     status: str = "SUCCESS"  # "SUCCESS", "TIMEOUT", "INJECTED_ERROR", "BLOCKED_POLICY"
-    routing_decision: str = "SIMULATED_SANDBOX"  # "SIMULATED_SANDBOX", "REDIRECTED", "BLOCKED"
+    routing_decision: str = "SIMULATED_SANDBOX"  # "SIMULATED_SANDBOX", "REDIRECTED", "BLOCKED", "ALLOW"
+    policy_reason: Optional[str] = None
+    actual_side_effect_occurred: bool = False
     injected_fault: Optional[str] = None
 
+
+class ActionAttemptRecord(BaseModel):
+    id: str
+    sequence: int
+    action_type: str  # "TOOL_CALL", "FILE_WRITE", "FILE_DELETE", "HTTP_REQUEST", "PROCESS_SPAWN"
+    target: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    policy_decision: str = "ALLOW"  # "ALLOW", "BLOCK", "REDIRECT", "MOCK"
+    policy_reason: Optional[str] = None
+    actual_side_effect: bool = False
+    state_before: Optional[Dict[str, Any]] = None
+    state_after: Optional[Dict[str, Any]] = None
+    timestamp: str = ""
 
 
 class StateChange(BaseModel):

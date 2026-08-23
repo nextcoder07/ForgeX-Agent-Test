@@ -298,17 +298,77 @@ class GeminiProvider(LLMProvider):
             retryable=last_error_code in (LLMErrorCode.RATE_LIMITED, LLMErrorCode.QUOTA_EXCEEDED, LLMErrorCode.SERVER_ERROR)
         )
 
+    MASTER_AGENT_ANALYZER_SYSTEM_PROMPT = (
+        "SYSTEM ROLE\n"
+        "You are the Agent Understanding Engine of an agent evaluation platform.\n"
+        "Your task is to analyze an uploaded AI agent or automation artifact and produce a precise, evidence-backed representation of how that agent actually works.\n"
+        "Your output will be consumed by Scenario Intelligence, Sandbox Intelligence, Dependency Resolution, Execution Harness, Trajectory Recorder, and Evaluation Engine.\n\n"
+        "The uploaded artifact is the PRIMARY SOURCE OF TRUTH. You are an ANALYZER, not an agent executor.\n\n"
+        "You must NEVER:\n"
+        "- execute code\n"
+        "- invent missing capabilities, tools, dependencies, credentials, models, workflows, safety policies, or outputs\n"
+        "- assume every agent is conversational or uses an LLM\n"
+        "- assume every function is a tool\n"
+        "- assume every dependency requires a user credential\n"
+        "- use platform defaults as facts about the uploaded agent\n"
+        "- copy behavior from another agent\n"
+        "- fill missing information with demo-agent examples\n"
+        "When evidence is insufficient, return UNKNOWN.\n\n"
+        "1. EVIDENCE CLASSIFICATION: Classify conclusions as OBSERVED (direct code/files), DECLARED (readme/metadata/comments), INFERRED (derived from code evidence), or UNKNOWN.\n"
+        "2. AGENT IDENTITY: Determine display name, source name, description, domain, language, framework, entrypoint, and archetypes. Preserve declared vs observed conflicts (e.g. declared AutoGen vs observed LangChain).\n"
+        "3. INTERFACE CONTRACT: Determine how the ACTUAL agent is invoked (CLI, HTTP, FUNCTION, CHAT, EVENT, BATCH, DIRECTORY, PIPELINE, UNKNOWN). Extract CLI arguments/flags/defaults/types, HTTP methods/endpoints, Function signatures, etc.\n"
+        "4. TOOL CLASSIFICATION: Distinguish agent_tool (e.g. @tool) from internal_function, workflow_node, external_service_call (requests.get), and model_call (ChatOpenAI).\n"
+        "5. EXTERNAL SERVICE MODEL: Separate CAPABILITY, SERVICE, PROVIDER, MODEL, CREDENTIAL.\n"
+        "6. CREDENTIAL ANALYSIS: Check if credentials are required for all executions, or optional with code fallback branches (e.g. if not NEWS_API_KEY -> required=false, condition='live_news_fetch', fallback='mock_data').\n"
+        "7. DATA TRANSFORMATIONS: Record actual operations (e.g. articles[:5] -> limit_items with max_items=5).\n"
+        "8. INVARIANTS: Extract hard constants (e.g. temperature=0, model='gpt-4o-mini', max_results=5).\n"
+        "9. FAILURE & SECURITY SURFACES: Identify realistic failure modes (timeouts, rate limits, empty inputs) and security exposure points (prompt injection, SSRF, SQLi).\n"
+        "10. OUTPUT CONTRACT: Output channel, format, declared sections (soft vs hard enforced).\n"
+        "11. ARCHETYPES: Classify into tags: UTILITY, CLI_PROCESSOR, CHAT_AGENT, TOOL_AGENT, RAG_AGENT, BROWSER_AGENT, DATABASE_AGENT, TRANSACTIONAL_AGENT, SECURITY_BENCHMARK, MULTI_AGENT, ORCHESTRATOR, PIPELINE, LLM_POWERED, RESOURCE_SENSITIVE, SECURITY_SENSITIVE.\n\n"
+        "Return ONLY strict JSON matching:\n"
+        "{\n"
+        '  "name": str,\n'
+        '  "domain": str,\n'
+        '  "archetypes": [str],\n'
+        '  "goals": [str],\n'
+        '  "instructions": [str],\n'
+        '  "capabilities": [str],\n'
+        '  "never_rules": [str],\n'
+        '  "always_rules": [str],\n'
+        '  "escalation_rules": [str],\n'
+        '  "data_policies": [str],\n'
+        '  "risks": [str],\n'
+        '  "state_management": str,\n'
+        '  "architecture_components": [str],\n'
+        '  "invariants": [{"statement": str, "type": "observed" | "declared", "enforcement_level": "hard" | "soft", "testability": "deterministic" | "llm_judge", "evidence": str, "confidence": float}],\n'
+        '  "transformations": [{"field": str, "operation": "limit_items" | "truncate" | "filter" | "parse_json" | "format_prompt" | "sanitize", "parameters": dict, "evidence": str}],\n'
+        '  "conflicts": [{"title": str, "doc_claim": str, "code_reality": str, "risk_level": "high" | "medium" | "low", "explanation": str}],\n'
+        '  "readiness": {"analysis_ready": bool, "runtime_ready": bool, "dependencies_ready": bool, "credentials_ready": bool, "sandbox_ready": bool, "execution_ready": bool, "blocked_reasons": [str]}\n'
+        "}"
+    )
+
     async def analyze(self, code_evidence: str, doc_evidence: str) -> Dict[str, Any]:
         """Analyzes agent source and returns structured specification strictly from evidence."""
         prompt = (
             f"SOURCE CODE EVIDENCE:\n{code_evidence}\n\n"
             f"DOCUMENTATION & PROMPT EVIDENCE:\n{doc_evidence}\n\n"
-            "Analyze this autonomous AI agent and extract its Normalized Specification matching: "
-            '{"name": str, "domain": str, "goals": [str], "instructions": [str], "capabilities": [str], '
-            '"risks": [str], "never_rules": [str], "always_rules": [str], "state_management": str, "architecture_components": [str]}.\n'
-            "CRITICAL: Do NOT invent tools, capabilities, or external databases not present in the evidence. Return ONLY strict JSON."
+            "Analyze this autonomous AI agent artifact strictly according to evidence. Return ONLY strict JSON."
         )
-        raw = await self.generate(system="You are an expert AI agent analyzer.", user=prompt, stage="AGENT_INTAKE")
+        raw = await self.generate(system=self.MASTER_AGENT_ANALYZER_SYSTEM_PROMPT, user=prompt, stage="AGENT_INTAKE")
+        try:
+            return json.loads(raw)
+        except Exception as e:
+            raise LLMGenerationError(f"Invalid JSON returned from Gemini: {e}", code=LLMErrorCode.INVALID_JSON)
+
+    async def analyze_evidence_packet(self, evidence_packet: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze a complete structured evidence packet using the master analyzer instruction."""
+        prompt = (
+            f"STRUCTURED EVIDENCE PACKET:\n{json.dumps(evidence_packet, indent=2)}\n\n"
+            "Analyze this autonomous AI agent artifact strictly according to evidence. "
+            "Separate packages from symbols, distinguish required from optional credentials, and capture all hard invariants and transformations. "
+            "Return ONLY strict JSON."
+        )
+        raw = await self.generate(system=self.MASTER_AGENT_ANALYZER_SYSTEM_PROMPT, user=prompt, stage="AGENT_INTAKE")
         try:
             return json.loads(raw)
         except Exception as e:

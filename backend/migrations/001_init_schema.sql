@@ -159,22 +159,33 @@ CREATE TABLE IF NOT EXISTS scenario_sets (
 
 -- 10. scenarios
 CREATE TABLE IF NOT EXISTS scenarios (
-    id                 TEXT PRIMARY KEY,
-    agent_id           TEXT REFERENCES agents(id) ON DELETE CASCADE,
-    scenario_set_id    TEXT REFERENCES scenario_sets(id) ON DELETE CASCADE,
-    category           TEXT NOT NULL,
-    title              TEXT NOT NULL,
-    purpose            TEXT,
-    current_version_id TEXT,
-    status             TEXT NOT NULL DEFAULT 'draft',
-    scenario_spec      JSONB,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                     TEXT PRIMARY KEY,
+    agent_id               TEXT REFERENCES agents(id) ON DELETE CASCADE,
+    scenario_set_id        TEXT REFERENCES scenario_sets(id) ON DELETE CASCADE,
+    category               TEXT NOT NULL,
+    title                  TEXT NOT NULL,
+    purpose                TEXT,
+    interface_type         TEXT NOT NULL DEFAULT 'CHAT',
+    fingerprint            TEXT,
+    target_failure_surface TEXT,
+    target_invariant       TEXT,
+    validation_status      TEXT NOT NULL DEFAULT 'VALIDATED',
+    critic_status          TEXT NOT NULL DEFAULT 'PENDING',
+    invocation             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    input_artifacts        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    assertions             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    provenance             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    current_version_id     TEXT,
+    status                 TEXT NOT NULL DEFAULT 'draft',
+    scenario_spec          JSONB,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- 11. evaluation_runs (Evaluation Jobs)
 CREATE TABLE IF NOT EXISTS evaluation_runs (
     id                       TEXT PRIMARY KEY,
+    agent_id                 TEXT REFERENCES agents(id) ON DELETE CASCADE,
     agent_version_id         TEXT REFERENCES agent_versions(id) ON DELETE CASCADE,
     name                     TEXT,
     mode                     TEXT NOT NULL,
@@ -193,7 +204,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
 CREATE TABLE IF NOT EXISTS evaluation_results (
     id                  TEXT PRIMARY KEY,
     evaluation_run_id   TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-    scenario_id         TEXT REFERENCES scenarios(id) ON DELETE SET NULL,
+    scenario_id         TEXT REFERENCES scenarios(id) ON DELETE CASCADE,
     status              TEXT NOT NULL,
     task_score          NUMERIC,
     tool_score          NUMERIC,
@@ -210,7 +221,7 @@ CREATE TABLE IF NOT EXISTS evaluation_results (
 
 -- 13. scorecards — evaluation scorecard summaries
 CREATE TABLE IF NOT EXISTS scorecards (
-    evaluation_id        TEXT PRIMARY KEY,
+    evaluation_id        TEXT PRIMARY KEY REFERENCES evaluation_runs(id) ON DELETE CASCADE,
     agent_id             TEXT REFERENCES agents(id) ON DELETE CASCADE,
     agent_name           TEXT,
     agent_version        TEXT,
@@ -233,7 +244,7 @@ CREATE TABLE IF NOT EXISTS scorecards (
 -- 14. failure_clusters
 CREATE TABLE IF NOT EXISTS failure_clusters (
     id                      TEXT PRIMARY KEY,
-    evaluation_id           TEXT NOT NULL,
+    evaluation_id           TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
     label                   TEXT,
     category                TEXT,
     member_verdict_ids      JSONB,
@@ -303,8 +314,8 @@ CREATE TABLE IF NOT EXISTS runtime.sessions (
 
 CREATE TABLE IF NOT EXISTS runtime.scenario_instances (
     id                   TEXT PRIMARY KEY,
-    evaluation_run_id    TEXT REFERENCES evaluation_runs(id) ON DELETE SET NULL,
-    scenario_id          TEXT REFERENCES scenarios(id) ON DELETE SET NULL,
+    evaluation_run_id    TEXT REFERENCES evaluation_runs(id) ON DELETE CASCADE,
+    scenario_id          TEXT REFERENCES scenarios(id) ON DELETE CASCADE,
     status               TEXT NOT NULL DEFAULT 'pending',
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -405,10 +416,14 @@ CREATE TABLE IF NOT EXISTS public.ai_generation_runs (
 -- 20. runtime.execution_sessions
 CREATE TABLE IF NOT EXISTS runtime.execution_sessions (
     id                 TEXT PRIMARY KEY,
+    agent_id           TEXT REFERENCES public.agents(id) ON DELETE CASCADE,
     evaluation_run_id  TEXT,
     agent_version_id   TEXT,
     scenario_id        TEXT,
     sandbox_session_id TEXT,
+    exit_code          INTEGER,
+    execution_mode     TEXT NOT NULL DEFAULT 'subprocess',
+    error_message      TEXT,
     status             TEXT NOT NULL DEFAULT 'active',
     started_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at       TIMESTAMPTZ
@@ -443,8 +458,9 @@ CREATE TABLE IF NOT EXISTS runtime.execution_metrics (
 -- 23. benchmark_records
 CREATE TABLE IF NOT EXISTS public.benchmark_records (
     id                   TEXT PRIMARY KEY,
-    agent_version_id     TEXT,
-    scenario_id          TEXT,
+    agent_id             TEXT REFERENCES public.agents(id) ON DELETE CASCADE,
+    agent_version_id     TEXT REFERENCES public.agent_versions(id) ON DELETE CASCADE,
+    scenario_id          TEXT REFERENCES public.scenarios(id) ON DELETE CASCADE,
     execution_session_id TEXT REFERENCES runtime.execution_sessions(id) ON DELETE CASCADE,
     trajectory           JSONB NOT NULL DEFAULT '[]'::jsonb,
     evaluation           JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -460,21 +476,28 @@ CREATE INDEX IF NOT EXISTS idx_agent_versions_agent_id       ON agent_versions(a
 CREATE INDEX IF NOT EXISTS idx_tools_agent_version_id        ON tools(agent_version_id);
 CREATE INDEX IF NOT EXISTS idx_dependencies_agent_version_id ON dependencies(agent_version_id);
 CREATE INDEX IF NOT EXISTS idx_scenarios_scenario_set_id     ON scenarios(scenario_set_id);
+CREATE INDEX IF NOT EXISTS idx_scenarios_agent_id            ON scenarios(agent_id);
+CREATE INDEX IF NOT EXISTS idx_scenarios_fingerprint         ON scenarios(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_scenarios_interface_type      ON scenarios(interface_type);
 CREATE INDEX IF NOT EXISTS idx_evaluation_results_run_id     ON evaluation_results(evaluation_run_id);
 
-CREATE INDEX IF NOT EXISTS idx_rt_tool_calls_instance      ON runtime.tool_calls(scenario_instance_id);
-CREATE INDEX IF NOT EXISTS idx_rt_agent_actions_instance   ON runtime.agent_actions(scenario_instance_id);
-CREATE INDEX IF NOT EXISTS idx_rt_security_events_instance ON runtime.security_events(scenario_instance_id);
-CREATE INDEX IF NOT EXISTS idx_rt_side_effects_instance    ON runtime.side_effect_events(scenario_instance_id);
-CREATE INDEX IF NOT EXISTS idx_rt_state_changes_instance   ON runtime.state_changes(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_tool_calls_instance        ON runtime.tool_calls(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_agent_actions_instance     ON runtime.agent_actions(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_security_events_instance   ON runtime.security_events(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_side_effects_instance      ON runtime.side_effect_events(scenario_instance_id);
+CREATE INDEX IF NOT EXISTS idx_rt_state_changes_instance     ON runtime.state_changes(scenario_instance_id);
 
-CREATE INDEX IF NOT EXISTS idx_rt_exec_steps_session       ON runtime.execution_steps(execution_session_id);
-CREATE INDEX IF NOT EXISTS idx_rt_exec_metrics_session     ON runtime.execution_metrics(execution_session_id);
-CREATE INDEX IF NOT EXISTS idx_benchmark_records_session   ON public.benchmark_records(execution_session_id);
+CREATE INDEX IF NOT EXISTS idx_rt_exec_sessions_agent_id     ON runtime.execution_sessions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_rt_exec_sessions_scenario_id  ON runtime.execution_sessions(scenario_id);
+CREATE INDEX IF NOT EXISTS idx_rt_exec_steps_session         ON runtime.execution_steps(execution_session_id);
+CREATE INDEX IF NOT EXISTS idx_rt_exec_metrics_session       ON runtime.execution_metrics(execution_session_id);
+CREATE INDEX IF NOT EXISTS idx_benchmark_records_agent_id    ON public.benchmark_records(agent_id);
+CREATE INDEX IF NOT EXISTS idx_benchmark_records_session     ON public.benchmark_records(execution_session_id);
 
 -- 24. agent_behavior_profiles
 CREATE TABLE IF NOT EXISTS public.agent_behavior_profiles (
     id                TEXT PRIMARY KEY,
+    agent_id          TEXT REFERENCES public.agents(id) ON DELETE CASCADE,
     agent_version_id  TEXT NOT NULL REFERENCES public.agent_versions(id) ON DELETE CASCADE,
     schema_version    TEXT NOT NULL DEFAULT 'v1',
     profile_json      JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -483,4 +506,5 @@ CREATE TABLE IF NOT EXISTS public.agent_behavior_profiles (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS idx_agent_behavior_profiles_agent_id ON public.agent_behavior_profiles(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_behavior_profiles_version ON public.agent_behavior_profiles(agent_version_id);

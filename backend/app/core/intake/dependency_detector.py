@@ -34,8 +34,8 @@ def redact_secret_string(value: str) -> str:
 
 class DependencyDetector:
     @staticmethod
-    def detect_environment_secrets(code_text: str) -> List[DetectedSecret]:
-        """Detect os.getenv(), os.environ.get(), process.env references without executing code."""
+    def detect_environment_secrets(code_text: str, raw_files: Dict[str, str] = None) -> List[DetectedSecret]:
+        """Detect os.getenv(), os.environ.get(), .env templates, and model SDK credentials without executing code."""
         detected: List[DetectedSecret] = []
         seen = set()
 
@@ -58,23 +58,64 @@ class DependencyDetector:
                         )
                     )
 
-        js_patterns = [
-            r'process\.env\.([A-Z0-9_]+)',
-            r'process\.env\[["\']([A-Z0-9_]+)["\']\]',
-        ]
-        for pat in js_patterns:
-            for match in re.findall(pat, code_text):
-                if match not in seen:
-                    seen.add(match)
-                    is_secret = any(kw in match.lower() for kw in ["key", "secret", "token", "password", "auth"])
-                    detected.append(
-                        DetectedSecret(
-                            name=match,
-                            type="secret" if is_secret else "config",
-                            required=True,
-                            masked_sample="********"
-                        )
-                    )
+        # 2. Parse .env.example / .env.template if present in raw_files
+        if raw_files:
+            for fname, content in raw_files.items():
+                if ".env" in fname.lower():
+                    for line in content.splitlines():
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            var_name = line.split("=", 1)[0].strip()
+                            if var_name and var_name not in seen:
+                                seen.add(var_name)
+                                is_secret = any(kw in var_name.lower() for kw in ["key", "secret", "token", "password", "auth", "cred"])
+                                detected.append(
+                                    DetectedSecret(
+                                        name=var_name,
+                                        type="secret" if is_secret else "config",
+                                        required=True,
+                                        masked_sample="********"
+                                    )
+                                )
+
+        # 3. Model SDK usage implies required credentials (e.g. ChatOpenAI -> OPENAI_API_KEY)
+        code_lower = code_text.lower()
+        if "openai" in code_lower and "OPENAI_API_KEY" not in seen:
+            seen.add("OPENAI_API_KEY")
+            detected.append(
+                DetectedSecret(
+                    name="OPENAI_API_KEY",
+                    type="secret",
+                    required=True,
+                    masked_sample="********"
+                )
+            )
+        if ("genai" in code_lower or "gemini" in code_lower) and "GEMINI_API_KEY" not in seen:
+            seen.add("GEMINI_API_KEY")
+            detected.append(
+                DetectedSecret(
+                    name="GEMINI_API_KEY",
+                    type="secret",
+                    required=True,
+                    masked_sample="********"
+                )
+            )
+        if "anthropic" in code_lower and "ANTHROPIC_API_KEY" not in seen:
+            seen.add("ANTHROPIC_API_KEY")
+            detected.append(
+                DetectedSecret(
+                    name="ANTHROPIC_API_KEY",
+                    type="secret",
+                    required=True,
+                    masked_sample="********"
+                )
+            )
+
+        # 4. Check if any detected secret has an explicit fallback in code (e.g. `if not NEWS_API_KEY:` or fallback mock)
+        for s in detected:
+            fallback_pattern = rf'(?:if\s+not\s+{s.name}|{s.name}\s+is\s+None|not\s+os\.getenv\(["\']?{s.name})'
+            if re.search(fallback_pattern, code_text, re.IGNORECASE):
+                s.required = False
 
         return detected
 
@@ -169,13 +210,15 @@ class DependencyDetector:
 
     @staticmethod
     def detect_runtime_packages(code_text: str, raw_files: Dict[str, str]) -> List[DependencyDefinition]:
-        """Dynamically detects packages from requirements.txt, pyproject.toml, and imports without hardcoding."""
+        """Authoritatively detects packages from requirements.txt / pyproject.toml without creating bogus packages from imported classes."""
         deps: List[DependencyDefinition] = []
         seen = set()
+        has_manifest = False
 
-        # 1. Parse requirements.txt / requirements.in
+        # 1. Parse requirements.txt / requirements.in / pyproject.toml (Authoritative)
         for fname, content in raw_files.items():
             if "requirements" in fname.lower() or fname.endswith(".txt"):
+                has_manifest = True
                 for line in content.splitlines():
                     line = line.strip()
                     if line and not line.startswith("#") and not line.startswith("-"):
@@ -192,21 +235,28 @@ class DependencyDetector:
                                 )
                             )
 
-        # 2. Parse top-level Python import statements from code
-        import_matches = re.findall(r'(?:from|import)\s+([a-zA-Z0-9_]+)', code_text)
-        std_libs = {"os", "sys", "re", "json", "time", "typing", "datetime", "math", "uuid", "ast", "logging", "argparse", "asyncio", "collections", "pathlib"}
-        for imp in import_matches:
-            imp_clean = imp.strip().lower()
-            if imp_clean not in std_libs and imp_clean not in seen:
-                seen.add(imp_clean)
-                deps.append(
-                    DependencyDefinition(
-                        id=f"dep-import-{imp_clean}",
-                        name=imp_clean,
-                        type="package",
-                        detected_from="IMPORT_STATEMENT"
+        # 2. Only if no requirements manifest exists, extract root module names from Python import statements
+        if not has_manifest:
+            std_libs = {
+                "os", "sys", "re", "json", "time", "typing", "datetime", "math", "uuid", "ast",
+                "logging", "argparse", "asyncio", "collections", "pathlib", "functools", "itertools",
+                "copy", "traceback", "subprocess", "hashlib", "io", "shutil", "tempfile"
+            }
+            # Match top-level module: `import foo.bar` -> `foo`, `from foo.bar import baz` -> `foo`
+            import_matches = re.findall(r'(?:from|import)\s+([a-zA-Z0-9_]+)', code_text)
+            for imp in import_matches:
+                imp_clean = imp.strip().lower()
+                # Ignore stdlib, lowercase/single character artifacts, or already seen
+                if imp_clean not in std_libs and imp_clean not in seen and len(imp_clean) > 1:
+                    seen.add(imp_clean)
+                    deps.append(
+                        DependencyDefinition(
+                            id=f"dep-import-{imp_clean}",
+                            name=imp_clean,
+                            type="package",
+                            detected_from="IMPORT_STATEMENT"
+                        )
                     )
-                )
 
         return deps
 
