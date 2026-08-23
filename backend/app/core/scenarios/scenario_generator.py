@@ -8,7 +8,7 @@ import json
 import uuid
 import hashlib
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from app.models.agent import AgentRecord
 from app.models.scenario import (
     Scenario,
@@ -99,7 +99,7 @@ async def generate_scenarios_for_agent(
     plan_dict: Dict[str, Any] = {
         "plan_id": scenario_plan.plan_id,
         "total_targets": scenario_plan.total_target,
-        "plan_items": [item.dict() for item in scenario_plan.plan_items]
+        "plan_items": [item.model_dump() for item in scenario_plan.plan_items]
     }
 
     # 3. Call LLM in One Batch
