@@ -291,6 +291,8 @@ class GeminiProvider(LLMProvider):
                         system_instruction=system,
                         temperature=temperature,
                         response_mime_type="application/json",
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                        http_options=types.HttpOptions(timeout=45000),
                     ),
                 )
                 if res and res.text:
