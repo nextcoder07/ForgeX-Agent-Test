@@ -65,7 +65,7 @@ def analyze_python_source(code: str, filename: str = "agent.py") -> Dict[str, An
                                     is_destructive=any(kw in item.name.lower() for kw in ["delete", "cancel", "drop", "destroy"]),
                                     requires_confirmation=any(kw in item.name.lower() for kw in ["cancel", "delete", "refund"]),
                                     requires_authorization=any(kw in item.name.lower() for kw in ["refund", "payment", "transfer"]),
-                                    canonical_capability="CUSTOM_TOOL",
+                                    canonical_capability=None,
                                     side_effect_type="WRITE" if any(kw in item.name.lower() for kw in ["refund", "cancel", "update", "send", "write", "post"]) else "READ"
                                 )
                             )
@@ -119,7 +119,7 @@ def analyze_python_source(code: str, filename: str = "agent.py") -> Dict[str, An
                             is_destructive=False,
                             requires_confirmation=False,
                             requires_authorization=False,
-                            canonical_capability="CUSTOM_TOOL",
+                            canonical_capability=None,
                             side_effect_type="READ"
                         )
                     )

@@ -124,7 +124,7 @@ class CapabilityExtractor:
         for tool in tools:
             # Determine canonical code
             cap_id = (tool.canonical_capability or "GENERIC_TOOL").upper()
-            if cap_id == "GENERIC_TOOL":
+            if cap_id in ("GENERIC_TOOL", "CUSTOM_TOOL", "TOOL"):
                 # Try to map based on common naming convention
                 fname_lower = tool.name.lower()
                 if "customer" in fname_lower:
@@ -141,6 +141,12 @@ class CapabilityExtractor:
                     cap_id = "EMAIL_NOTIFICATION"
                 elif "search" in fname_lower or "knowledge" in fname_lower:
                     cap_id = "KNOWLEDGE_SEARCH"
+                elif "calculate" in fname_lower or "calc" in fname_lower or "math" in fname_lower:
+                    cap_id = "CALCULATE_EXPRESSION"
+                elif "currency" in fname_lower or "convert" in fname_lower:
+                    cap_id = "CURRENCY_CONVERSION"
+                elif "json" in fname_lower or "format" in fname_lower or "report" in fname_lower:
+                    cap_id = "FORMAT_REPORT"
                 else:
                     # Fallback to function name capitalized
                     cap_id = tool.name.upper()
