@@ -245,12 +245,21 @@ class TestAgentKeyManager:
 
             selected = eligible[0]
             selected.last_used_at = now
+            val = selected.value
             return {
-                "OPENAI_API_KEY": selected.value,
-                "GEMINI_API_KEY": selected.value,
-                "ANTHROPIC_API_KEY": selected.value,
-                "OPENROUTER_API_KEY": selected.value,
-                "TEST_AI_API_KEY": selected.value,
+                "OPENAI_API_KEY": val,
+                "GEMINI_API_KEY": val,
+                "GOOGLE_API_KEY": val,
+                "ANTHROPIC_API_KEY": val,
+                "OPENROUTER_API_KEY": val,
+                "MISTRAL_API_KEY": val,
+                "GROQ_API_KEY": val,
+                "TOGETHER_API_KEY": val,
+                "NEBIUS_API_KEY": val,
+                "COHERE_API_KEY": val,
+                "EXA_API_KEY": val,
+                "TAVILY_API_KEY": val,
+                "TEST_AI_API_KEY": val,
                 "TEST_AI_API_NAME": selected.api_name,
                 "TEST_AI_MODEL": selected.model_name,
             }
