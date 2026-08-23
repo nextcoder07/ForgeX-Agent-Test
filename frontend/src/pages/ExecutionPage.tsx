@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Cpu,
   Layers,
@@ -27,11 +28,11 @@ import {
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface ExecutionPageProps {
-  onNavigate: (page: PageId) => void;
   onExecutionEvaluated?: (evalJob: any) => void; // Callback to pass eval job results to evaluation page
 }
 
-export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onNavigate, onExecutionEvaluated }) => {
+export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluated }) => {
+  const navigate = useNavigate();
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -240,7 +241,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onNavigate, onExec
               <div className="py-12 text-center text-slate-500 text-xs font-mono space-y-2">
                 <p>No scenarios found for this agent.</p>
                 <button
-                  onClick={() => onNavigate('scenarios')}
+                  onClick={() => navigate("/scenarios")}
                   className="text-indigo-400 hover:underline"
                 >
                   Generate scenarios now →

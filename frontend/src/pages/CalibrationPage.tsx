@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import { fetchCalibrationReport } from '../api/client';
 import type { CalibrationReport } from '../api/client';
 import { CalibrationPanel } from '../components/CalibrationPanel';

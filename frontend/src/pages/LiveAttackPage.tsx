@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import { LiveAttackConsole } from '../components/LiveAttackConsole';
 import { Flame } from 'lucide-react';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';

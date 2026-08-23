@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Wrench,
   Sparkles,
@@ -34,10 +35,9 @@ import {
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface FixMyAgentPageProps {
-  onNavigate: (page: PageId) => void;
 }
 
-export const FixMyAgentPage: React.FC<FixMyAgentPageProps> = ({ onNavigate }) => {
+export const FixMyAgentPage: React.FC<FixMyAgentPageProps> = ({}) => {
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const [repairStatus, setRepairStatus] = useState<any | null>(null);

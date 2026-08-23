@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import { compareRegressions } from '../api/client';
 import type { RegressionComparison } from '../api/client';
 import { RegressionView } from '../components/RegressionView';

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Zap,
   BarChart3,
@@ -39,11 +40,12 @@ import { FailureClustersView } from '../components/FailureClustersView';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface EvaluationRunPageProps {
-  onNavigate: (page: PageId) => void;
-  evaluationJobId?: string;
+  jobId?: string;
 }
 
-export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({ onNavigate, evaluationJobId }) => {
+export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
+  const { jobId } = useParams<{ jobId?: string }>();
+  const navigate = useNavigate();
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [batchSize, setBatchSize] = useState(34);
@@ -111,13 +113,13 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({ onNavigate
   };
 
   useEffect(() => {
-    if (evaluationJobId) {
-      startPolling(evaluationJobId);
+    if (jobId) {
+      startPolling(jobId);
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [evaluationJobId]);
+  }, [jobId]);
 
   const handleLaunchEvaluation = async () => {
     if (!selectedAgentId) return;
@@ -538,7 +540,7 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({ onNavigate
                   Not Now
                 </button>
                 <button
-                  onClick={() => onNavigate('fix-agent')}
+                  onClick={() => navigate("/fix-agent")}
                   className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 via-indigo-600 to-cyan-500 hover:from-rose-400 hover:to-cyan-400 text-white font-extrabold text-xs shadow-lg shadow-rose-500/25 flex items-center space-x-2 transition hover:scale-[1.02]"
                 >
                   <Wrench className="w-4 h-4" />

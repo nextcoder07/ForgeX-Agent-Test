@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import { PipelineMonitor } from '../components/PipelineMonitor';
 import { Radio, Activity } from 'lucide-react';
 

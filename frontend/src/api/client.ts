@@ -2,7 +2,10 @@
  * Complete REST API Client for the Agent Evaluation & Reliability Platform.
  */
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const configuredApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+export const API_BASE_URL = configuredApiUrl
+  ? (configuredApiUrl.endsWith('/api') ? configuredApiUrl : `${configuredApiUrl}/api`)
+  : '/api';
 
 export interface ToolDefinition {
   name: string;

@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import { fetchAgents, fetchScenarioLibrary, fetchCalibrationReport } from '../api/client';
 import type { AgentRecord, Scenario, CalibrationReport } from '../api/client';
 import { Activity, ShieldCheck, Layers, Cpu, Flame, ArrowRight, Sparkles, GitCompare, CheckCircle2, TrendingUp, RefreshCw, Radio } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
 
 interface DashboardPageProps {
-  onNavigate: (page: PageId) => void;
 }
 
-export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
+export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
+  const navigate = useNavigate();
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [calibration, setCalibration] = useState<CalibrationReport | null>(null);
@@ -63,21 +64,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
             <div className="flex items-center space-x-3 pt-2 flex-wrap gap-2">
               <button
-                onClick={() => onNavigate('intake')}
+                onClick={() => navigate("/intake")}
                 className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-rose-600 hover:from-cyan-400 hover:to-rose-500 text-slate-100 font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center space-x-2 transition"
               >
                 <Sparkles className="w-4 h-4" />
                 <span>Bring Your Agent</span>
               </button>
               <button
-                onClick={() => onNavigate('live-attack')}
+                onClick={() => navigate("/live-attack")}
                 className="px-5 py-2.5 rounded-xl bg-rose-950/50 hover:bg-rose-950/70 border border-rose-500/40 text-rose-300 font-bold text-sm transition flex items-center space-x-2"
               >
                 <Flame className="w-4 h-4" />
                 <span>Live Attack Console</span>
               </button>
               <button
-                onClick={() => onNavigate('pipeline')}
+                onClick={() => navigate("/pipeline")}
                 className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-bold text-sm transition flex items-center space-x-2"
               >
                 <Radio className="w-4 h-4 text-cyan-400" />
@@ -121,7 +122,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             return (
               <div
                 key={step.id}
-                onClick={() => onNavigate(step.page)}
+                onClick={() => navigate(`/${step.page}`)}
                 className="group p-5 rounded-2xl glass-card border border-slate-800 hover:border-slate-700 cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5"
               >
                 <div className="flex items-start justify-between mb-3">
@@ -150,7 +151,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-bold text-slate-100">Registered Agents</h2>
             <button
-              onClick={() => onNavigate('agents')}
+              onClick={() => navigate("/agents")}
               className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center space-x-1 font-semibold"
             >
               <span>View All & X-Ray</span>
@@ -171,7 +172,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 {agents.map((a, i) => (
                   <tr
                     key={a.id}
-                    onClick={() => onNavigate('agents')}
+                    onClick={() => navigate("/agents")}
                     className={`border-b border-slate-800/80 cursor-pointer hover:bg-slate-900/40 transition ${i % 2 === 0 ? 'bg-slate-950' : 'bg-slate-900/20'}`}
                   >
                     <td className="px-4 py-2.5">

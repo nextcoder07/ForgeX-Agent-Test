@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import { AgentIntakeConsole } from '../components/AgentIntakeConsole';
 import { AgentMapGraph } from '../components/AgentMapGraph';
 import { SpecConflictCard } from '../components/SpecConflictCard';
@@ -18,11 +19,11 @@ import type { PageId } from '../components/Navbar';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface AgentIntakePageProps {
-  onNavigate: (page: PageId) => void;
   onAgentRegistered: (agent: AgentRecord) => void;
 }
 
-export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onNavigate, onAgentRegistered }) => {
+export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onAgentRegistered }) => {
+  const navigate = useNavigate();
   const [analysisResult, setAnalysisResult] = useState<AgentUnderstandingResult | null>(null);
   const [registeredAgent, setRegisteredAgent] = useState<AgentRecord | null>(null);
   const [displayName, setDisplayName] = useState('');
@@ -127,7 +128,7 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onNavigate, on
                   <span className="text-[10px] text-slate-500">Registered: {registeredAgent.name}</span>
                   <span className="text-[10px] text-slate-500">Analyzed: {registeredAgent.source_name || registeredAgent.name}</span>
                   <button
-                    onClick={() => onNavigate('scenarios')}
+                    onClick={() => navigate("/scenarios")}
                     className="px-4 py-2 rounded-xl bg-indigo-950/50 hover:bg-indigo-950 border border-indigo-500/40 text-indigo-300 font-bold text-xs transition flex items-center space-x-2"
                   >
                     <Layers className="w-3.5 h-3.5" />

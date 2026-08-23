@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Shield,
   CheckCircle2,
@@ -95,11 +96,11 @@ const STATUS_CONFIG = {
 };
 
 interface DependencySetupPageProps {
-  onNavigate: (page: PageId) => void;
   agent?: AgentRecord;
 }
 
-export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavigate, agent: initialAgent }) => {
+export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent: initialAgent }) => {
+  const navigate = useNavigate();
   const [agentsList, setAgentsList] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>(initialAgent?.id || '');
   const [currentAgent, setCurrentAgent] = useState<AgentRecord | null>(initialAgent || null);
@@ -679,7 +680,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
       <div className="p-5 rounded-2xl glass-panel border border-slate-800 flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center space-x-4">
           <button
-            onClick={() => onNavigate('intake')}
+            onClick={() => navigate("/intake")}
             className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
           >
             ← Back to Intake
@@ -707,7 +708,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
         )}
 
         <button
-          onClick={() => onNavigate('scenarios')}
+          onClick={() => navigate("/scenarios")}
           className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-white font-extrabold text-xs shadow-lg shadow-emerald-500/25 flex items-center space-x-2 transition-all hover:scale-[1.02] active:scale-95"
         >
           <Layers className="w-4 h-4" />

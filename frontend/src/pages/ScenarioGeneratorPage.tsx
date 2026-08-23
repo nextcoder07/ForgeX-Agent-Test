@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from "react-router-dom";
 import { fetchAgents, fetchStrategyPlan, generateScenarios, fetchScenarioLibrary, fetchCoverageReport } from '../api/client';
 import type { AgentRecord, StrategyPlan, Scenario, CoverageGapReport } from '../api/client';
 import { ScenarioStrategyView } from '../components/ScenarioStrategyView';
@@ -9,10 +10,10 @@ import type { PageId } from '../components/Navbar';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
 interface ScenarioGeneratorPageProps {
-  onNavigate: (page: PageId) => void;
 }
 
-export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({ onNavigate }) => {
+export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({}) => {
+  const navigate = useNavigate();
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [strategy, setStrategy] = useState<StrategyPlan | null>(null);
@@ -168,7 +169,7 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({ on
             scenarios={scenarios}
             onRunSelected={(ids) => {
               console.log('Run selected scenarios:', ids);
-              onNavigate('evaluations');
+              navigate("/evaluations");
             }}
           />
         </div>

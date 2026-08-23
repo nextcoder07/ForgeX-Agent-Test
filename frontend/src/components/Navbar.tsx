@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
   Layers,
@@ -32,13 +33,13 @@ export type PageId =
   | 'pipeline'
   | 'fix-agent';
 
-interface NavbarProps {
-  activePage: PageId;
-  onNavigate: (page: PageId) => void;
-}
-
-export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
+export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Determine active page from current pathname
+  const currentPath = location.pathname.split('/')[1] || 'dashboard';
 
   const navItems: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }>; category?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
@@ -56,8 +57,12 @@ export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
     { id: 'pipeline', label: 'Pipeline Monitor', icon: Radio },
   ];
 
+  const handleNav = (page: PageId) => {
+    navigate(`/${page}`);
+  };
+
   const handleMobileNav = (page: PageId) => {
-    onNavigate(page);
+    handleNav(page);
     setMobileMenuOpen(false);
   };
 
@@ -92,11 +97,11 @@ export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
           <nav className="hidden xl:flex items-center space-x-1">
             {navItems.slice(0, 8).map((item) => {
               const Icon = item.icon;
-              const isActive = activePage === item.id;
+              const isActive = currentPath === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => onNavigate(item.id)}
+                  onClick={() => handleNav(item.id)}
                   className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-all duration-200 ${
                     isActive
                       ? 'bg-cyan-950/60 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20'
@@ -132,11 +137,11 @@ export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
         <div className="hidden md:flex xl:hidden overflow-x-auto space-x-1 py-2 border-t border-slate-900 custom-scrollbar">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = activePage === item.id;
+            const isActive = currentPath === item.id;
             return (
               <button
                 key={item.id}
-                onClick={() => onNavigate(item.id)}
+                onClick={() => handleNav(item.id)}
                 className={`px-2.5 py-1 rounded-md text-[11px] font-medium whitespace-nowrap flex items-center space-x-1 transition ${
                   isActive
                     ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
@@ -161,7 +166,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activePage, onNavigate }) => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 pb-2">
               {navItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = activePage === item.id;
+                const isActive = currentPath === item.id;
                 return (
                   <button
                     key={item.id}

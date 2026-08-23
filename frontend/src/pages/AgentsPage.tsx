@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { fetchAgents, fetchDemoAgentFiles } from '../api/client';
+import { useNavigate, useParams } from "react-router-dom";
+import { fetchAgents, fetchDemoAgents, fetchDemoAgentFiles } from '../api/client';
 import type { AgentRecord } from '../api/client';
 import { CodeFileInspector } from '../components/CodeFileInspector';
 import { AgentMapGraph } from '../components/AgentMapGraph';
@@ -17,10 +18,10 @@ import {
 import type { PageId } from '../components/Navbar';
 
 interface AgentsPageProps {
-  onNavigate: (page: PageId) => void;
 }
 
-export const AgentsPage: React.FC<AgentsPageProps> = ({ onNavigate }) => {
+export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
+  const navigate = useNavigate();
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<AgentRecord | null>(null);
   const [agentFiles, setAgentFiles] = useState<Record<string, string>>({});
@@ -56,9 +57,15 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    // Try to load the underlying source files (works for demo agents)
-    const localId = agent.id.replace('agent-', '').replace('-v1', '');
+    // Resolve the actual test-agents folder instead of deriving it from a registry ID.
     try {
+      const localAgents = await fetchDemoAgents();
+      const candidates = [agent.source_name, agent.name, agent.display_name]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
+      const localId = localAgents.find((folder) => candidates.includes(folder.toLowerCase()))
+        || localAgents.find((folder) => candidates.some((candidate) => folder.toLowerCase().includes(candidate) || candidate.includes(folder.toLowerCase())));
+      if (!localId) return;
       const data = await fetchDemoAgentFiles(localId);
       if (data.files) setAgentFiles(data.files);
       if (data.metadata) setAgentMeta(data.metadata);
@@ -147,7 +154,7 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onNavigate }) => {
           )}
 
           <button
-            onClick={() => onNavigate('intake')}
+            onClick={() => navigate("/intake")}
             className="w-full py-2 rounded-xl border border-dashed border-slate-700 text-xs text-slate-400 hover:border-cyan-500/50 hover:text-cyan-300 flex items-center justify-center space-x-1.5 transition"
           >
             <Sparkles className="w-3.5 h-3.5" />
