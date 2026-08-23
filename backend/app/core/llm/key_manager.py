@@ -132,8 +132,11 @@ class UnifiedKeyManager:
             ))
             logger.info(f"Registered Ollama Local Server ({ollama_url} - {ollama_model})")
 
+        # 5. Sort keys so cloud keys come first (in registry order), and Ollama local server comes last as fallback
+        self.keys.sort(key=lambda k: 1 if k.api_name in ("ollama", "local") else 0)
+
         if not self.keys:
-            logger.warning("No API keys configured in environment!")
+            logger.warning("AI not provided: No API keys or Ollama endpoints configured in environment!")
 
     def get_all_keys_status(self) -> List[Dict[str, Any]]:
         with self._lock:
