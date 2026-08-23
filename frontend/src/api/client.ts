@@ -212,34 +212,101 @@ export interface ExecutionTrace {
 }
 
 export interface FailureFinding {
+  finding_id?: string;
   category: string;
   severity: string;
+  title?: string;
+  description?: string;
   source: string;
   explanation: string;
   evidence: string;
+  expected?: string;
+  observed?: string;
+  remediation?: string;
+  execution_step_id?: string;
+  event_ids?: string[];
+  evidence_type?: string;
+  source_location?: string;
+  attempted_action?: boolean;
+  policy_blocked?: boolean;
+  actual_side_effect?: boolean;
   confidence: number;
 }
 
 export interface RunVerdict {
+  id?: string;
+  evaluation_run_id?: string;
   trace_id: string;
+  execution_session_id?: string;
   scenario_id: string;
+  scenario_version_id?: string;
+  status?: string; // "PASS", "FAIL", "BLOCKED", "INCONCLUSIVE", "ERROR", "NOT_APPLICABLE"
   passed: boolean;
-  findings: FailureFinding[];
   expected_behavior_met: boolean;
+  deterministic_score?: number;
+  semantic_score?: number | null;
+  final_score?: number;
+  findings: FailureFinding[];
+  evaluation_method?: string;
   counterfactual_trace_id?: string;
   counterfactual_passed?: boolean;
-  attack_causation_proven: boolean;
+  attack_causation_proven?: boolean;
 }
 
 export interface FailureCluster {
   id: string;
+  evaluation_id?: string;
   label: string;
+  title?: string;
   category: string;
+  root_cause_pattern?: string;
   member_verdict_ids: string[];
+  verdict_ids?: string[];
+  affected_scenarios?: string[];
   representative_evidence: string;
   count: number;
+  occurrences?: number;
   severity: string;
   recommended_fix: string;
+  remediation_suggestion?: string;
+  failure_surface?: string;
+  workflow_node?: string;
+}
+
+export interface RegressionTest {
+  id: string;
+  source_evaluation_id: string;
+  source_verdict_id: string;
+  agent_id: string;
+  scenario_id: string;
+  failure_category: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | string;
+  assertion: Record<string, any>;
+  status: 'ACTIVE' | 'PASSED' | 'DEPRECATED' | 'IGNORED' | string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TenDimensionScoreBreakdown {
+  correctness?: number | null;
+  goal_adherence?: number | null;
+  safety?: number | null;
+  security?: number | null;
+  robustness?: number | null;
+  tool_discipline?: number | null;
+  recovery?: number | null;
+  output_quality?: number | null;
+  efficiency?: number | null;
+  compliance?: number | null;
+  task_correctness?: number | null;
+  instruction_following?: number | null;
+  tool_correctness?: number | null;
+  tool_parameter_correctness?: number | null;
+  workflow_correctness?: number | null;
+  failure_recovery?: number | null;
+  response_quality?: number | null;
+  overall_score: number;
+  applicable_dimensions?: string[];
 }
 
 export interface ReliabilityScorecard {
@@ -258,8 +325,17 @@ export interface ReliabilityScorecard {
   total_scenarios: number;
   passed: number;
   failed: number;
+  blocked?: number;
+  inconclusive?: number;
   critical_failures: number;
-  judge_agreement_rate: number;
+  judge_agreement_rate?: number | null;
+  execution_mode?: string;
+  model_substitution?: boolean;
+  confidence?: string;
+  score_formula_version?: string;
+  weights?: Record<string, number>;
+  provenance?: Record<string, any>;
+  dimension_scores?: TenDimensionScoreBreakdown;
 }
 
 export interface RegressionComparison {
@@ -652,5 +728,196 @@ export async function fetchExecutionJobDetails(jobId: string): Promise<Execution
 export async function fetchExecutionTraces(jobId: string): Promise<ExecutionTrace[]> {
   const res = await fetch(`${API_BASE_URL}/executions/jobs/${jobId}/traces`);
   if (!res.ok) throw new Error(`Failed to fetch execution traces: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchEvaluationJobDetails(jobId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/jobs/${jobId}`);
+  if (!res.ok) throw new Error(`Failed to fetch evaluation job details: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchEvaluationVerdicts(jobId: string): Promise<any[]> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/jobs/${jobId}/verdicts`);
+  if (!res.ok) throw new Error(`Failed to fetch evaluation verdicts: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchEvaluationTracesDetails(jobId: string): Promise<any[]> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/jobs/${jobId}/traces`);
+  if (!res.ok) throw new Error(`Failed to fetch evaluation traces: ${res.statusText}`);
+  return res.json();
+}
+
+
+// ── Execution Model Binding & Dependency Resolver Interfaces ───────────────
+
+export interface ExecutionModelBinding {
+  id: string;
+  execution_id: string;
+  original_model: string;
+  executed_model: string;
+  original_provider: string;
+  executed_provider: string;
+  mode: 'faithful' | 'compatible' | 'simulation';
+  model_substitution: boolean;
+  reason: string;
+  confidence: string;
+  fidelity: 'HIGH' | 'MEDIUM' | 'TEST-SPECIFIC';
+  created_at: string;
+}
+
+export interface DependencyResolverResult {
+  agent_id: string;
+  agent_category: 'llm_powered' | 'local_model' | 'rule_based' | 'tool_heavy';
+  detected_model_dependencies: any[];
+  detected_secrets: any[];
+  recommended_mode: 'faithful' | 'compatible' | 'simulation';
+  mode_options: any[];
+  active_binding?: ExecutionModelBinding;
+}
+
+
+export interface EvaluationReport {
+  evaluation_id: string;
+  agent_id: string;
+  agent_name: string;
+  scenario_id?: string;
+  original_model: string;
+  executed_model: string;
+  execution_mode: 'faithful' | 'compatible' | 'simulation';
+  model_substitution: boolean;
+  confidence: string;
+  overall_score: number;
+  dimension_scores: TenDimensionScoreBreakdown;
+  explainability: string[];
+  strengths: string[];
+  failures: string[];
+  recommendations: string[];
+  created_at: string;
+}
+
+export async function resolveDependencies(
+  agentId: string,
+  requestedMode?: string,
+  secrets: Record<string, string> = {}
+): Promise<DependencyResolverResult> {
+  const res = await fetch(`${API_BASE_URL}/dependencies/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent_id: agentId,
+      requested_mode: requestedMode,
+      provided_secrets: secrets,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to resolve dependencies: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchEvaluationReport(evalId: string): Promise<EvaluationReport> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/jobs/${evalId}/report`);
+  if (!res.ok) throw new Error(`Failed to fetch evaluation report: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchAgentReliability(agentId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/agents/${agentId}/reliability`);
+  if (!res.ok) throw new Error(`Failed to fetch reliability metrics: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchAgentRegressions(agentId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/agents/${agentId}/regressions`);
+  if (!res.ok) throw new Error(`Failed to fetch regression suite: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Fix My Agent Repair Interfaces & API Methods ────────────────────────────
+
+export interface RepairIterationResult {
+  iteration: number;
+  agent_id: string;
+  agent_version: string;
+  previous_version: string;
+  eval_scorecard: ReliabilityScorecard;
+  fixing_agent_reasoning: string;
+  changes_made: string[];
+  diff_summary: string;
+  passed_count: number;
+  failed_count: number;
+  critical_failures: number;
+  status: string; // "IMPROVED" | "REGRESSED" | "PASSED" | "FAILED"
+  created_at: string;
+}
+
+export interface RepairSession {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  original_version: string;
+  current_version: string;
+  status: 'IDLE_AWAITING_USER_APPROVAL' | 'RUNNING' | 'COMPLETED_FIXED' | 'COMPLETED_PARTIAL' | 'STOPPED_BY_USER' | 'MAX_ITERATIONS_REACHED' | 'FAILED';
+  max_iterations: number;
+  current_iteration: number;
+  current_step?: string;
+  baseline_scorecard?: ReliabilityScorecard | null;
+  latest_scorecard?: ReliabilityScorecard | null;
+  iterations: RepairIterationResult[];
+  final_status: string;
+  final_verdict?: string;
+  error_message?: string | null;
+  user_approved_repair: boolean;
+  stop_requested: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getAgentRepairStatus(agentId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/repair/agents/${agentId}/status`);
+  if (!res.ok) throw new Error(`Failed to fetch repair status: ${res.statusText}`);
+  return res.json();
+}
+
+export async function startRepairSession(sessionId: string, maxIterations: number = 5): Promise<RepairSession> {
+  const res = await fetch(`${API_BASE_URL}/repair/sessions/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, max_iterations: maxIterations }),
+  });
+  if (!res.ok) throw new Error(`Failed to start repair session: ${res.statusText}`);
+  return res.json();
+}
+
+export async function stopRepairSession(sessionId: string): Promise<RepairSession> {
+  const res = await fetch(`${API_BASE_URL}/repair/sessions/${sessionId}/stop`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`Failed to stop repair session: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getRepairSession(sessionId: string): Promise<RepairSession> {
+  const res = await fetch(`${API_BASE_URL}/repair/sessions/${sessionId}`);
+  if (!res.ok) throw new Error(`Failed to fetch repair session: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchRegressionTests(agentId?: string): Promise<RegressionTest[]> {
+  const url = agentId
+    ? `${API_BASE_URL}/evaluations/regression-tests?agent_id=${encodeURIComponent(agentId)}`
+    : `${API_BASE_URL}/evaluations/regression-tests`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch regression tests: ${res.statusText}`);
+  return res.json();
+}
+
+export async function createRegressionTest(data: Partial<RegressionTest>): Promise<RegressionTest> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/regression-tests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to create regression test: ${res.statusText}`);
   return res.json();
 }

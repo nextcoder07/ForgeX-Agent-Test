@@ -131,6 +131,7 @@ def run_scenario_in_sandbox(
         except Exception as exc:
             logger.warning(f"Subprocess runner failed, falling back to in-process sandbox: {exc}")
 
+    executed_real_code = False
     if code_content:
         try:
             # Create isolated execution namespace with interceptors and Sandboxed OS wrapper

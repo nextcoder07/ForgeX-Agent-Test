@@ -282,6 +282,76 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ onNavi
             </li>
           </ol>
         </div>
+
+        {/* Explicit 3-Mode Execution Selection */}
+        <div className="p-6 rounded-2xl glass-panel border border-cyan-500/30 bg-slate-950/80 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Layers className="w-5 h-5 text-cyan-400" />
+              <h2 className="text-base font-extrabold text-slate-100">Select Execution Mode</h2>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-500/30">
+              TRANSPARENT FIDELITY
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Mode 1: Faithful */}
+            <div className="p-4 rounded-xl glass-card border border-emerald-500/30 bg-emerald-950/10 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">MODE 1 — FAITHFUL</span>
+                  <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-emerald-500/20 text-emerald-300">Fidelity: HIGH</span>
+                </div>
+                <p className="text-xs font-semibold text-slate-200">Original Model Execution</p>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  Executes agent using original model & credentials (e.g. OpenAI GPT-5). Requires original API credentials.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-emerald-500/20 flex items-center justify-between text-[10px] font-mono text-emerald-400">
+                <span>Model Substitution: NO</span>
+                <span>Confidence: HIGH</span>
+              </div>
+            </div>
+
+            {/* Mode 2: Compatible */}
+            <div className="p-4 rounded-xl glass-card border border-amber-500/30 bg-amber-950/10 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">MODE 2 — COMPATIBLE</span>
+                  <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-amber-500/20 text-amber-300">Fidelity: MEDIUM</span>
+                </div>
+                <p className="text-xs font-semibold text-slate-200">Alternative Model Substitute</p>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  Tests agent workflow & tools under Google Gemini when original credential is unavailable.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-amber-500/20 flex items-center justify-between text-[10px] font-mono text-amber-400">
+                <span>Model Substitution: YES</span>
+                <span>Confidence: MEDIUM</span>
+              </div>
+            </div>
+
+            {/* Mode 3: Simulation */}
+            <div className="p-4 rounded-xl glass-card border border-indigo-500/30 bg-indigo-950/10 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">MODE 3 — SIMULATION</span>
+                  <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-indigo-500/20 text-indigo-300">Fidelity: TEST-SPECIFIC</span>
+                </div>
+                <p className="text-xs font-semibold text-slate-200">Deterministic MockLLM</p>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  Uses MockLLM for deterministic tool call, failure, timeout, and malformed response testing.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-indigo-500/20 flex items-center justify-between text-[10px] font-mono text-indigo-400">
+                <span>Model Substitution: MOCK</span>
+                <span>Confidence: TEST-SPECIFIC</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       {/* Progress Bar */}

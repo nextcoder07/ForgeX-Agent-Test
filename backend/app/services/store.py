@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Any
 from app.db.supabase_client import get_client
 from app.models.agent import AgentRecord, ToolDefinition, ToolRisk, DependencyDefinition, AgentConstitution
 from app.models.scenario import Scenario, ScenarioCategory
-from app.models.evaluation import EvaluationJob, ReliabilityScorecard
+from app.models.evaluation import EvaluationJob, ReliabilityScorecard, RegressionTest
 from app.models.failure import RunVerdict, FailureCluster, FailureFinding
 from app.models.execution import ExecutionTrace, ExecutionJob, ExecutionSession, ExecutionStep, ExecutionMetrics, BenchmarkRecord
 from app.models.pipeline import PipelineRun, PipelineStage, AIGenerationRun
@@ -38,6 +38,34 @@ class SyncedDict:
         self.key_col = key_col
         self._local_data: Dict[str, Any] = {}
         self._sb = get_client()
+        self._load_local_snapshot()
+
+    def _snapshot_file(self) -> str:
+        return os.path.join(os.path.dirname(__file__), f"__snapshot_{self.table_name}.json")
+
+    def _save_local_snapshot(self):
+        try:
+            snapshot = {}
+            for k, val in self._local_data.items():
+                snapshot[k] = self.serialize_fn(k, val)
+            target_file = self._snapshot_file()
+            temp_file = f"{target_file}.tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(snapshot, f)
+            os.replace(temp_file, target_file)
+        except Exception as e:
+            logger.debug(f"Could not save disk snapshot for {self.table_name}: {e}")
+
+    def _load_local_snapshot(self):
+        sf = self._snapshot_file()
+        if os.path.exists(sf):
+            try:
+                with open(sf, "r", encoding="utf-8") as f:
+                    snapshot = json.load(f)
+                    for k, row in snapshot.items():
+                        self._local_data[k] = self.deserialize_fn(row)
+            except Exception as e:
+                logger.debug(f"Could not load disk snapshot for {self.table_name}: {e}")
 
     def __getitem__(self, key: str) -> Any:
         if self._sb:
@@ -54,6 +82,7 @@ class SyncedDict:
 
     def __setitem__(self, key: str, value: Any) -> None:
         self._local_data[key] = value
+        self._save_local_snapshot()
         if self._sb:
             try:
                 row = self.serialize_fn(key, value)
@@ -64,11 +93,13 @@ class SyncedDict:
     def __delitem__(self, key: str) -> None:
         if key in self._local_data:
             del self._local_data[key]
+            self._save_local_snapshot()
         if self._sb:
             try:
                 self._sb.table(self.table_name).delete().eq(self.key_col, key).execute()
             except Exception as e:
                 logger.error(f"Supabase error deleting from {self.table_name} for key {key}: {e}")
+
 
     def get(self, key: str, default: Optional[Any] = None) -> Any:
         try:
@@ -195,30 +226,87 @@ def _deserialize_scenario(row: Dict[str, Any]) -> Scenario:
     return Scenario(**spec)
 
 def _serialize_job(key: str, job: EvaluationJob) -> Dict[str, Any]:
+    spec = {
+        "agent_id": job.agent_id,
+        "agent_version_id": job.agent_version_id,
+        "agent_name": job.agent_name,
+        "agent_version": job.agent_version,
+        "execution_run_id": job.execution_run_id,
+        "sandbox_specification_id": job.sandbox_specification_id,
+        "behavior_profile_id": job.behavior_profile_id,
+        "scenario_set_id": job.scenario_set_id,
+        "current_step": job.current_step,
+        "error_message": job.error_message,
+        "total_scenarios": job.total_scenarios,
+        "completed_scenarios": job.completed_scenarios,
+        "total_verdicts": job.total_verdicts,
+        "execution_mode": job.execution_mode,
+        "original_model": job.original_model,
+        "executed_model": job.executed_model,
+        "model_substitution": job.model_substitution,
+        "confidence": job.confidence,
+        "fidelity": job.fidelity,
+        "evaluator_version": job.evaluator_version,
+        "rule_set_version": job.rule_set_version,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at
+    }
     return {
         "id": job.id,
-        "agent_version_id": job.agent_id, # link to agent mapping
+        "agent_version_id": job.agent_version_id or job.agent_id,
         "name": job.agent_name,
-        "mode": "evaluation",
+        "mode": job.execution_mode,
         "status": job.status,
         "total_scenarios": job.total_scenarios,
         "completed_scenarios": job.completed_scenarios,
         "started_at": job.created_at,
-        "completed_at": job.finished_at
+        "completed_at": job.finished_at,
+        "job_spec": spec
     }
 
 def _deserialize_job(row: Dict[str, Any]) -> EvaluationJob:
+    spec = row.get("job_spec") or {}
+    status = row.get("status", "completed")
+    current_step = spec.get("current_step") or row.get("current_step") or "Evaluation job processed."
+
+    # Auto-recover active jobs interrupted by backend server restart
+    if status in ["running", "evaluating", "aggregating", "pending"]:
+        status = "failed"
+        current_step = "Job interrupted by backend server restart. Click Retry to re-run."
+        error_msg = "Server process restarted during active execution."
+    else:
+        error_msg = spec.get("error_message") or row.get("error_message")
+
     return EvaluationJob(
         id=row["id"],
-        agent_id=row.get("agent_version_id", ""),
-        agent_name=row.get("name", ""),
-        agent_version="v1.0",
-        status=row.get("status", "completed"),
-        total_scenarios=row.get("total_scenarios", 0),
-        completed_scenarios=row.get("completed_scenarios", 0),
-        created_at=str(row.get("started_at", _now())),
-        finished_at=row.get("completed_at")
+        agent_id=spec.get("agent_id") or row.get("agent_version_id") or row.get("agent_id", ""),
+        agent_version_id=spec.get("agent_version_id") or row.get("agent_version_id"),
+        agent_name=spec.get("agent_name") or row.get("name", ""),
+        agent_version=spec.get("agent_version") or row.get("agent_version", "v1.0"),
+        execution_run_id=spec.get("execution_run_id"),
+        sandbox_specification_id=spec.get("sandbox_specification_id"),
+        behavior_profile_id=spec.get("behavior_profile_id"),
+        scenario_set_id=spec.get("scenario_set_id"),
+        status=status,
+        current_step=current_step,
+        error_message=error_msg,
+        total_scenarios=int(spec.get("total_scenarios") or row.get("total_scenarios", 0)),
+        completed_scenarios=int(spec.get("completed_scenarios") or row.get("completed_scenarios", 0)),
+        total_verdicts=int(spec.get("total_verdicts") or row.get("total_verdicts", 0)),
+        execution_mode=spec.get("execution_mode") or row.get("mode") or "faithful",
+        original_model=spec.get("original_model") or row.get("original_model", "openai/gpt-5"),
+        executed_model=spec.get("executed_model") or row.get("executed_model", "openai/gpt-5"),
+        model_substitution=bool(spec.get("model_substitution") if "model_substitution" in spec else row.get("model_substitution", False)),
+        confidence=spec.get("confidence") or row.get("confidence", "HIGH"),
+        fidelity=float(spec.get("fidelity") or 1.0),
+        evaluator_version=spec.get("evaluator_version") or "v2.0",
+        rule_set_version=spec.get("rule_set_version") or "reliability-rules-v2",
+        created_at=str(spec.get("created_at") or row.get("started_at") or _now()),
+        started_at=spec.get("started_at") or row.get("started_at"),
+        finished_at=spec.get("finished_at") or row.get("completed_at")
     )
+
 
 def _serialize_scorecard(key: str, sc: ReliabilityScorecard) -> Dict[str, Any]:
     return {
@@ -237,11 +325,18 @@ def _serialize_scorecard(key: str, sc: ReliabilityScorecard) -> Dict[str, Any]:
         "total_scenarios": sc.total_scenarios,
         "passed": sc.passed,
         "failed": sc.failed,
+        "blocked": sc.blocked,
+        "inconclusive": sc.inconclusive,
         "critical_failures": sc.critical_failures,
-        "judge_agreement_rate": sc.judge_agreement_rate
+        "judge_agreement_rate": sc.judge_agreement_rate,
+        "score_formula_version": sc.score_formula_version,
+        "scorecard_spec": sc.model_dump() if hasattr(sc, "model_dump") else sc.dict()
     }
 
 def _deserialize_scorecard(row: Dict[str, Any]) -> ReliabilityScorecard:
+    spec = row.get("scorecard_spec") or {}
+    if spec:
+        return ReliabilityScorecard(**spec)
     return ReliabilityScorecard(
         evaluation_id=row["evaluation_id"],
         agent_id=row.get("agent_id", ""),
@@ -258,18 +353,18 @@ def _deserialize_scorecard(row: Dict[str, Any]) -> ReliabilityScorecard:
         total_scenarios=int(row.get("total_scenarios", 0)),
         passed=int(row.get("passed", 0)),
         failed=int(row.get("failed", 0)),
+        blocked=int(row.get("blocked", 0)),
+        inconclusive=int(row.get("inconclusive", 0)),
         critical_failures=int(row.get("critical_failures", 0)),
-        judge_agreement_rate=float(row.get("judge_agreement_rate", 94.5))
+        judge_agreement_rate=row.get("judge_agreement_rate"),
+        score_formula_version=row.get("score_formula_version", "v2.0-weighted")
     )
 
 def _serialize_verdicts(key: str, verdicts: List[RunVerdict]) -> Dict[str, Any]:
-    # Store List[RunVerdict] as a JSON list in evaluation_results with the job/run_id as key
-    # Wait, the table evaluation_results has columns evaluation_run_id and evidence / details.
-    # To keep it extremely simple, we store it in evaluation_results with a scenario ID of 'verdicts_list'
-    # or inside evidence JSONB.
     return {
-        "id": f"res-list-{key}",
+        "id": f"verd-list-{key}",
         "evaluation_run_id": key,
+        "record_type": "verdicts",
         "status": "completed",
         "evidence": {"verdicts": [v.model_dump() if hasattr(v, "model_dump") else v.dict() for v in verdicts]}
     }
@@ -280,10 +375,10 @@ def _deserialize_verdicts(row: Dict[str, Any]) -> List[RunVerdict]:
     return [RunVerdict(**v) for v in verdicts_data]
 
 def _serialize_traces(key: str, traces: List[ExecutionTrace]) -> Dict[str, Any]:
-    # Store List[ExecutionTrace] as a JSON list in reports or state_snapshots under run/job id
     return {
         "id": f"trace-list-{key}",
         "evaluation_run_id": key,
+        "record_type": "traces",
         "status": "completed",
         "evidence": {"traces": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in traces]}
     }
@@ -465,12 +560,12 @@ def _deserialize_execution_job(row: Dict[str, Any]) -> ExecutionJob:
     return ExecutionJob(
         id=row["id"],
         agent_id=row.get("agent_id", ""),
-        agent_name=row.get("agent_name", ""),
+        agent_name=row.get("name") or row.get("agent_name", ""),
         status=row.get("status", "pending"),
-        total_scenarios=row.get("total_scenarios", 0),
-        completed_scenarios=row.get("completed_scenarios", 0),
+        total_scenarios=int(row.get("total_scenarios", 0)),
+        completed_scenarios=int(row.get("completed_scenarios", 0)),
         scenario_ids=row.get("scenario_ids", []),
-        created_at=row.get("created_at", _now()),
+        created_at=str(row.get("created_at", _now())),
         finished_at=row.get("finished_at"),
     )
 
@@ -639,6 +734,56 @@ def _deserialize_behavior_profile(row: Dict[str, Any]) -> AgentBehaviorProfile:
     return AgentBehaviorProfile(**p_json)
 
 
+def _serialize_repair_session(key: str, sess: RepairSession) -> Dict[str, Any]:
+    return {
+        "id": sess.id,
+        "agent_id": sess.agent_id,
+        "agent_name": sess.agent_name,
+        "status": sess.status.value if hasattr(sess.status, "value") else str(sess.status),
+        "session_spec": sess.model_dump() if hasattr(sess, "model_dump") else sess.dict()
+    }
+
+
+def _deserialize_repair_session(row: Dict[str, Any]) -> RepairSession:
+    spec = row.get("session_spec") or {}
+    return RepairSession(**spec)
+
+
+def _serialize_regression_test(key: str, reg: RegressionTest) -> Dict[str, Any]:
+    return {
+        "id": reg.id,
+        "source_evaluation_id": reg.source_evaluation_id,
+        "source_verdict_id": reg.source_verdict_id,
+        "agent_id": reg.agent_id,
+        "scenario_id": reg.scenario_id,
+        "failure_category": reg.failure_category,
+        "severity": reg.severity,
+        "status": reg.status,
+        "created_at": reg.created_at,
+        "updated_at": reg.updated_at,
+        "regression_spec": reg.model_dump() if hasattr(reg, "model_dump") else reg.dict()
+    }
+
+
+def _deserialize_regression_test(row: Dict[str, Any]) -> RegressionTest:
+    spec = row.get("regression_spec") or {}
+    if spec:
+        return RegressionTest(**spec)
+    return RegressionTest(
+        id=row["id"],
+        source_evaluation_id=row.get("source_evaluation_id", ""),
+        source_verdict_id=row.get("source_verdict_id", ""),
+        agent_id=row.get("agent_id", ""),
+        scenario_id=row.get("scenario_id", ""),
+        failure_category=row.get("failure_category", ""),
+        severity=row.get("severity", "high"),
+        assertion=row.get("assertion", {}),
+        status=row.get("status", "ACTIVE"),
+        created_at=row.get("created_at", _now()),
+        updated_at=row.get("updated_at", _now())
+    )
+
+
 # ---------------------------------------------------------------------------
 # Global Store Implementation
 # ---------------------------------------------------------------------------
@@ -648,8 +793,9 @@ class Store:
         self.scenarios = SyncedDict("scenarios", _serialize_scenario, _deserialize_scenario)
         self.jobs = SyncedDict("evaluation_runs", _serialize_job, _deserialize_job)
         self.scorecards = SyncedDict("scorecards", _serialize_scorecard, _deserialize_scorecard, "evaluation_id")
-        self.verdicts = SyncedDict("evaluation_results", _serialize_verdicts, _deserialize_verdicts, "evaluation_run_id")
-        self.traces = SyncedDict("evaluation_results", _serialize_traces, _deserialize_traces, "evaluation_run_id")
+        # Use separate logical table names so verdicts and traces don't share the same snapshot file
+        self.verdicts = SyncedDict("evaluation_verdicts", _serialize_verdicts, _deserialize_verdicts, "evaluation_run_id")
+        self.traces = SyncedDict("evaluation_traces", _serialize_traces, _deserialize_traces, "evaluation_run_id")
         self.clusters = SyncedDict("failure_clusters", _serialize_clusters, _deserialize_clusters, "evaluation_id")
         self.pipeline_runs = SyncedDict("pipeline_runs", _serialize_pipeline_run, _deserialize_pipeline_run)
         self.agent_test_specs = SyncedDict("agent_test_specifications", _serialize_agent_test_spec, _deserialize_agent_test_spec)
@@ -664,7 +810,10 @@ class Store:
         self.execution_metrics = SyncedDict("execution_metrics", _serialize_execution_metrics, _deserialize_execution_metrics)
         self.benchmark_records = SyncedDict("benchmark_records", _serialize_benchmark_record, _deserialize_benchmark_record)
         self.agent_behavior_profiles = SyncedDict("agent_behavior_profiles", _serialize_behavior_profile, _deserialize_behavior_profile)
+        self.repair_sessions = SyncedDict("repair_sessions", _serialize_repair_session, _deserialize_repair_session)
+        self.regression_tests = SyncedDict("regression_tests", _serialize_regression_test, _deserialize_regression_test)
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
+
 
         # Seed platform-provided resources (free sandbox / mock capabilities)
         self._seed_platform_resources()

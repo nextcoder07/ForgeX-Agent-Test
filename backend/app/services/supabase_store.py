@@ -278,13 +278,19 @@ class SupabaseStore:
     def insert_evaluation_result(self, result: Dict) -> Optional[Dict]:
         if not self._sb:
             return None
-        rows = _exec(self._sb.table("evaluation_results").insert(result).select("*"))
+        try:
+            rows = _exec(self._sb.table("evaluation_verdicts").insert(result).select("*"))
+        except Exception:
+            rows = _exec(self._sb.table("evaluation_results").insert(result).select("*"))
         return rows[0] if rows else None
 
     def list_evaluation_results(self, run_id: str) -> List[Dict]:
         if not self._sb:
             return []
-        return _exec(self._sb.table("evaluation_results").select("*").eq("evaluation_run_id", run_id))
+        try:
+            return _exec(self._sb.table("evaluation_verdicts").select("*").eq("evaluation_run_id", run_id))
+        except Exception:
+            return _exec(self._sb.table("evaluation_results").select("*").eq("evaluation_run_id", run_id))
 
     # -------------------------------------------------------------------------
     # REPORTS
