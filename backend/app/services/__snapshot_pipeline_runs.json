@@ -138,5 +138,12 @@
     "status": "running",
     "started_at": "2026-08-23T12:24:30.548180",
     "completed_at": null
+  },
+  "pipe-607571a4": {
+    "id": "pipe-607571a4",
+    "pipeline_type": "agent_intake",
+    "status": "running",
+    "started_at": "2026-08-23T13:44:15.634568",
+    "completed_at": null
   }
 }

@@ -3224,5 +3224,307 @@
     "analysis_run_id": "run-14a422",
     "confidence": 0.98,
     "created_at": "2026-08-23T12:24:30.542150Z"
+  },
+  "abp-0eb0ea31": {
+    "id": "abp-0eb0ea31",
+    "agent_id": "agent-338b2642",
+    "agent_version_id": "agent-338b2642",
+    "schema_version": "v1",
+    "profile_json": {
+      "id": "abp-0eb0ea31",
+      "agent_id": "agent-338b2642",
+      "agent_version_id": "agent-338b2642",
+      "schema_version": "v1",
+      "identity": {
+        "name": "GitHub Issue Triager",
+        "domain": "software-development",
+        "entrypoint": "07-github-issue-triager/agent.py"
+      },
+      "goal": "Execute software-development tasks using discovered workflow nodes and external capabilities.",
+      "interface_contract": {
+        "interface_type": "CLI",
+        "entrypoint": "07-github-issue-triager/agent.py",
+        "invocation_pattern": {
+          "command": "python 07-github-issue-triager/agent.py --issue-url --title --body",
+          "arguments": [
+            "--issue-url",
+            "--title",
+            "--body"
+          ]
+        },
+        "input_artifacts": [],
+        "stdin_supported": false,
+        "interactive": false,
+        "endpoint": null,
+        "env_vars_required": [
+          "OPENAI_API_KEY",
+          "GITHUB_TOKEN"
+        ]
+      },
+      "output_contract": {
+        "stdout_format": "TEXT",
+        "output_files": [],
+        "exit_codes": {
+          "0": "SUCCESS"
+        },
+        "schema_definition": null
+      },
+      "dependency_requirements": [
+        {
+          "name": "langchain==0.3.0",
+          "type": "framework",
+          "required": true,
+          "detected_from": "07-github-issue-triager/requirements.txt"
+        },
+        {
+          "name": "langchain-core==0.3.0",
+          "type": "framework",
+          "required": true,
+          "detected_from": "07-github-issue-triager/requirements.txt"
+        },
+        {
+          "name": "langchain-openai==0.2.0",
+          "type": "framework",
+          "required": true,
+          "detected_from": "07-github-issue-triager/requirements.txt"
+        },
+        {
+          "name": "requests==2.32.3",
+          "type": "package",
+          "required": true,
+          "detected_from": "07-github-issue-triager/requirements.txt"
+        },
+        {
+          "name": "python-dotenv==1.0.1",
+          "type": "package",
+          "required": true,
+          "detected_from": "07-github-issue-triager/requirements.txt"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "type": "credential",
+          "required": true,
+          "detected_from": "environment_reference"
+        },
+        {
+          "name": "GITHUB_TOKEN",
+          "type": "credential",
+          "required": true,
+          "detected_from": "environment_reference"
+        }
+      ],
+      "workflow_graph": {
+        "nodes": [],
+        "edges": [],
+        "entrypoint": "07-github-issue-triager/agent.py",
+        "terminal_nodes": []
+      },
+      "inputs": [
+        {
+          "name": "--issue-url",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "description": "GitHub issue URL"
+        },
+        {
+          "name": "--title",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "description": "Issue title (use with --body)"
+        },
+        {
+          "name": "--body",
+          "type": "string",
+          "required": false,
+          "default": "",
+          "description": "Issue body text"
+        }
+      ],
+      "outputs": [],
+      "state_model": {},
+      "external_calls": [
+        {
+          "class_name": "ChatOpenAI",
+          "capability": "LLM_INFERENCE",
+          "file": "07-github-issue-triager/agent.py",
+          "line": 50,
+          "evidence": "Instantiated ChatOpenAI() in 07-github-issue-triager/agent.py"
+        }
+      ],
+      "capabilities": [
+        "LLM_INFERENCE",
+        "GitHub API interaction"
+      ],
+      "data_transformations": [
+        {
+          "field": "articles",
+          "operation": "format_prompt_text",
+          "parameters": {
+            "template": "Title: {title}\nSource: {source}\nSummary: {description}"
+          },
+          "evidence": "Article formatting into LLM prompt text in 07-github-issue-triager/agent.py"
+        }
+      ],
+      "invariants": [
+        {
+          "statement": "Default CLI --body = ''",
+          "type": "observed",
+          "enforcement_level": "hard",
+          "testability": "deterministic",
+          "source_file": "07-github-issue-triager/agent.py",
+          "source_location": null,
+          "evidence": "parser.add_argument('--body', default='')",
+          "confidence": 1.0
+        },
+        {
+          "statement": "LLM model = gpt-4o-mini",
+          "type": "observed",
+          "enforcement_level": "hard",
+          "testability": "deterministic",
+          "source_file": "07-github-issue-triager/agent.py",
+          "source_location": null,
+          "evidence": "model=gpt-4o-mini",
+          "confidence": 1.0
+        },
+        {
+          "statement": "LLM temperature = 0",
+          "type": "observed",
+          "enforcement_level": "hard",
+          "testability": "deterministic",
+          "source_file": "07-github-issue-triager/agent.py",
+          "source_location": null,
+          "evidence": "temperature=0",
+          "confidence": 1.0
+        },
+        {
+          "statement": "HTTP network timeout = 10s",
+          "type": "observed",
+          "enforcement_level": "hard",
+          "testability": "deterministic",
+          "source_file": "07-github-issue-triager/agent.py",
+          "source_location": null,
+          "evidence": "timeout=10",
+          "confidence": 1.0
+        }
+      ],
+      "failure_surfaces": [
+        {
+          "id": "fail-prompt-injection",
+          "component": "SECURITY",
+          "surface_type": "security",
+          "description": "External news/article content containing prompt injection payloads",
+          "evidence": "External untrusted article content formatted into LLM prompt",
+          "is_inferred": true,
+          "severity": "critical"
+        },
+        {
+          "id": "fail-input-issue-url-empty",
+          "component": "INPUT_PARSER",
+          "surface_type": "input",
+          "description": "Empty or whitespace string passed to --issue-url parameter",
+          "evidence": "CLI parameter --issue-url",
+          "is_inferred": false,
+          "severity": "medium"
+        },
+        {
+          "id": "fail-input-title-empty",
+          "component": "INPUT_PARSER",
+          "surface_type": "input",
+          "description": "Empty or whitespace string passed to --title parameter",
+          "evidence": "CLI parameter --title",
+          "is_inferred": false,
+          "severity": "medium"
+        },
+        {
+          "id": "fail-input-body-empty",
+          "component": "INPUT_PARSER",
+          "surface_type": "input",
+          "description": "Empty or whitespace string passed to --body parameter",
+          "evidence": "CLI parameter --body",
+          "is_inferred": false,
+          "severity": "medium"
+        },
+        {
+          "id": "fail-newsapi-timeout-http-error",
+          "component": "NEWS_RETRIEVAL",
+          "surface_type": "external_service",
+          "description": "NewsAPI network timeout (10s), HTTP 401 unauthenticated, HTTP 429 rate limited, or HTTP 500 error",
+          "evidence": "requests.get(url, timeout=10)",
+          "is_inferred": false,
+          "severity": "high"
+        },
+        {
+          "id": "fail-newsapi-malformed-response",
+          "component": "NEWS_RETRIEVAL",
+          "surface_type": "data",
+          "description": "NewsAPI returns malformed JSON or missing 'articles' / 'title' fields",
+          "evidence": "response.json().get('articles', []) and a['title'] indexing",
+          "is_inferred": false,
+          "severity": "medium"
+        },
+        {
+          "id": "fail-llm-missing-credential",
+          "component": "LLM_INFERENCE",
+          "surface_type": "llm",
+          "description": "Missing required OPENAI_API_KEY environment variable causing ChatOpenAI initialization failure",
+          "evidence": "ChatOpenAI(model='gpt-4o-mini') without explicit key argument",
+          "is_inferred": false,
+          "severity": "critical"
+        },
+        {
+          "id": "fail-llm-timeout-quota",
+          "component": "LLM_INFERENCE",
+          "surface_type": "llm",
+          "description": "OpenAI API rate limit (429), quota exhaustion, network timeout, or 500 service error",
+          "evidence": "ChatOpenAI invocation",
+          "is_inferred": false,
+          "severity": "high"
+        }
+      ],
+      "security_surfaces": [
+        {
+          "surface": "CREDENTIAL_IN_QUERY_PARAM",
+          "risk": "API key passed in URL query parameter string rather than Authorization header",
+          "severity": "medium",
+          "evidence": "apiKey={NEWS_API_KEY} parameter in URL query string"
+        },
+        {
+          "surface": "EXTERNAL_CONTENT_INJECTION",
+          "risk": "Untrusted external article/web content formatted directly into LLM prompt",
+          "severity": "high",
+          "evidence": "External article titles and descriptions formatted into LLM context"
+        }
+      ],
+      "side_effects": [
+        "External service call to LLM_INFERENCE"
+      ],
+      "declared_behaviors": [
+        "Capability: LLM_INFERENCE",
+        "Capability: GitHub API interaction"
+      ],
+      "observed_behaviors": [
+        "Workflow graph with 0 nodes"
+      ],
+      "conflicts": [],
+      "readiness": {
+        "analysis_ready": true,
+        "runtime_ready": true,
+        "dependencies_ready": true,
+        "credentials_ready": false,
+        "sandbox_ready": false,
+        "execution_ready": false,
+        "blocked_reasons": [
+          "Missing required API credentials: ['OPENAI_API_KEY', 'GITHUB_TOKEN']"
+        ]
+      },
+      "confidence_score": 0.98,
+      "analysis_run_id": "run-e05b41",
+      "created_at": "2026-08-23T13:44:15.629690Z"
+    },
+    "analysis_run_id": "run-e05b41",
+    "confidence": 0.98,
+    "created_at": "2026-08-23T13:44:15.629690Z"
   }
 }

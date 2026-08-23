@@ -1451,7 +1451,9 @@
       "memory_limit_mb": 512,
       "execution_timeout_seconds": 30,
       "isolation_mode": "subprocess",
-      "agent_source_reference": "test-agents/Customer Support Agent"
+      "agent_source_reference": "test-agents/Customer Support Agent",
+      "entrypoint": "agent.py",
+      "base_image": "python:3.12-slim"
     },
     "dependencies": [
       {
@@ -1523,5 +1525,82 @@
     "status": "READY",
     "blockers": [],
     "created_at": "2026-08-23T13:22:58.560630Z"
+  },
+  "sb-spec-dd3820d4": {
+    "id": "sb-spec-dd3820d4",
+    "agent_id": "agent-338b2642",
+    "language": "python",
+    "runtime_version": "3.12",
+    "base_image": "python:3.12-slim",
+    "entrypoint": "agent.py",
+    "runtime": {
+      "language": "python",
+      "version": "3.12",
+      "cpu_limit": 1.0,
+      "memory_limit_mb": 512,
+      "execution_timeout_seconds": 30,
+      "isolation_mode": "subprocess",
+      "agent_source_reference": "test-agents/GitHub Issue Triager"
+    },
+    "dependencies": [
+      {
+        "name": "langchain==0.3.0",
+        "type": "framework",
+        "detected_from": "07-github-issue-triager/requirements.txt",
+        "required": true
+      },
+      {
+        "name": "langchain-core==0.3.0",
+        "type": "framework",
+        "detected_from": "07-github-issue-triager/requirements.txt",
+        "required": true
+      },
+      {
+        "name": "langchain-openai==0.2.0",
+        "type": "framework",
+        "detected_from": "07-github-issue-triager/requirements.txt",
+        "required": true
+      },
+      {
+        "name": "requests==2.32.3",
+        "type": "package",
+        "detected_from": "07-github-issue-triager/requirements.txt",
+        "required": true
+      },
+      {
+        "name": "python-dotenv==1.0.1",
+        "type": "package",
+        "detected_from": "07-github-issue-triager/requirements.txt",
+        "required": true
+      }
+    ],
+    "filesystem": {
+      "read_only_root": true,
+      "tmp_dir_mb": 64,
+      "allowed_paths": [
+        "/tmp",
+        "/workspace"
+      ],
+      "virtual_fs": {
+        "order_db.json": "{\"status\": \"active\", \"seeded\": true}",
+        "customer_records.json": "{\"seeded\": true}"
+      }
+    },
+    "network": {
+      "allow_external_http": true,
+      "allowed_domains": [
+        "localhost",
+        "127.0.0.1",
+        "api.openai.com",
+        "newsapi.org"
+      ],
+      "intercept_outbound": true,
+      "policy_id": "sandbox-web-restricted"
+    },
+    "tools": [],
+    "credentials": [],
+    "status": "READY",
+    "blockers": [],
+    "created_at": "2026-08-23T13:45:25.785030Z"
   }
 }

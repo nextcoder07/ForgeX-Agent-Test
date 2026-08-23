@@ -1078,5 +1078,59 @@
     "status": "ready",
     "user_value": null,
     "created_at": "2026-08-23T12:24:55.575539"
+  },
+  "bind-5ab68497": {
+    "id": "bind-5ab68497",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "Python 3.12 Runtime",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T13:45:22.879735"
+  },
+  "bind-3e83b324": {
+    "id": "bind-3e83b324",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "langchain==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T13:45:23.496612"
+  },
+  "bind-b33c9df0": {
+    "id": "bind-b33c9df0",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "langchain-core==0.3.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T13:45:23.919831"
+  },
+  "bind-216c403d": {
+    "id": "bind-216c403d",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "langchain-openai==0.2.0",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T13:45:24.314157"
+  },
+  "bind-3ada028b": {
+    "id": "bind-3ada028b",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "requests==2.32.3",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T13:45:24.838961"
+  },
+  "bind-de46f99d": {
+    "id": "bind-de46f99d",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "python-dotenv==1.0.1",
+    "resolution_type": "platform_sandbox",
+    "status": "ready",
+    "user_value": null,
+    "created_at": "2026-08-23T13:45:25.298689"
   }
 }

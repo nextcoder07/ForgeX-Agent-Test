@@ -129,52 +129,41 @@ class OllamaProvider(LLMProvider):
     """Local model provider (Ollama) — NO API Key required."""
     def __init__(self, endpoint: Optional[str] = None, model_name: Optional[str] = None):
         self.endpoint = (endpoint or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
-        self.model_name = model_name or os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
+        self.model_name = model_name or os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", "qwen2.5-coder:7b"))
 
     async def generate(
         self,
         system: str,
         user: str,
-        temperature: float = 0.2,
+        temperature: float = 0.1,
         conversation_id: Optional[str] = None,
         stage: str = "UNKNOWN"
     ) -> str:
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
+            payload = {
+                "model": self.model_name,
+                "system": system + "\n\nCRITICAL OUTPUT REQUIREMENT: Output MUST be strictly valid raw JSON. Do NOT include markdown code block wrappers (```json ... ```), preamble, or postscript.",
+                "prompt": user,
+                "format": "json",
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "top_p": 0.95,
+                    "num_ctx": 8192
+                }
+            }
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 res = await client.post(
                     f"{self.endpoint}/api/generate",
-                    json={
-                        "model": self.model_name,
-                        "system": system,
-                        "prompt": user,
-                        "stream": False,
-                        "options": {"temperature": temperature}
-                    },
-                    timeout=60.0
+                    json=payload
                 )
                 if res.status_code == 200:
                     return res.json().get("response", "")
                 raise RuntimeError(f"Ollama server returned HTTP {res.status_code}")
         except Exception as e:
-            logger.warning(f"Ollama local model generation error: {e}")
+            logger.warning(f"Ollama local model generation error ({self.model_name}): {e}")
             return json.dumps(FallbackMockEngine.mock_agent_understanding(user))
-
-    async def analyze(self, code_evidence: str, doc_evidence: str) -> Dict[str, Any]:
-        system_prompt = (
-            "You are an expert AI Security & Architecture Analyzer specializing in agentic code analysis. "
-            "Analyze the provided Python agent code and documentation thoroughly. "
-            "Extract name, domain, goals, instructions, tools (with risk levels 'low', 'high', 'critical'), "
-            "capabilities, never_rules, always_rules, state_management, and architecture_components. "
-            "Respond ONLY with a clean, valid JSON object matching the requested schema."
-        )
-        user_prompt = (
-            f"SOURCE CODE EVIDENCE:\n{code_evidence}\n\n"
-            f"DOCUMENTATION EVIDENCE:\n{doc_evidence}\n\n"
-            "Return JSON object with keys: agent_name, domain, goals, instructions, tools, capabilities, never_rules, always_rules."
-        )
-        raw = await self.generate(system_prompt, user_prompt, stage="AGENT_INTAKE")
-        return _clean_and_parse_json(raw)
 
     async def analyze_evidence_packet(self, evidence_packet: Dict[str, Any]) -> Dict[str, Any]:
         system_prompt = (
@@ -268,13 +257,13 @@ def get_provider(provider_name: str, model_name: str = "", api_key: str = "", mo
     if p_lower == "openai":
         return OpenAIProvider(api_key=api_key, model_name=model_name or "gpt-5")
     elif p_lower in ["google", "gemini"]:
-        return GeminiProvider(api_key=api_key, model_name=model_name or LLMConfig.MODEL)
+        return GeminiProvider(api_key=api_key, model_name=model_name or LLMConfig.GEMINI_MODEL)
     elif p_lower in ["openrouter", "otherai", "open-router"]:
         return OpenRouterProvider(api_key=api_key, model_name=model_name)
     elif p_lower == "anthropic":
         return AnthropicProvider(api_key=api_key, model_name=model_name or "claude-3-5-sonnet")
     elif p_lower in ["ollama", "local"]:
-        return OllamaProvider(model_name=model_name or "llama3")
+        return OllamaProvider(model_name=model_name or "qwen2.5-coder:7b")
     elif p_lower == "mock":
         return MockLLM(mock_behavior=mock_behavior)
     

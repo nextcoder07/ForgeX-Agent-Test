@@ -958,5 +958,53 @@
     "dependency_type": "package",
     "required": true,
     "detected_from": "requirements.txt"
+  },
+  "dep-f3fda903": {
+    "id": "dep-f3fda903",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "Python 3.12 Runtime",
+    "dependency_type": "runtime",
+    "required": true,
+    "detected_from": "config"
+  },
+  "dep-770b0097": {
+    "id": "dep-770b0097",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "langchain==0.3.0",
+    "dependency_type": "framework",
+    "required": true,
+    "detected_from": "07-github-issue-triager/requirements.txt"
+  },
+  "dep-e14fb637": {
+    "id": "dep-e14fb637",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "langchain-core==0.3.0",
+    "dependency_type": "framework",
+    "required": true,
+    "detected_from": "07-github-issue-triager/requirements.txt"
+  },
+  "dep-b1675e3c": {
+    "id": "dep-b1675e3c",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "langchain-openai==0.2.0",
+    "dependency_type": "framework",
+    "required": true,
+    "detected_from": "07-github-issue-triager/requirements.txt"
+  },
+  "dep-273291f6": {
+    "id": "dep-273291f6",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "requests==2.32.3",
+    "dependency_type": "package",
+    "required": true,
+    "detected_from": "07-github-issue-triager/requirements.txt"
+  },
+  "dep-511c6573": {
+    "id": "dep-511c6573",
+    "agent_id": "agent-338b2642",
+    "dependency_name": "python-dotenv==1.0.1",
+    "dependency_type": "package",
+    "required": true,
+    "detected_from": "07-github-issue-triager/requirements.txt"
   }
 }
