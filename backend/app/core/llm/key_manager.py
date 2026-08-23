@@ -179,6 +179,82 @@ class UnifiedKeyManager:
                         k.status = "AVAILABLE"
                     break
 
+class TestAgentKeyManager:
+    """Dedicated Key Manager for Test Agent sandbox executions."""
+    _lock = threading.Lock()
+
+    def __init__(self):
+        self.keys: List[AIKey] = []
+        self.load_keys()
+
+    def load_keys(self):
+        self.keys.clear()
+        for idx in range(1, 50):
+            val = os.getenv(f"TEST_AI_API_KEY_{idx}", "").strip()
+            if not val:
+                continue
+            api_name = os.getenv(f"TEST_AI_API_NAME_{idx}", "openrouter").strip().lower()
+            model_name = os.getenv(f"TEST_AI_MODEL_{idx}", "openai/gpt-4o-mini").strip()
+            self.keys.append(AIKey(
+                key_id=f"Test Agent Key {idx}",
+                value=val,
+                api_name=api_name,
+                model_name=model_name
+            ))
+
+        # Legacy single key fallback
+        legacy_val = os.getenv("TEST_AGENT_GEMINI_API_KEY", "").strip()
+        if legacy_val and not any(k.value == legacy_val for k in self.keys):
+            self.keys.append(AIKey(
+                key_id="Test Agent Legacy Gemini Key",
+                value=legacy_val,
+                api_name="gemini",
+                model_name="gemini-3.6-flash"
+            ))
+
+    def select_active_key(self) -> Optional[AIKey]:
+        with self._lock:
+            now = time.time()
+            for k in self.keys:
+                if k.status == "COOLDOWN" and now >= k.cooldown_until:
+                    k.status = "AVAILABLE"
+            eligible = [k for k in self.keys if k.status == "AVAILABLE"]
+            return eligible[0] if eligible else None
+
+    def get_active_test_credentials(self) -> Dict[str, str]:
+        with self._lock:
+            now = time.time()
+            for k in self.keys:
+                if k.status == "COOLDOWN" and now >= k.cooldown_until:
+                    k.status = "AVAILABLE"
+
+            eligible = [k for k in self.keys if k.status == "AVAILABLE"]
+            if not eligible:
+                # Fallback to UnifiedKeyManager primary keys if no dedicated test key is available
+                ukm = UnifiedKeyManager()
+                fallback_key = ukm.select_key()
+                if fallback_key:
+                    return {
+                        "OPENAI_API_KEY": fallback_key.value,
+                        "GEMINI_API_KEY": fallback_key.value,
+                        "ANTHROPIC_API_KEY": fallback_key.value,
+                        "OPENROUTER_API_KEY": fallback_key.value,
+                        "TEST_AI_API_KEY": fallback_key.value,
+                    }
+                return {}
+
+            selected = eligible[0]
+            selected.last_used_at = now
+            return {
+                "OPENAI_API_KEY": selected.value,
+                "GEMINI_API_KEY": selected.value,
+                "ANTHROPIC_API_KEY": selected.value,
+                "OPENROUTER_API_KEY": selected.value,
+                "TEST_AI_API_KEY": selected.value,
+                "TEST_AI_API_NAME": selected.api_name,
+                "TEST_AI_MODEL": selected.model_name,
+            }
+
 class ConversationSession:
     def __init__(self, conversation_id: str, system_prompt: str = ""):
         self.conversation_id = conversation_id
@@ -269,73 +345,4 @@ def classify_error(e: Exception) -> tuple[str, str]:
 def is_rotation_eligible(error_category: str) -> bool:
     return error_category in (ErrorCategory.KEY_SPECIFIC, ErrorCategory.PROJECT_QUOTA)
 
-class TestAgentKeyManager:
-    """Manages dedicated API keys strictly reserved for test agents in compatible mode."""
-    _instance = None
-    _lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs):
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super(TestAgentKeyManager, cls).__new__(cls, *args, **kwargs)
-                cls._instance._initialized = False
-            return cls._instance
-
-    def __init__(self, cooldown_seconds: int = 120):
-        if self._initialized:
-            return
-        self.keys: List[AIKey] = []
-        self.cooldown_seconds = cooldown_seconds
-        self.load_keys()
-        self._initialized = True
-
-    def load_keys(self):
-        self.keys.clear()
-        main_key = os.getenv("TEST_AGENT_GEMINI_API_KEY", "")
-        if main_key:
-            self.keys.append(AIKey(key_id="Test Agent Key 1", value=main_key, api_name="gemini", model_name="gemini-2.5-flash"))
-            
-        for idx in range(1, 10):
-            key_val = os.getenv(f"TEST_AGENT_GEMINI_API_KEY_{idx}", "")
-            if key_val and not any(k.value == key_val for k in self.keys):
-                self.keys.append(AIKey(key_id=f"Test Agent Key {idx+1}", value=key_val, api_name="gemini", model_name="gemini-2.5-flash"))
-
-    def select_key(self) -> Optional[AIKey]:
-        with self._lock:
-            now = time.time()
-            for k in self.keys:
-                if k.status == "COOLDOWN" and now >= k.cooldown_until:
-                    k.status = "AVAILABLE"
-
-            eligible = [k for k in self.keys if k.status == "AVAILABLE"]
-            if not eligible:
-                return None
-
-            selected = min(eligible, key=lambda x: x.last_used_at)
-            selected.last_used_at = time.time()
-            return selected
-
-    def mark_key_failed(self, key_id: str, error_type: str, error_msg: str):
-        with self._lock:
-            for k in self.keys:
-                if k.key_id == key_id:
-                    k.failure_count += 1
-                    k.last_error = error_msg
-                    if error_type in ("INVALID_KEY", "AUTHENTICATION_ERROR"):
-                        k.status = "STOPPED"
-                    elif error_type == "QUOTA_EXHAUSTED":
-                        k.status = "COOLDOWN"
-                        k.cooldown_until = time.time() + 600
-                    else:
-                        k.status = "COOLDOWN"
-                        k.cooldown_until = time.time() + 30
-                    break
-
-    def mark_key_success(self, key_id: str):
-        with self._lock:
-            for k in self.keys:
-                if k.key_id == key_id:
-                    k.failure_count = 0
-                    if k.status not in ("STOPPED", "COOLDOWN"):
-                        k.status = "AVAILABLE"
-                    break

@@ -101,8 +101,7 @@ class SyncedDict:
                     except Exception as retry_err:
                         logger.error(f"Fallback save failed for {self.table_name}: {retry_err}")
                         raise retry_err
-                logger.error(f"Supabase error saving to {self.table_name} for key {key}: {e}")
-                raise e
+                logger.warning(f"Supabase error saving to {self.table_name} for key {key}: {e}. Preserved in local snapshot.")
 
     def __delitem__(self, key: str) -> None:
         if key in self._local_data:

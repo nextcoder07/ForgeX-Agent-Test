@@ -498,8 +498,10 @@ class DependencyResolver:
             # Faithful: Demand ONLY original credentials
             for r in agent_reqs:
                 if r.credential:
-                    is_full = bool(secrets.get(r.credential) or system_items.get(r.credential, {}).is_configured)
-                    sys_masked = system_items.get(r.credential, {}).masked_value
+                    sys_item = system_items.get(r.credential)
+                    sys_cfg = getattr(sys_item, "is_configured", False) if sys_item else bool(os.getenv(r.credential))
+                    is_full = bool(secrets.get(r.credential) or sys_cfg)
+                    sys_masked = getattr(sys_item, "masked_value", None) if sys_item else None
                     requirements.append(
                         CredentialRequirement(
                             key_name=r.credential,
@@ -514,7 +516,9 @@ class DependencyResolver:
 
         elif mode == ExecutionMode.COMPATIBLE:
             # Compatible: Demand TEST_AGENT_GEMINI_API_KEY + external tool keys
-            gemini_full = bool(secrets.get("TEST_AGENT_GEMINI_API_KEY") or system_items.get("TEST_AGENT_GEMINI_API_KEY", {}).is_configured)
+            sys_item = system_items.get("TEST_AGENT_GEMINI_API_KEY")
+            sys_cfg = getattr(sys_item, "is_configured", False) if sys_item else bool(os.getenv("TEST_AGENT_GEMINI_API_KEY"))
+            gemini_full = bool(secrets.get("TEST_AGENT_GEMINI_API_KEY") or sys_cfg)
             requirements.append(
                 CredentialRequirement(
                     key_name="TEST_AGENT_GEMINI_API_KEY",
@@ -522,13 +526,15 @@ class DependencyResolver:
                     description="Required for Compatible mode model substitution",
                     is_fulfilled=gemini_full,
                     provided_by_system=bool(os.getenv("TEST_AGENT_GEMINI_API_KEY")),
-                    masked_value=system_items.get("TEST_AGENT_GEMINI_API_KEY", {}).masked_value if hasattr(system_items.get("TEST_AGENT_GEMINI_API_KEY", {}), "masked_value") else None
+                    masked_value=getattr(sys_item, "masked_value", None) if sys_item else None
                 )
             )
             # Add external service tool credentials (excluding LLM keys)
             for r in agent_reqs:
                 if r.type == "service" and r.credential and r.credential not in ["GEMINI_API_KEY", "TEST_AGENT_GEMINI_API_KEY"]:
-                    is_full = bool(secrets.get(r.credential) or system_items.get(r.credential, {}).is_configured)
+                    s_item = system_items.get(r.credential)
+                    s_cfg = getattr(s_item, "is_configured", False) if s_item else bool(os.getenv(r.credential))
+                    is_full = bool(secrets.get(r.credential) or s_cfg)
                     requirements.append(
                         CredentialRequirement(
                             key_name=r.credential,
@@ -537,7 +543,7 @@ class DependencyResolver:
                             is_fulfilled=is_full,
                             is_optional=not r.required,
                             provided_by_system=bool(os.getenv(r.credential)),
-                            masked_value=system_items.get(r.credential, {}).masked_value if is_full else None
+                            masked_value=getattr(s_item, "masked_value", None) if is_full else None
                         )
                     )
 
