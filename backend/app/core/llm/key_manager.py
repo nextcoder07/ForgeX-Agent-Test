@@ -145,7 +145,8 @@ class UnifiedKeyManager:
             if not eligible:
                 return None
             
-            selected = min(eligible, key=lambda x: x.last_used_at)
+            # Always select the first eligible key to maintain strict priority order
+            selected = eligible[0]
             selected.last_used_at = time.time()
             return selected
 
