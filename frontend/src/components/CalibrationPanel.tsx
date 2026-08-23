@@ -7,10 +7,10 @@ interface CalibrationPanelProps {
 }
 
 export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({ report }) => {
-  const rate = report.agreement_rate > 1 ? report.agreement_rate : report.agreement_rate * 100;
-  const agreementPct = rate.toFixed(2);
-  const fpPct = report.total_samples > 0 ? ((report.false_positives / report.total_samples) * 100).toFixed(1) : '0';
-  const fnPct = report.total_samples > 0 ? ((report.false_negatives / report.total_samples) * 100).toFixed(1) : '0';
+  const agreementVal = report.agreement_rate > 1 ? report.agreement_rate : report.agreement_rate * 100;
+  const agreementPct = agreementVal.toFixed(2);
+  const fpPct = report.total_samples > 0 ? ((report.false_positives / report.total_samples) * 100).toFixed(2) : '0.00';
+  const fnPct = report.total_samples > 0 ? ((report.false_negatives / report.total_samples) * 100).toFixed(2) : '0.00';
 
   return (
     <div className="space-y-6">

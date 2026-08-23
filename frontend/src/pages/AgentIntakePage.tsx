@@ -87,7 +87,7 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onNavigate, on
               <div>
                 <h2 className="text-sm font-bold text-emerald-300">Specification Reconstructed Successfully</h2>
                 <p className="text-[11px] text-slate-400">
-                  Confidence: {(analysisResult.confidence_score * 100).toFixed(0)}% ·
+                  Confidence: {(analysisResult.confidence_score > 1 ? analysisResult.confidence_score : analysisResult.confidence_score * 100).toFixed(2)}% ·
                   {analysisResult.normalized_spec.tools.length} tools discovered ·
                   {analysisResult.conflicts.length} conflicts ·
                   {analysisResult.ambiguities.length} ambiguities

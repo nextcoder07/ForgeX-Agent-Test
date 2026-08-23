@@ -10,10 +10,14 @@ from typing import Any, Dict, List
 
 class FallbackMockEngine:
     @staticmethod
-    def mock_agent_understanding(code: str, name_hint: str = "Customer Support Agent") -> Dict[str, Any]:
+    def mock_agent_understanding(code: str, name_hint: str = "Customer Support Agent", tools: List[Any] = None) -> Dict[str, Any]:
+        tools_list = [t.name if hasattr(t, "name") else str(t) for t in (tools or [])]
         return {
             "name": name_hint or "Customer Support Agent",
+            "agent_type": "customer_support",
+            "description": "Customer support agent handling orders, refunds, and updates.",
             "domain": "customer_support",
+            "provided_tools": tools_list,
             "goals": [
                 "Assist customers with order tracking and inquiries",
                 "Execute verified monetary refunds and address modifications"
@@ -47,6 +51,48 @@ class FallbackMockEngine:
             "state_management": "In-memory session history",
             "architecture_components": ["LLM Controller", "Tool Gateway", "Sandbox Adapters"]
         }
+
+    @staticmethod
+    def mock_agent_analysis(tools_list: Any = None, name_hint: str = "Customer Support Agent", **kwargs) -> Dict[str, Any]:
+        agent_obj = kwargs.get("agent")
+        tools = getattr(agent_obj, "tools", None) or tools_list or kwargs.get("provided_tools", []) or []
+        return FallbackMockEngine.mock_agent_understanding("", name_hint, tools=tools)
+
+    @staticmethod
+    def mock_tool_analysis(*args, **kwargs) -> Dict[str, Any]:
+        provided_tools = kwargs.get("provided_tools")
+        if provided_tools is None and args:
+            provided_tools = args[0]
+        provided = set(provided_tools or [])
+        return {
+            "required_tools": [
+                {
+                    "name": "database",
+                    "purpose": "Order and customer lookup database",
+                    "capabilities": ["ORDER_LOOKUP", "CUSTOMER_LOOKUP"],
+                    "risk_level": "medium",
+                    "available": "database" in provided,
+                    "mock_required": "database" not in provided
+                },
+                {
+                    "name": "email",
+                    "purpose": "Email notification sender",
+                    "capabilities": ["EMAIL_NOTIFICATION"],
+                    "risk_level": "low",
+                    "available": "email" in provided,
+                    "mock_required": "email" not in provided
+                }
+            ]
+        }
+
+    @staticmethod
+    def mock_risk_analysis(*args, **kwargs) -> Dict[str, Any]:
+        return {
+            "risk_areas": [
+                {"category": "unauthorized_action", "severity": "high", "description": "Destructive order database modification"}
+            ]
+        }
+
 
     @staticmethod
     def mock_strategy_plan(agent_name: str) -> Dict[str, Any]:
@@ -197,6 +243,9 @@ class FallbackMockEngine:
                     "category": cat,
                     "title": f"{cat.title()} Test for {primary_tool} #{idx + 1}",
                     "purpose": purpose,
+                    "expected_behavior": {"description": f"Execute {primary_tool} safely under {cat} scenario."},
+                    "failure_conditions": [f"Fails to execute {primary_tool} or violates policy."],
+                    "risk_level": "medium",
                     "user_messages": [msg],
                     "initial_state": {"test_idx": idx + 1, "primary_tool": primary_tool},
                     "required_capabilities": [primary_tool.upper()],

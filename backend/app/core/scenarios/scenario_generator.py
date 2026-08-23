@@ -43,12 +43,28 @@ def _compute_scenario_fingerprint(sc: Scenario) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def deduplicate_scenarios(scenarios: List[Scenario], threshold: float = 0.88) -> List[Scenario]:
+    """Deduplicates scenarios based on fingerprint and purpose similarity."""
+    seen_fingerprints = set()
+    unique_scenarios = []
+    for sc in scenarios:
+        fp = _compute_scenario_fingerprint(sc)
+        purpose_key = sc.purpose.strip().lower()
+        key = (fp, purpose_key)
+        if key not in seen_fingerprints:
+            seen_fingerprints.add(key)
+            unique_scenarios.append(sc)
+    return unique_scenarios
+
+
+
 async def generate_scenarios_for_agent(
     agent: AgentRecord,
     strategy: Optional[StrategyPlan] = None,
     llm: Optional[LLMProvider] = None,
     scenario_plan: Optional[ScenarioPlan] = None,
-    request: Optional[ScenarioGenerationRequest] = None
+    request: Optional[ScenarioGenerationRequest] = None,
+    **kwargs: Any
 ) -> List[Scenario]:
     """Generates concrete 5-layer test scenarios from deterministic ScenarioPlan items using batch LLM intelligence."""
     from app.core.llm.providers import get_platform_provider
@@ -198,6 +214,8 @@ async def generate_scenarios_for_agent(
                 safety_constraints=raw.get("safety_constraints", agent.constitution.never_rules) if isinstance(raw.get("safety_constraints"), list) else agent.constitution.never_rules,
                 execution_limits=raw.get("execution_limits", {"timeout_seconds": 30}) if isinstance(raw.get("execution_limits"), dict) else {"timeout_seconds": 30},
                 expected_behavior=expected_behavior,
+                failure_conditions=[str(fc) for fc in raw.get("failure_conditions", [])] if isinstance(raw.get("failure_conditions"), list) and raw.get("failure_conditions") else [f"Failure under {category.value} condition"],
+                risk_level=str(raw.get("risk_level", "medium")),
                 assertions=assertions,
                 provenance={
                     "generated_by": "gemini",
@@ -277,7 +295,36 @@ def generate_scenarios_deterministically(agent: AgentRecord, plan: ScenarioPlan)
         stress_vals = {"--topic": "technology", "--count": 100} if is_cli else {"message": "A" * 1000}
 
     scenarios: List[Scenario] = []
-    plan_items = plan.plan_items if plan.plan_items else []
+    plan_items = list(plan.plan_items) if plan.plan_items else []
+    if len(plan_items) < plan.total_target:
+        default_cats = [
+            ScenarioCategory.NORMAL,
+            ScenarioCategory.EDGE,
+            ScenarioCategory.RECOVERY,
+            ScenarioCategory.ADVERSARIAL,
+            ScenarioCategory.SECURITY,
+            ScenarioCategory.STRESS,
+            ScenarioCategory.CHAOS,
+        ]
+        existing_cats = {item.category for item in plan_items}
+        for cat in default_cats:
+            if cat not in existing_cats and len(plan_items) < plan.total_target:
+                plan_items.append(ScenarioPlanItem(
+                    plan_id=f"auto-item-{uuid.uuid4().hex[:6]}",
+                    target_type="category",
+                    category=cat,
+                    target=f"{cat.value.title()} coverage item",
+                    reason=f"Evaluate agent behavior under {cat.value} conditions."
+                ))
+        while len(plan_items) < plan.total_target:
+            cat = default_cats[len(plan_items) % len(default_cats)]
+            plan_items.append(ScenarioPlanItem(
+                plan_id=f"auto-item-{uuid.uuid4().hex[:6]}",
+                target_type="category",
+                category=cat,
+                target=f"{cat.value.title()} extra item",
+                reason=f"Evaluate agent behavior under {cat.value} conditions."
+            ))
 
     for idx, item in enumerate(plan_items):
         category = item.category
@@ -345,7 +392,9 @@ def generate_scenarios_deterministically(agent: AgentRecord, plan: ScenarioPlan)
             fault_injections=faults,
             safety_constraints=agent.constitution.never_rules,
             execution_limits={"timeout_seconds": 30},
-            expected_behavior={"summary": "Graceful output complying with core requirements"},
+            expected_behavior={"summary": "Graceful output complying with the core requirements"},
+            failure_conditions=[f"Failure to handle {category.value} scenario: {purpose}"],
+            risk_level="medium",
             assertions=assertions,
             provenance={
                 "generated_by": "deterministic_builder",

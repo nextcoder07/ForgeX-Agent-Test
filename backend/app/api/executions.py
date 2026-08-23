@@ -11,7 +11,13 @@ import datetime as dt
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from app.models.execution import ExecutionJob, ExecutionTrace
+from app.models.execution import (
+    ExecutionJob, ExecutionTrace, ExecutionRun, ExecutionSession,
+    ExecutionAction, ExecutionPreflight, PreExecutionSnapshot,
+    PostExecutionSnapshot, ObservationSummary, ExecutionLifecycleState,
+    ExecutionFailureState, EvidencePackage
+)
+from app.core.execution.preflight import run_scenario_preflight
 from app.models.dependency_model import ExecutionMode, ExecutionModelBinding
 from app.services.store import store
 from app.core.sandbox.sandbox_manager import SandboxManager
@@ -35,6 +41,44 @@ class RunExecutionRequest(BaseModel):
     secrets: Dict[str, str] = Field(default_factory=dict)
 
 
+class PreflightExecutionRequest(BaseModel):
+    agent_id: str
+    scenario_ids: List[str]
+    secrets: Dict[str, str] = Field(default_factory=dict)
+
+
+@router.post("/preflight")
+def check_execution_preflight(payload: PreflightExecutionRequest):
+    """Run preflight validation check and variable resolution before starting execution."""
+    agent = store.get_agent(payload.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
+
+    scenarios = [store.get_scenario(sc_id) for sc_id in payload.scenario_ids if store.get_scenario(sc_id)]
+    if not scenarios:
+        raise HTTPException(status_code=404, detail="No valid scenarios found for preflight check")
+
+    preflight_results = []
+    overall_ready = True
+    for sc in scenarios:
+        pf_res = run_scenario_preflight(
+            scenario=sc,
+            agent=agent,
+            execution_run_id="",
+            provided_variables=payload.secrets
+        )
+        if not pf_res.is_ready:
+            overall_ready = False
+        preflight_results.append(pf_res.model_dump() if hasattr(pf_res, "model_dump") else pf_res.dict())
+
+    return {
+        "agent_id": agent.id,
+        "overall_status": "READY" if overall_ready else "BLOCKED",
+        "scenarios_checked": len(preflight_results),
+        "preflight_results": preflight_results
+    }
+
+
 def _run_sandbox_scenarios_task(
     job_id: str,
     agent_id: str,
@@ -43,7 +87,7 @@ def _run_sandbox_scenarios_task(
     include_counterfactuals: bool = True,
     secrets: Dict[str, str] = None
 ):
-    """Background or sync task to execute scenarios inside SandboxManager and save traces."""
+    """Background or sync task to execute scenarios inside SandboxManager, collect evidence, and seal execution."""
     if secrets is None:
         secrets = {}
     agent = store.get_agent(agent_id)
@@ -53,6 +97,20 @@ def _run_sandbox_scenarios_task(
 
     job.status = "running"
     store.save_execution_job(job)
+
+    # Create ExecutionRun batch record
+    exec_run = ExecutionRun(
+        id=job_id,
+        agent_id=agent_id,
+        agent_version_id=agent.version_label,
+        scenario_ids=scenario_ids,
+        execution_mode=getattr(binding, "mode", ExecutionMode.FAITHFUL).value if binding else "faithful",
+        status=ExecutionLifecycleState.RUNNING.value,
+        started_at=_now(),
+        requested_count=len(scenario_ids),
+        ready_count=len(scenario_ids)
+    )
+    store.save_execution_run(exec_run)
 
     manager = SandboxManager()
     traces: List[ExecutionTrace] = []
@@ -73,43 +131,127 @@ def _run_sandbox_scenarios_task(
         sc = store.get_scenario(sc_id)
         if not sc:
             continue
-        # Skip scenarios that failed generation — they are placeholder entries
         if getattr(sc, 'validation_status', '') == 'FAILED_GENERATION':
             continue
 
-        activity_log.emit(
-            category="SANDBOX",
-            action="RUN_SCENARIO",
-            detail=f"[{idx+1}/{len(scenario_ids)}] Sandbox running scenario: {sc.title} ({sc.category.value if hasattr(sc.category, 'value') else str(sc.category)})",
-            status="success"
+        session_id = f"sess-{uuid.uuid4().hex[:8]}"
+        session = ExecutionSession(
+            id=session_id,
+            execution_run_id=job_id,
+            agent_version_id=agent.version_label,
+            scenario_id=sc.id,
+            status=ExecutionLifecycleState.PREFLIGHT.value,
+            started_at=_now()
         )
+        store.save_execution_session(session)
+
+        # Preflight
+        pf_res = run_scenario_preflight(scenario=sc, agent=agent, execution_run_id=job_id, provided_variables=secrets)
+        if pf_res.preflight_record:
+            session.preflight = pf_res.preflight_record
+
+        if not pf_res.is_ready:
+            session.status = ExecutionLifecycleState.FINALIZING.value
+            session.failure_state = ExecutionFailureState.BLOCKED.value
+            session.finished_at = _now()
+            store.save_execution_session(session)
+            exec_run.blocked_count += 1
+            store.save_execution_run(exec_run)
+            continue
+
+        # Build Sandbox
+        session.status = ExecutionLifecycleState.SANDBOX_BUILDING.value
+        store.save_execution_session(session)
 
         try:
-            # 1. Create unique ephemeral sandbox
             sb_instance = manager.create_sandbox(agent_id=agent.id, scenario_id=sc.id)
             manager.install_dependencies(sb_instance, agent)
             manager.inject_allowed_environment(sb_instance, allowed_env={"MODE": mode_val}, secrets=secrets)
 
-            # 2. Run primary trace inside sandbox
+            # Pre-Execution Snapshot
+            session.pre_snapshot = PreExecutionSnapshot(
+                filesystem_state={"workspace": sb_instance.temp_dir},
+                environment_metadata={"MODE": mode_val},
+                database_fixture_state=sc.initial_state,
+                network_policy={"allow": ["localhost"], "default": "DENY"},
+                timestamp=_now()
+            )
+
+            session.status = ExecutionLifecycleState.RUNNING.value
+            store.save_execution_session(session)
+
+            # Primary Execution Trace
             t_primary = manager.run_agent(sb_instance, agent, sc, binding)
             traces.append(t_primary)
 
-            # 3. Clean up sandbox instance
+            # Post-Execution Snapshot
+            session.post_snapshot = PostExecutionSnapshot(
+                filesystem_state={"workspace": sb_instance.temp_dir},
+                modified_files=[],
+                state_diffs=[],
+                process_exit_code=0,
+                timestamp=_now()
+            )
+
+            # Build 4-Layer Action Evidence Records
+            actions: List[ExecutionAction] = []
+            for seq, tc in enumerate(t_primary.tool_calls):
+                pol_decision = tc.routing_decision if tc.routing_decision in ["ALLOW", "BLOCK", "REDIRECT"] else ("BLOCK" if tc.status == "BLOCKED_POLICY" else "ALLOW")
+                act = ExecutionAction(
+                    id=f"act-{session_id}-{seq+1}",
+                    execution_session_id=session_id,
+                    sequence=seq + 1,
+                    action_type="TOOL_CALL",
+                    target=tc.tool_name,
+                    attempt_payload=tc.arguments,
+                    policy_decision=pol_decision,
+                    policy_reason=tc.policy_reason,
+                    executed=(pol_decision != "BLOCK"),
+                    result_status=tc.status,
+                    execution_result=tc.result,
+                    side_effect_detected=tc.actual_side_effect_occurred,
+                    evaluation_status="NOT_EVALUATED",
+                    timestamp=_now()
+                )
+                actions.append(act)
+                store.save_execution_action(act)
+
+            # Build EvidencePackage
+            evidence_pkg = EvidencePackage(
+                session_id=session_id,
+                scenario_id=sc.id,
+                agent_version_id=agent.version_label,
+                observation_summary=t_primary.observation_summary,
+                evidence_references=[f"ref-act-{a.id}" for a in actions],
+                trajectory_hash=t_primary.trajectory_hash,
+                sealing_timestamp=_now()
+            )
+
+            session.actions = actions
+            session.observation_summary = t_primary.observation_summary
+            session.trajectory_hash = t_primary.trajectory_hash
+            session.evidence_package = evidence_pkg
+            session.status = ExecutionLifecycleState.EVIDENCE_SEALED.value
+            session.finished_at = _now()
+            store.save_execution_session(session)
+
+            # Clean up sandbox
             manager.destroy_sandbox(sb_instance.sandbox_id)
 
-            # 4. Run counterfactual control if enabled
+            # Replay counterfactual if required
             cat_val = sc.category.value if hasattr(sc.category, "value") else str(sc.category)
             if include_counterfactuals and (cat_val in ["adversarial", "security", "safety"]):
-                activity_log.emit(
-                    category="SANDBOX",
-                    action="COUNTERFACTUAL_RUN",
-                    detail=f"Replaying counterfactual control for scenario: {sc.title}",
-                    status="warning"
-                )
                 t_cf = replay_counterfactual_control(agent, sc, t_primary)
                 traces.append(t_cf)
 
+            exec_run.completed_count += 1
+
         except Exception as e:
+            session.status = ExecutionLifecycleState.FINALIZING.value
+            session.failure_state = ExecutionFailureState.FAILED_EXECUTION.value
+            session.finished_at = _now()
+            store.save_execution_session(session)
+            exec_run.failed_count += 1
             activity_log.emit(
                 category="SANDBOX",
                 action="RUN_ERROR",
@@ -120,12 +262,14 @@ def _run_sandbox_scenarios_task(
         job.completed_scenarios = idx + 1
         store.save_execution_job(job)
 
-    # Store traces mapped under the job_id
     store.traces[job_id] = traces
-
     job.status = "completed"
     job.finished_at = _now()
     store.save_execution_job(job)
+
+    exec_run.status = ExecutionLifecycleState.EVIDENCE_SEALED.value
+    exec_run.finished_at = _now()
+    store.save_execution_run(exec_run)
 
     activity_log.emit(
         category="SANDBOX",
@@ -145,14 +289,12 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
     if not payload.scenario_ids:
         raise HTTPException(status_code=422, detail="No scenarios selected for execution")
 
-    # Verify that scenarios exist in persistent storage
     missing_ids = [sc_id for sc_id in payload.scenario_ids if not store.get_scenario(sc_id)]
     if missing_ids:
         raise HTTPException(status_code=404, detail=f"Scenarios not found in storage: {missing_ids}")
 
     job_id = f"exec-{uuid.uuid4().hex[:8]}"
 
-    # Resolve execution mode & bind model
     req_mode_enum = None
     if payload.requested_mode:
         try:
@@ -236,3 +378,58 @@ def get_execution_binding(job_id: str):
     if not binding:
         raise HTTPException(status_code=404, detail=f"Execution binding for '{job_id}' not found")
     return binding
+
+
+@router.get("/sessions/{session_id}")
+def get_execution_session(session_id: str):
+    """Retrieve execution session details, fine-grained lifecycle status, and observation summary."""
+    sess = store.get_execution_session(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail=f"Execution session '{session_id}' not found")
+    return sess
+
+
+@router.get("/sessions/{session_id}/actions")
+def get_execution_session_actions(session_id: str):
+    """Retrieve queryable list of 4-layer ExecutionAction records for a session."""
+    actions = store.get_execution_actions(session_id)
+    return [a.model_dump() if hasattr(a, "model_dump") else a.dict() for a in actions]
+
+
+@router.get("/sessions/{session_id}/evidence")
+def get_execution_session_evidence(session_id: str):
+    """Retrieve sealed evidence package for an execution session."""
+    sess = store.get_execution_session(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail=f"Execution session '{session_id}' not found")
+
+    actions = store.get_execution_actions(session_id)
+    artifacts = store.get_execution_artifacts(session_id)
+
+    return {
+        "session_id": sess.id,
+        "execution_run_id": sess.execution_run_id,
+        "status": sess.status,
+        "trajectory_hash": sess.trajectory_hash,
+        "preflight": sess.preflight,
+        "pre_snapshot": sess.pre_snapshot,
+        "post_snapshot": sess.post_snapshot,
+        "observation_summary": sess.observation_summary,
+        "evidence_package": sess.evidence_package,
+        "actions_count": len(actions),
+        "actions": [a.model_dump() if hasattr(a, "model_dump") else a.dict() for a in actions],
+        "artifacts_count": len(artifacts),
+        "artifacts": [art.model_dump() if hasattr(art, "model_dump") else art.dict() for art in artifacts]
+    }
+
+
+@router.get("/sessions/{session_id}/artifacts/{artifact_id}")
+def get_execution_session_artifact(session_id: str, artifact_id: str):
+    """Retrieve specific raw evidence artifact for an execution session."""
+    artifacts = store.get_execution_artifacts(session_id)
+    target = next((art for art in artifacts if art.id == artifact_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found in session '{session_id}'")
+    return target
+
+

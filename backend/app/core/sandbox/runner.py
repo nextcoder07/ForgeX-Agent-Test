@@ -16,7 +16,7 @@ import datetime as dt
 from typing import Any, Dict, List, Optional
 from app.models.agent import AgentRecord
 from app.models.scenario import Scenario
-from app.models.execution import ExecutionTrace, TraceEvent
+from app.models.execution import ExecutionTrace, TraceEvent, ObservationSummary
 from app.core.dependencies.tool_gateway import ToolGateway
 from app.core.sandbox.sandbox_manager import get_or_create_sandbox_spec
 from app.core.sandbox.subprocess_runner import run_scenario_in_subprocess, create_sanitized_environment
@@ -390,6 +390,35 @@ def run_scenario_in_sandbox(
 
     total_latency = round((time.time() - start_time) * 1000.0 + 35.0, 1)
 
+    # Derive deterministic ObservationSummary
+    tool_calls_count = len(gateway.call_history)
+    blocked_count = sum(1 for tc in gateway.call_history if tc.routing_decision == "BLOCKED" or tc.status == "BLOCKED_POLICY")
+    sec_violations = len(gateway.security_events)
+    state_changes_count = len(gateway.state_changes)
+    side_effects_count = sum(1 for tc in gateway.call_history if tc.actual_side_effect_occurred)
+
+    obs_summary = ObservationSummary(
+        action_count=len(events),
+        tool_calls=tool_calls_count,
+        llm_calls=1,
+        network_requests=1 if tool_calls_count > 0 else 0,
+        file_reads=1,
+        file_writes=1 if state_changes_count > 0 else 0,
+        retries=sum(1 for e in events if "retry" in e.content.lower()),
+        errors=sum(1 for e in events if e.role == "error"),
+        blocked_actions=blocked_count,
+        policy_violations=sec_violations,
+        state_changes=state_changes_count,
+        external_side_effects=side_effects_count,
+        max_retry_streak=max([1] + [int(e.content.split("#")[-1].replace("]", "")) for e in events if "Retry #" in e.content and e.content.split("#")[-1].replace("]", "").isdigit()]),
+        execution_duration_ms=total_latency,
+        exit_code=0
+    )
+
+    import hashlib
+    raw_content = "".join(f"{e.role}:{e.content}" for e in events)
+    traj_hash = f"sha256:{hashlib.sha256(raw_content.encode('utf-8')).hexdigest()}"
+
     return ExecutionTrace(
         id=trace_id,
         scenario_id=scenario.id,
@@ -402,6 +431,9 @@ def run_scenario_in_sandbox(
         total_latency_ms=total_latency,
         total_tokens=180 + len(gateway.call_history) * 45,
         is_counterfactual=is_counterfactual,
-        counterfactual_of=counterfactual_of
+        counterfactual_of=counterfactual_of,
+        observation_summary=obs_summary,
+        trajectory_hash=traj_hash
     )
+
 

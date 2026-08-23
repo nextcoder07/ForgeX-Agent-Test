@@ -251,7 +251,7 @@ export const LiveAttackConsole: React.FC<LiveAttackConsoleProps> = ({ preselecte
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-rose-300 uppercase">{f.category}</span>
                         <span className="font-mono text-[9px] text-slate-400">
-                          Confidence: {Math.round(f.confidence * 100)}%
+                          Confidence: {Math.round(f.confidence > 1 ? f.confidence : f.confidence * 100)}%
                         </span>
                       </div>
                       <p className="text-slate-300 font-mono">{f.explanation}</p>
