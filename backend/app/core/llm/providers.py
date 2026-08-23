@@ -147,8 +147,84 @@ def get_provider(provider_name: str, model_name: str = "", api_key: str = "", mo
     return GeminiProvider(api_key=api_key, model_name=model_name or LLMConfig.GEMINI_MODEL)
 
 
+from app.core.llm.key_manager import UnifiedKeyManager, classify_error, is_rotation_eligible
+
+class UniversalProvider(LLMProvider):
+    """Orchestrates dynamic cross-provider key rotation using UnifiedKeyManager."""
+    def __init__(self):
+        self.manager = UnifiedKeyManager()
+        self.model_name = "universal"
+
+    async def _execute_with_rotation(self, method_name: str, *args, **kwargs) -> Any:
+        last_error = None
+        attempt = 0
+        while attempt < 10:
+            attempt += 1
+            key = self.manager.select_key()
+            if not key:
+                if last_error:
+                    raise last_error
+                raise ValueError("No AI keys available in the UnifiedKeyManager pool.")
+            
+            # Instantiate ephemeral provider based on api_name
+            api_lower = key.api_name.lower()
+            if api_lower in ("gemini", "google"):
+                provider = GeminiProvider(api_key=key.value, model_name=key.model_name)
+            elif api_lower in ("openrouter", "openai", "otherai", "open-router"):
+                provider = OpenRouterProvider(api_key=key.value, model_name=key.model_name)
+            else:
+                self.manager.mark_key_failed(key.key_id, "INVALID_KEY", f"Unknown provider {key.api_name}")
+                continue
+                
+            try:
+                method = getattr(provider, method_name)
+                res = await method(*args, **kwargs)
+                self.manager.mark_key_success(key.key_id)
+                self.model_name = key.model_name
+                return res
+            except Exception as e:
+                last_error = e
+                error_type, error_category = classify_error(e)
+                self.manager.mark_key_failed(key.key_id, error_type, str(e))
+                if not is_rotation_eligible(error_category):
+                    logger.warning(f"UniversalProvider halting rotation due to permanent error: {error_type}")
+                    raise e
+                continue
+        raise RuntimeError(f"UniversalProvider exhausted rotation limit. Last error: {last_error}")
+
+    async def generate(
+        self, 
+        system: str, 
+        user: str, 
+        temperature: float = 0.2,
+        conversation_id: Optional[str] = None,
+        stage: str = "UNKNOWN"
+    ) -> str:
+        return await self._execute_with_rotation("generate", system=system, user=user, temperature=temperature, conversation_id=conversation_id, stage=stage)
+
+    async def analyze(self, code_evidence: str, doc_evidence: str) -> Dict[str, Any]:
+        return await self._execute_with_rotation("analyze", code_evidence, doc_evidence)
+
+    async def analyze_evidence_packet(self, evidence_packet: Dict[str, Any]) -> Dict[str, Any]:
+        return await self._execute_with_rotation("analyze_evidence_packet", evidence_packet)
+
+    async def critique(self, scenario_json: Dict[str, Any], agent_spec: Dict[str, Any]) -> Dict[str, Any]:
+        return await self._execute_with_rotation("critique", scenario_json, agent_spec)
+
+    async def generate_scenarios(self, agent_spec: Dict[str, Any], strategy_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+        return await self._execute_with_rotation("generate_scenarios", agent_spec, strategy_plan)
+
+    async def judge_trace(self, trace_json: Dict[str, Any], constraints: List[str]) -> Dict[str, Any]:
+        return await self._execute_with_rotation("judge_trace", trace_json, constraints)
+
+
 def get_platform_provider() -> LLMProvider:
-    """Build the configured platform provider; Gemini remains the default."""
-    provider = os.getenv("PLATFORM_LLM_PROVIDER", LLMConfig.PROVIDER)
+    """Build the configured platform provider; defaults to UniversalProvider for full cross-provider rotation."""
+    provider = os.getenv("PLATFORM_LLM_PROVIDER", "hybrid")
     model = os.getenv("PLATFORM_LLM_MODEL", "")
+    
+    p_lower = (provider or "").lower()
+    if p_lower in ["hybrid", "auto", "gemini", "universal"]:
+        return UniversalProvider()
+        
     return get_provider(provider, model_name=model)

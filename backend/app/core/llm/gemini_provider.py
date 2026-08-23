@@ -24,8 +24,7 @@ from app.services.store import store
 from app.models.pipeline import AIGenerationRun
 from app.core.llm.llm_config import LLMConfig
 from app.core.llm.key_manager import (
-    GeminiKeyManager,
-    GeminiSessionManager,
+    SessionManager,
     classify_error,
     is_rotation_eligible
 )
@@ -223,38 +222,22 @@ def safe_json_loads(text: str) -> Any:
 
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str = "", model_name: str = ""):
-        self._is_custom_key = bool(api_key)
-        self.api_key = api_key or GEMINI_API_KEY
-        self.model_name = model_name or GEMINI_MODEL
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         self.last_input_tokens = 0
         self.last_output_tokens = 0
 
     def _get_client_for_request(self) -> tuple[Optional[Any], str]:
-        """Returns the GenAI Client to use for this request, and its safe key identifier."""
-        if self._is_custom_key:
-            if not self.api_key:
-                return None, "No Key Provided"
-            try:
-                from google import genai
-                client = genai.Client(api_key=self.api_key)
-                return client, "Explicit Custom Key"
-            except Exception as e:
-                logger.error(f"Error initializing custom client: {e}")
-                return None, "Explicit Custom Key"
-
-        # Dynamically select from Key Manager
-        key_mgr = GeminiKeyManager()
-        selected_key = key_mgr.select_key()
-        if not selected_key:
-            return None, "No Key Available"
-
+        """Returns the GenAI Client to use for this request."""
+        if not self.api_key:
+            return None, "No Key Provided"
         try:
             from google import genai
-            client = genai.Client(api_key=selected_key.value)
-            return client, selected_key.key_id
+            client = genai.Client(api_key=self.api_key)
+            return client, "Explicit Key"
         except Exception as e:
-            logger.error(f"Error initializing GenAI Client for key {selected_key.key_id}: {e}")
-            return None, selected_key.key_id
+            logger.error(f"Error initializing custom client: {e}")
+            return None, "Explicit Key"
 
     async def generate(
         self,
@@ -269,144 +252,67 @@ class GeminiProvider(LLMProvider):
         self.last_output_tokens = 0
         req_summary = f"System: {system[:80]}... | User: {user[:120]}... | Temp: {temperature}"
 
-        key_mgr = GeminiKeyManager()
-        if not self._is_custom_key and not key_mgr.keys:
+        if not self.api_key:
             raise LLMGenerationError(
-                message="No Gemini API keys configured in environment",
+                message="No Gemini API key provided",
                 code=LLMErrorCode.NO_API_KEY,
                 provider="gemini",
                 model=self.model_name,
                 retryable=False
             )
 
-        max_attempts = max(1, len(key_mgr.keys)) if not self._is_custom_key else 1
-        attempt = 0
-        last_exception = None
-        res_text = None
-        last_error_code = LLMErrorCode.UNKNOWN
-        last_key_id = ""
+        client, key_id = self._get_client_for_request()
 
-        while attempt < max_attempts:
-            attempt += 1
-            client, key_id = self._get_client_for_request()
-            last_key_id = key_id
-
-            if not client:
-                last_error_code = LLMErrorCode.NO_API_KEY
-                last_exception = Exception(f"No available Gemini client for {key_id}")
-                break
-
-            if not client or key_id == "No Key Configured":
-                last_exception = Exception("No AVAILABLE Gemini API key configured or all keys are in cooldown.")
-                logger.error("No eligible Gemini key available for LLM generation.")
-                break
-
-            activity_log.emit(
-                category="LLM",
-                action="REQUEST",
-                detail=f"[{key_id}] {self.model_name} invocation initiated (Attempt {attempt}/{max_attempts})",
-                request_summary=req_summary,
-                status="success"
+        if not client:
+            raise LLMGenerationError(
+                message="Failed to initialize Gemini client",
+                code=LLMErrorCode.NO_API_KEY,
+                provider="gemini",
+                model=self.model_name,
+                retryable=False
             )
 
-            try:
-                from google.genai import types
-                res = client.models.generate_content(
-                    model=self.model_name,
-                    contents=user,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system,
-                        temperature=temperature,
-                        response_mime_type="application/json",
-                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                        http_options=types.HttpOptions(timeout=45000),
-                    ),
+        activity_log.emit(
+            category="LLM",
+            action="REQUEST",
+            detail=f"[{key_id}] {self.model_name} invocation initiated",
+            request_summary=req_summary,
+            status="success"
+        )
+
+        try:
+            from google.genai import types
+            res = client.models.generate_content(
+                model=self.model_name,
+                contents=user,
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=temperature,
+                    response_mime_type="application/json",
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                    http_options=types.HttpOptions(timeout=45000),
+                ),
+            )
+            if res and res.text:
+                res_text = res.text
+                input_tokens, output_tokens = _response_token_counts(res)
+                self.last_input_tokens = input_tokens
+                self.last_output_tokens = output_tokens
+
+                duration = (time.time() - start_time) * 1000.0
+                activity_log.emit(
+                    category="LLM",
+                    action="RESPONSE",
+                    detail=f"[{key_id}] {self.model_name} response received",
+                    response_summary=res.text[:200],
+                    duration_ms=duration,
+                    status="success"
                 )
-                if res and res.text:
-                    res_text = res.text
-                    input_tokens, output_tokens = _response_token_counts(res)
-                    self.last_input_tokens = input_tokens
-                    self.last_output_tokens = output_tokens
+            else:
+                raise Exception("API returned an empty text response")
 
-                    if not self._is_custom_key:
-                        GeminiKeyManager().mark_key_success(key_id)
-
-                    duration = (time.time() - start_time) * 1000.0
-                    activity_log.emit(
-                        category="LLM",
-                        action="RESPONSE",
-                        detail=f"[{key_id}] {self.model_name} response received",
-                        response_summary=res.text[:200],
-                        duration_ms=duration,
-                        status="success"
-                    )
-                    break
-                else:
-                    raise Exception("API returned an empty text response")
-
-            except Exception as e:
-                last_exception = e
-                from app.core.llm.key_manager import classify_error, is_rotation_eligible, ErrorCategory
-                error_type, error_category = classify_error(e)
-                error_msg = str(e)
-                logger.warning(f"Gemini error on {key_id}: {error_msg} (Type: {error_type}, Category: {error_category})")
-
-                # Map to structured LLMErrorCode
-                if error_category == ErrorCategory.PROJECT_QUOTA:
-                    last_error_code = LLMErrorCode.QUOTA_EXCEEDED
-                    if not self._is_custom_key:
-                        GeminiKeyManager().mark_key_failed(key_id, "QUOTA_EXHAUSTED", error_msg)
-                    activity_log.emit(
-                        category="LLM",
-                        action="PROJECT_QUOTA_EXHAUSTED",
-                        detail=f"Shared Project/Daily Quota exhausted on {key_id}. Stopping key rotation to trigger fallback.",
-                        request_summary=f"Quota Metric: {error_msg[:120]}",
-                        status="warning"
-                    )
-                    # Stop rotating immediately: Keys on the same project share this exhausted quota
-                    break
-
-                elif error_type == "MODEL_NOT_FOUND":
-                    last_error_code = LLMErrorCode.MODEL_NOT_FOUND
-                    activity_log.emit(
-                        category="LLM",
-                        action="MODEL_NOT_FOUND",
-                        detail=f"Model '{self.model_name}' not found on provider API. Key rotation stopped.",
-                        request_summary=f"Error: {error_msg[:120]}",
-                        status="error"
-                    )
-                    break
-
-                elif error_type in ("INVALID_KEY", "AUTHENTICATION_ERROR"):
-                    last_error_code = LLMErrorCode.AUTHENTICATION_ERROR
-                    if not self._is_custom_key:
-                        GeminiKeyManager().mark_key_failed(key_id, error_type, error_msg)
-
-                elif error_type == "QUOTA_EXHAUSTED":
-                    last_error_code = LLMErrorCode.QUOTA_EXCEEDED
-                    if not self._is_custom_key:
-                        GeminiKeyManager().mark_key_failed(key_id, error_type, error_msg)
-
-                elif error_type == "INVALID_REQUEST":
-                    last_error_code = LLMErrorCode.INVALID_REQUEST
-                    break
-
-                else:
-                    last_error_code = LLMErrorCode.SERVER_ERROR
-                    if not self._is_custom_key:
-                        GeminiKeyManager().mark_key_failed(key_id, error_type, error_msg)
-
-                if is_rotation_eligible(error_category) and not self._is_custom_key:
-                    next_key_id = GeminiKeyManager().peek_next_key_id()
-                    if next_key_id:
-                        activity_log.emit(
-                            category="LLM",
-                            action="REQUEST",
-                            detail=f"Rotating to {next_key_id} (in-flight request continues)...",
-                            status="warning"
-                        )
-                else:
-                    break
+        except Exception as e:
+            raise e
 
         # Record AI Generation Run to store
         import uuid
@@ -418,7 +324,7 @@ class GeminiProvider(LLMProvider):
             status="SUCCESS" if res_text else "FAILED",
             input_tokens=self.last_input_tokens,
             output_tokens=self.last_output_tokens,
-            error_message=str(last_exception) if last_exception else None,
+            error_message=None,
             prompt_version="v1",
             input_reference={"system": system, "user": user[:500]},
             output_reference={"response": res_text[:500]} if res_text else None
