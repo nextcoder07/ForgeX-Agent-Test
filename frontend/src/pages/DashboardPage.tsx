@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchAgents, fetchScenarioLibrary, fetchCalibrationReport } from '../api/client';
+import { fetchAgents, fetchScenarioLibrary, fetchCalibrationReport, startFullEvaluationPipeline } from '../api/client';
 import type { AgentRecord, Scenario, CalibrationReport } from '../api/client';
-import { Activity, ShieldCheck, Layers, Cpu, Flame, ArrowRight, Sparkles, GitCompare, CheckCircle2, TrendingUp, RefreshCw, Radio } from 'lucide-react';
+import { Activity, ShieldCheck, Layers, Cpu, Flame, ArrowRight, Sparkles, GitCompare, CheckCircle2, TrendingUp, RefreshCw, Radio, Wrench, Zap } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
 
 interface DashboardPageProps {
@@ -14,6 +14,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [calibration, setCalibration] = useState<CalibrationReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [startingPipeline, setStartingPipeline] = useState(false);
+  const [pipelineMessage, setPipelineMessage] = useState('');
 
   useEffect(() => {
     Promise.allSettled([
@@ -26,86 +28,251 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
   const categories = [...new Set(scenarios.map(s => s.category))];
   const validatedScenarios = scenarios.filter(s => s.validation_status === 'VALIDATED');
 
+  const handleStartFullPipeline = async () => {
+    const agent = agents[0];
+    if (!agent) {
+      navigate('/intake');
+      return;
+    }
+    setStartingPipeline(true);
+    setPipelineMessage('');
+    try {
+      const run = await startFullEvaluationPipeline(agent.id, 'simulation');
+      localStorage.setItem('lastPipelineRunId', run.id);
+      setPipelineMessage(`Pipeline started for ${agent.display_name || agent.name}.`);
+      navigate('/pipeline');
+    } catch (error) {
+      setPipelineMessage(error instanceof Error ? error.message : 'Unable to start pipeline.');
+    } finally {
+      setStartingPipeline(false);
+    }
+  };
+
   const engineSteps = [
-    { id: 'intake', label: 'Agent Intake & Understanding', description: 'Upload or select any agent. AST static analysis + Gemini-powered spec reconstruction maps tools, goals, and policy claims.', icon: Sparkles, color: 'from-cyan-500 to-cyan-700', page: 'intake' as PageId },
-    { id: 'scenarios', label: 'Scenario Intelligence Engine', description: 'Auto-generates 8-category adversarial + normal test suites. Critic validates each scenario before it enters the library.', icon: Layers, color: 'from-indigo-500 to-indigo-700', page: 'scenarios' as PageId },
-    { id: 'evaluations', label: 'Sandbox + Evaluation Engine', description: 'Runs agents in ephemeral sandboxes with fault injection. Hybrid rule + LLM judge scores every run. Counterfactual replay isolates causation.', icon: ShieldCheck, color: 'from-violet-500 to-violet-700', page: 'evaluations' as PageId },
-    { id: 'live-attack', label: 'Live Red-Teaming Console', description: 'Fire real-time adversarial prompts. Instant counterfactual replay compares agent response against clean control.', icon: Flame, color: 'from-rose-500 to-rose-700', page: 'live-attack' as PageId },
-    { id: 'failures', label: 'Failure Clustering & Causation', description: 'ML clustering groups similar failures into root cause clusters with remediation recommendations.', icon: Activity, color: 'from-amber-500 to-amber-700', page: 'failures' as PageId },
+    { id: 'intake', label: '1. Agent Intake & AST Reconstruction', description: 'Upload or select any agent. AST static analysis + Gemini spec reconstruction maps tools, goals, and prompt-code discrepancies.', icon: Sparkles, color: 'from-cyan-500 to-cyan-700', page: 'intake' as PageId },
+    { id: 'scenarios', label: '2. Scenario Intelligence Engine', description: 'Auto-generates 8-category adversarial + normal test suites. Critic validates each scenario before entering the library.', icon: Layers, color: 'from-indigo-500 to-indigo-700', page: 'scenarios' as PageId },
+    { id: 'dependencies', label: '3. Dependency & Tool Gateway', description: 'Configures environment variables, API key resolution, mock fallbacks, and sandbox tool permissions.', icon: ShieldCheck, color: 'from-blue-500 to-blue-700', page: 'dependencies' as PageId },
+    { id: 'executions', label: '4. Sandboxed Execution Engine', description: 'Runs agents in ephemeral sandboxes with chaos fault injection (latency, 500 errors, rate limits) and trace collection.', icon: Radio, color: 'from-violet-500 to-violet-700', page: 'executions' as PageId },
+    { id: 'evaluations', label: '5. Hybrid Evaluation & 2D Scorecard', description: 'Dual-tier grading (deterministic rules + calibrated Gemini judge). Computes 2D Safety x Capability matrix & failure clusters.', icon: Zap, color: 'from-amber-500 to-amber-700', page: 'evaluations' as PageId },
+    { id: 'fix-agent', label: '6. Automated Remediation & Self-Healing', description: 'Synthesizes AST code patches and hardened prompts to fix identified failure clusters with 1-click verification.', icon: Wrench, color: 'from-rose-500 to-rose-700', page: 'fix-agent' as PageId },
+  ];
+
+  const auxiliaryModules = [
+    { id: 'live-attack', label: 'Live Red-Teaming Attack Console', description: 'Fire real-time adversarial prompts. Instant counterfactual replay compares agent response against clean control to prove causation.', icon: Flame, color: 'from-rose-500 to-rose-700', page: 'live-attack' as PageId },
+    { id: 'failures', label: 'Failure Clustering & Root-Cause Analysis', description: 'ML clustering groups similar failures into actionable root-cause clusters with remediation recommendations.', icon: Activity, color: 'from-amber-500 to-amber-700', page: 'failures' as PageId },
     { id: 'scorecard', label: 'Regression & Version Diff', description: 'Compare two agent versions with safety/capability delta. Detect regressions before deploying updates.', icon: GitCompare, color: 'from-emerald-500 to-emerald-700', page: 'scorecard' as PageId },
+    { id: 'calibration', label: 'LLM Judge Calibration Benchmark', description: 'Benchmark AI judge verdicts against human gold-standard labels to ensure agreement rate and low error rates.', icon: CheckCircle2, color: 'from-cyan-500 to-cyan-700', page: 'calibration' as PageId },
   ];
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Hero Banner */}
-      <div className="relative overflow-hidden rounded-3xl p-8 border border-slate-800 bg-gradient-to-br from-slate-950 via-indigo-950/40 to-slate-950 shadow-2xl">
-        {/* Glowing BG */}
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-4 left-1/3 w-72 h-72 bg-cyan-600/8 rounded-full blur-3xl" />
-          <div className="absolute bottom-4 right-1/4 w-56 h-56 bg-indigo-600/8 rounded-full blur-3xl" />
+    <div className="space-y-5 sm:space-y-6 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+      <div className="relative overflow-hidden rounded-2xl border border-slate-700/80 bg-[#030712] shadow-xl p-4 sm:p-6">
+        <div className="mb-3 flex items-center gap-2 text-slate-100">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-rose-500 to-pink-500 text-xs font-bold">✦</span>
+          <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight">Project Overview & Problem Statement</h2>
         </div>
 
-        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div className="space-y-3">
-            <div className="flex items-center space-x-3">
-              <span className="px-2.5 py-1 text-[10px] font-mono uppercase rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 tracking-widest">
+        <div className="space-y-4 text-base leading-relaxed text-slate-200">
+          <p>
+            Autonomous AI agents are increasingly entrusted with sensitive, real-world tasks—such as executing database queries, calling external APIs, web scraping, multi-agent collaboration, and automating financial decisions. However, <span className="font-semibold text-white">industry benchmarks indicate that ~70% of autonomous agents fail when exposed to uncontrolled production environments</span>.
+          </p>
+
+          <div>
+            <p className="mb-3 font-semibold text-white">Key production vulnerabilities include:</p>
+            <ol className="space-y-2 pl-6 text-slate-200">
+              <li><span className="font-semibold text-white">1. Unchecked Infinite Tool Loops</span>: Unhandled API errors or malformed tool arguments trap agents in recursive retry cycles that exhaust tokens and budget.</li>
+              <li><span className="font-semibold text-white">2. Doc-vs-Code Reality Discrepancies</span>: Severe logic mismatches between natural-language system prompts and actual code implementation.</li>
+              <li><span className="font-semibold text-white">3. Adversarial Prompt Injections</span>: Authority bypasses and indirect prompt injection attacks that trick agents into bypassing security policies.</li>
+              <li><span className="font-semibold text-white">4. Silent Goal Drift & Hallucinated Success</span>: Agents claiming task completion even when downstream tool invocations fail or return empty schemas.</li>
+              <li><span className="font-semibold text-white">5. Absence of Pre-Deployment Regression Testing</span>: Developers updating system prompts or tools without verifying whether changes introduced safety or capability regressions.</li>
+            </ol>
+          </div>
+
+          <p>
+            <span className="font-semibold text-white">ForgeX</span> provides a complete, open-source <span className="font-semibold text-cyan-300">Pre-Deployment CI/CD Evaluation & Self-Healing Platform</span>. It statically inspects agent source code, dynamically generates adversarial test suites across 8 risk dimensions, runs sandboxed test executions with chaos fault injection, computes 2D Safety-Capability scorecards, proves attack causation through counterfactual replays, and automatically generates AST-level code patches.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-700/80 bg-[#030712] shadow-xl overflow-hidden">
+        <div className="flex items-center gap-3 border-b border-slate-700/80 bg-slate-900/80 px-4 py-3 sm:px-6">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-cyan-500 to-indigo-500 text-xs font-bold text-white">G</span>
+          <h2 className="text-lg sm:text-2xl font-extrabold tracking-tight text-slate-100">End-to-End Evaluation Lifecycle</h2>
+        </div>
+
+        <div className="overflow-x-auto px-3 py-4 sm:px-5">
+          <div className="relative min-w-[1100px] rounded-xl border border-slate-700/80 bg-[#030712] p-4 sm:p-5">
+            <div className="absolute left-8 top-12 bottom-16 w-px bg-slate-600/80" />
+            <div className="absolute left-8 right-5 top-12 h-px bg-slate-600/80" />
+            <div className="absolute left-8 right-5 bottom-16 h-px bg-slate-600/80" />
+
+            <div className="relative z-10 space-y-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="w-[180px] shrink-0">
+                  <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-300">
+                    <div className="h-3 w-3 rounded-full border border-slate-200 bg-slate-100" />
+                    <span>Developer / CI Pipeline</span>
+                  </div>
+                </div>
+
+                <div className="grid flex-1 grid-cols-6 gap-3">
+                  {[
+                    'Engine 1: Intake & AST',
+                    'Engine 2: Scenario Intel',
+                    'Engine 3: Dependency Gateway',
+                    'Engine 4: Sandbox Runner',
+                    'Engine 5: Hybrid Evaluator',
+                    'Engine 6: Fix My Agent',
+                  ].map((label, idx) => (
+                    <div key={label} className="min-h-[56px] rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-2 text-center text-[10px] sm:text-[11px] font-medium text-slate-200 shadow-sm shadow-slate-950/50">
+                      {label}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex w-[76px] justify-end gap-2 pt-1.5">
+                  <button className="h-8 w-8 rounded-md border border-slate-600 bg-slate-900 text-slate-200">↔</button>
+                  <button className="h-8 w-8 rounded-md border border-slate-600 bg-slate-900 text-slate-200">◫</button>
+                </div>
+              </div>
+
+              <div className="relative pl-0">
+                <div className="absolute left-[188px] top-2 h-[335px] w-px bg-slate-600/80" />
+                <div className="absolute left-[420px] top-2 h-[335px] w-px bg-slate-600/80" />
+                <div className="absolute left-[650px] top-2 h-[335px] w-px bg-slate-600/80" />
+                <div className="absolute left-[884px] top-2 h-[335px] w-px bg-slate-600/80" />
+
+                <div className="relative ml-[200px] grid grid-cols-6 gap-3 text-[10px] sm:text-[11px] text-slate-200">
+                  {[
+                    'Upload Python/TS Agent / Select Demo',
+                    'AST Static Analysis & Prompt Extraction',
+                    'Normalized Spec + Doc-Code Conflict Report',
+                    'Generate Test Suite (20 Scenarios across 8 Categories)',
+                    'LLM Critic validates uniqueness & coverage',
+                    'Scenario Matrix & Gap Analysis',
+                    'Execute Batch Evaluation with Chaos Injection',
+                    'Route tools through Gateway & capture raw execution traces',
+                    'Complete Step-by-Step Execution Traces',
+                    'Rule Check + Gemini Judge Scoring',
+                    'Cluster Failures into Root Causes & Plot 2D Scorecard',
+                    '2D Matrix (Safety x Capability), Failure Clusters & Trace Diffs',
+                    'Request Automated Remediation for Failure Cluster',
+                    'Synthesize AST code patch + hardened system prompt',
+                    'Code Diff + 1-Click Verification Trigger',
+                  ].map((label, index) => (
+                    <div key={`${label}-${index}`} className="relative flex items-center justify-center rounded-full border border-slate-500 bg-slate-900/90 px-2 py-2 text-center leading-tight shadow-sm shadow-slate-950/40">
+                      {label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center gap-4">
+                <div className="w-[180px] shrink-0">
+                  <div className="flex items-center justify-start gap-2 rounded-md border border-slate-700 bg-slate-900/80 px-2 py-2 text-[10px] sm:text-[11px] text-slate-300">
+                    <div className="h-3 w-3 rounded-full border border-slate-200 bg-slate-100" />
+                    <span>Developer / CI Pipeline</span>
+                  </div>
+                </div>
+
+                <div className="flex-1 grid grid-cols-6 gap-3">
+                  {[
+                    'Engine 1: Intake & AST',
+                    'Engine 2: Scenario Intel',
+                    'Engine 3: Dependency Gateway',
+                    'Engine 4: Sandbox Runner',
+                    'Engine 5: Hybrid Evaluator',
+                    'Engine 6: Fix My Agent',
+                  ].map((label) => (
+                    <div key={`${label}-bottom`} className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-2 text-center text-[10px] sm:text-[11px] font-medium text-slate-200">
+                      {label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Hero Banner */}
+      <div className="relative overflow-hidden rounded-2xl p-4 sm:p-6 border border-slate-700/80 bg-gradient-to-br from-slate-950 via-indigo-950/50 to-slate-950 shadow-xl">
+        {/* Glowing BG */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-2 left-1/3 w-60 h-60 bg-cyan-600/10 rounded-full blur-3xl" />
+          <div className="absolute bottom-2 right-1/4 w-48 h-48 bg-indigo-600/10 rounded-full blur-3xl" />
+        </div>
+
+        <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
+          <div className="space-y-2.5">
+            <div className="flex items-center space-x-2">
+              <span className="px-2 py-0.5 text-[9px] sm:text-[10px] font-mono uppercase rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 tracking-wider">
                 AI Reliability CI Platform
               </span>
             </div>
-            <h1 className="text-3xl font-extrabold text-slate-100 leading-tight">
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-white leading-tight">
               Agent Evaluation &<br />
-              <span className="bg-gradient-to-r from-cyan-400 via-indigo-400 to-rose-400 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-cyan-300 via-indigo-300 to-rose-300 bg-clip-text text-transparent">
                 Reliability Engine
               </span>
             </h1>
-            <p className="text-slate-400 text-sm max-w-lg leading-relaxed">
-              Autonomous AI agents fail on ~70% of real-world tasks. This platform provides continuous integration for agents — automatically generating adversarial test suites, running sandboxed evaluations, proving failure causation, and producing reliability scorecards before you ship.
+            <p className="text-slate-300 text-xs sm:text-sm max-w-xl leading-relaxed">
+              Autonomous AI agents fail on ~70% of real-world tasks. Continuous integration automatically generates adversarial test suites, runs sandboxed evaluations, proves failure causation, and produces reliability scorecards before deployment.
             </p>
 
-            <div className="flex items-center space-x-3 pt-2 flex-wrap gap-2">
+            <div className="flex items-center space-x-2 pt-1 flex-wrap gap-2">
               <button
                 onClick={() => navigate("/intake")}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-rose-600 hover:from-cyan-400 hover:to-rose-500 text-slate-100 font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center space-x-2 transition"
+                className="px-3.5 py-2 rounded-lg bg-gradient-to-r from-cyan-500 via-indigo-600 to-rose-600 hover:from-cyan-400 hover:to-rose-500 text-white font-bold text-xs sm:text-sm shadow-md shadow-cyan-500/20 flex items-center space-x-1.5 transition"
               >
-                <Sparkles className="w-4 h-4" />
+                <Sparkles className="w-3.5 h-3.5" />
                 <span>Bring Your Agent</span>
               </button>
               <button
                 onClick={() => navigate("/live-attack")}
-                className="px-5 py-2.5 rounded-xl bg-rose-950/50 hover:bg-rose-950/70 border border-rose-500/40 text-rose-300 font-bold text-sm transition flex items-center space-x-2"
+                className="px-3.5 py-2 rounded-lg bg-rose-950/70 hover:bg-rose-900/80 border border-rose-500/50 text-rose-200 font-bold text-xs sm:text-sm transition flex items-center space-x-1.5"
               >
-                <Flame className="w-4 h-4" />
+                <Flame className="w-3.5 h-3.5" />
                 <span>Live Attack Console</span>
               </button>
               <button
                 onClick={() => navigate("/pipeline")}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-bold text-sm transition flex items-center space-x-2"
+                className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs sm:text-sm transition flex items-center space-x-1.5"
               >
-                <Radio className="w-4 h-4 text-cyan-400" />
+                <Radio className="w-3.5 h-3.5 text-cyan-400" />
                 <span>Pipeline Telemetry</span>
               </button>
+              <button
+                onClick={handleStartFullPipeline}
+                disabled={startingPipeline}
+                className="px-3.5 py-2 rounded-lg bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/50 text-emerald-200 font-bold text-xs sm:text-sm transition flex items-center space-x-1.5 disabled:opacity-50"
+              >
+                <Zap className={`w-3.5 h-3.5 ${startingPipeline ? 'animate-pulse' : ''}`} />
+                <span>{startingPipeline ? 'Starting Pipeline...' : 'Run Full Lifecycle'}</span>
+              </button>
             </div>
+            {pipelineMessage && <p className="text-xs text-amber-300 pt-1">{pipelineMessage}</p>}
           </div>
 
           {/* Stat Pills */}
-          <div className="grid grid-cols-2 gap-3 shrink-0">
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-cyan-500/20 text-center">
-              <p className="text-2xl font-extrabold text-cyan-300 font-mono">{loading ? '–' : agents.length}</p>
-              <p className="text-[10px] font-mono uppercase text-slate-400 mt-0.5">Agents Indexed</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-2.5 w-full lg:w-auto shrink-0">
+            <div className="p-3 rounded-xl bg-slate-900/90 border border-cyan-500/30 text-center">
+              <p className="text-xl sm:text-2xl font-extrabold text-cyan-300 font-mono">{loading ? '–' : agents.length}</p>
+              <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Agents Indexed</p>
             </div>
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-indigo-500/20 text-center">
-              <p className="text-2xl font-extrabold text-indigo-300 font-mono">{loading ? '–' : scenarios.length}</p>
-              <p className="text-[10px] font-mono uppercase text-slate-400 mt-0.5">Scenarios Library</p>
+            <div className="p-3 rounded-xl bg-slate-900/90 border border-indigo-500/30 text-center">
+              <p className="text-xl sm:text-2xl font-extrabold text-indigo-300 font-mono">{loading ? '–' : scenarios.length}</p>
+              <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Scenarios Library</p>
             </div>
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-emerald-500/20 text-center">
-              <p className="text-2xl font-extrabold text-emerald-300 font-mono">{loading ? '–' : validatedScenarios.length}</p>
-              <p className="text-[10px] font-mono uppercase text-slate-400 mt-0.5">Validated Tests</p>
+            <div className="p-3 rounded-xl bg-slate-900/90 border border-emerald-500/30 text-center">
+              <p className="text-xl sm:text-2xl font-extrabold text-emerald-300 font-mono">{loading ? '–' : validatedScenarios.length}</p>
+              <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Validated Tests</p>
             </div>
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-amber-500/20 text-center">
-              <p className="text-2xl font-extrabold text-amber-300 font-mono">
-                {loading || !calibration ? '–' : `${(calibration.agreement_rate > 1 ? calibration.agreement_rate : calibration.agreement_rate * 100).toFixed(2)}%`}
+            <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 text-center">
+              <p className="text-xl sm:text-2xl font-extrabold text-amber-300 font-mono">
+                {loading || !calibration ? '–' : `${(calibration.agreement_rate > 1 ? calibration.agreement_rate : calibration.agreement_rate * 100).toFixed(1)}%`}
               </p>
-              <p className="text-[10px] font-mono uppercase text-slate-400 mt-0.5">Judge Agreement</p>
+              <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Judge Agreement</p>
             </div>
           </div>
         </div>
@@ -113,30 +280,62 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
 
       {/* 6-Engine Pipeline Flow */}
       <div>
-        <h2 className="text-lg font-extrabold text-slate-100 mb-4">
-          Six-Engine Evaluation Pipeline
+        <h2 className="text-base sm:text-lg font-extrabold text-slate-100 mb-3 flex items-center justify-between">
+          <span>Six-Engine Evaluation Pipeline</span>
+          <span className="text-xs font-mono font-normal text-cyan-400">1 $\rightarrow$ 2 $\rightarrow$ 3 $\rightarrow$ 4 $\rightarrow$ 5 $\rightarrow$ 6</span>
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {engineSteps.map((step, idx) => {
             const Icon = step.icon;
             return (
               <div
                 key={step.id}
                 onClick={() => navigate(`/${step.page}`)}
-                className="group p-5 rounded-2xl glass-card border border-slate-800 hover:border-slate-700 cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5"
+                className="group p-3.5 sm:p-4 rounded-xl glass-card border border-slate-700/70 hover:border-cyan-500/50 cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className={`p-2.5 rounded-xl bg-gradient-to-br ${step.color} bg-opacity-20 border border-white/10`}>
+                <div className="flex items-start justify-between mb-2.5">
+                  <div className={`p-2 rounded-lg bg-gradient-to-br ${step.color} bg-opacity-30 border border-white/10`}>
                     <Icon className="w-4 h-4 text-white" />
                   </div>
-                  <span className="text-[10px] font-mono text-slate-500 border border-slate-800 px-1.5 py-0.5 rounded">
-                    #{idx + 1}
+                  <span className="text-[10px] font-mono text-cyan-300 border border-cyan-500/40 bg-cyan-950/60 px-1.5 py-0.5 rounded font-bold">
+                    Engine #{idx + 1}
                   </span>
                 </div>
-                <h3 className="text-sm font-bold text-slate-100 mb-1">{step.label}</h3>
-                <p className="text-[11px] text-slate-400 leading-relaxed">{step.description}</p>
-                <div className="mt-3 flex items-center space-x-1 text-[11px] font-semibold text-cyan-400 group-hover:text-cyan-300 transition">
+                <h3 className="text-xs sm:text-sm font-bold text-slate-100 mb-1">{step.label}</h3>
+                <p className="text-[11px] sm:text-xs text-slate-300 leading-relaxed">{step.description}</p>
+                <div className="mt-2.5 flex items-center space-x-1 text-[11px] font-semibold text-cyan-400 group-hover:text-cyan-300 transition">
                   <span>Open Module</span>
+                  <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Auxiliary Analysis Modules */}
+      <div>
+        <h2 className="text-base sm:text-lg font-extrabold text-slate-100 mb-3">
+          Specialized Analysis & Telemetry Tools
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {auxiliaryModules.map((step) => {
+            const Icon = step.icon;
+            return (
+              <div
+                key={step.id}
+                onClick={() => navigate(`/${step.page}`)}
+                className="group p-3 sm:p-3.5 rounded-xl glass-card border border-slate-700/60 hover:border-indigo-500/50 cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 space-y-2"
+              >
+                <div className="flex items-center space-x-2">
+                  <div className={`p-1.5 rounded-md bg-gradient-to-br ${step.color} bg-opacity-30 border border-white/10`}>
+                    <Icon className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <h3 className="text-xs font-bold text-slate-100 truncate">{step.label}</h3>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed line-clamp-3">{step.description}</p>
+                <div className="flex items-center space-x-1 text-[10px] font-semibold text-indigo-400 group-hover:text-indigo-300 transition">
+                  <span>Launch Tool</span>
                   <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
                 </div>
               </div>
@@ -148,8 +347,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
       {/* Recent Agents Table */}
       {!loading && agents.length > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-bold text-slate-100">Registered Agents</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm sm:text-base font-bold text-slate-100">Registered Agents</h2>
             <button
               onClick={() => navigate("/agents")}
               className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center space-x-1 font-semibold"
@@ -158,14 +357,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
               <ArrowRight className="w-3 h-3" />
             </button>
           </div>
-          <div className="rounded-2xl overflow-hidden border border-slate-800">
+          <div className="rounded-xl overflow-hidden border border-slate-700/80 responsive-table-container">
             <table className="w-full text-xs">
               <thead>
-                <tr className="bg-slate-900/80 border-b border-slate-800">
-                  <th className="text-left px-4 py-3 font-mono text-slate-400 uppercase text-[10px]">Agent Name</th>
-                  <th className="text-left px-4 py-3 font-mono text-slate-400 uppercase text-[10px]">Domain</th>
-                  <th className="text-left px-4 py-3 font-mono text-slate-400 uppercase text-[10px]">Version</th>
-                  <th className="text-left px-4 py-3 font-mono text-slate-400 uppercase text-[10px]">Tools</th>
+                <tr className="bg-slate-900/90 border-b border-slate-700/80">
+                  <th className="text-left px-3.5 py-2.5 font-mono text-slate-300 uppercase text-[10px]">Agent Name</th>
+                  <th className="text-left px-3.5 py-2.5 font-mono text-slate-300 uppercase text-[10px]">Domain</th>
+                  <th className="text-left px-3.5 py-2.5 font-mono text-slate-300 uppercase text-[10px]">Version</th>
+                  <th className="text-left px-3.5 py-2.5 font-mono text-slate-300 uppercase text-[10px]">Tools</th>
                 </tr>
               </thead>
               <tbody>
@@ -173,20 +372,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
                   <tr
                     key={a.id}
                     onClick={() => navigate("/agents")}
-                    className={`border-b border-slate-800/80 cursor-pointer hover:bg-slate-900/40 transition ${i % 2 === 0 ? 'bg-slate-950' : 'bg-slate-900/20'}`}
+                    className={`border-b border-slate-800 cursor-pointer hover:bg-slate-900/60 transition ${i % 2 === 0 ? 'bg-slate-950' : 'bg-slate-900/40'}`}
                   >
-                    <td className="px-4 py-2.5">
+                    <td className="px-3.5 py-2">
                       <span className="font-bold text-slate-100">{a.name}</span>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className="text-slate-400 font-mono">{a.domain}</span>
+                    <td className="px-3.5 py-2">
+                      <span className="text-slate-300 font-mono">{a.domain}</span>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30 font-mono text-[10px]">
+                    <td className="px-3.5 py-2">
+                      <span className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/40 font-mono text-[10px]">
                         {a.version_label}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-3.5 py-2">
                       <span className="text-slate-300">{a.tools.length} tools</span>
                     </td>
                   </tr>

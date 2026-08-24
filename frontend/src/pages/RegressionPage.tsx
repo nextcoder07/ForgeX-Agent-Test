@@ -30,10 +30,10 @@ export const RegressionPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-5">
       <div>
-        <h1 className="text-2xl font-extrabold text-slate-100">Regression & Version Diff Engine</h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100">Regression & Version Diff Engine</h1>
+        <p className="text-xs sm:text-sm text-slate-300 mt-1">
           Compare two evaluation jobs to detect regressions before deploying agent updates. Shows safety/capability deltas and which failures were resolved or newly introduced.
         </p>
       </div>

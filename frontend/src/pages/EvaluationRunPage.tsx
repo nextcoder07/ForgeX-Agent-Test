@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
   Zap,
   BarChart3,
@@ -46,6 +46,10 @@ interface EvaluationRunPageProps {
 export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
   const { jobId } = useParams<{ jobId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const agentIdFromUrl = queryParams.get('agentId');
+
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [batchSize, setBatchSize] = useState(34);
@@ -55,6 +59,7 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
   const [verdicts, setVerdicts] = useState<any[]>([]);
   const [traces, setTraces] = useState<any[]>([]);
   const [clusters, setClusters] = useState<FailureCluster[]>([]);
+  const [resultsError, setResultsError] = useState('');
   const [running, setRunning] = useState(false);
   const [userDeclinedRepair, setUserDeclinedRepair] = useState(false);
   const [expandedScenarioId, setExpandedScenarioId] = useState<string | null>(null);
@@ -65,9 +70,13 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
   useEffect(() => {
     fetchAgents().then((list) => {
       setAgents(list);
-      if (list.length > 0) setSelectedAgentId(list[0].id);
+      if (agentIdFromUrl && list.some(a => a.id === agentIdFromUrl)) {
+        setSelectedAgentId(agentIdFromUrl);
+      } else if (list.length > 0) {
+        setSelectedAgentId(list[0].id);
+      }
     });
-  }, []);
+  }, [agentIdFromUrl]);
 
   const startPolling = (jobId: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -95,20 +104,22 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
 
   const loadResults = async (jobId: string) => {
     try {
+      setResultsError('');
       const [sc, rep, verd, trc, clus] = await Promise.all([
-        fetchScorecard(jobId).catch(() => null),
-        fetchEvaluationReport(jobId).catch(() => null),
-        fetchEvaluationVerdicts(jobId).catch(() => []),
-        fetchEvaluationTracesDetails(jobId).catch(() => []),
-        fetchFailureClusters(jobId).catch(() => []),
+        fetchScorecard(jobId),
+        fetchEvaluationReport(jobId),
+        fetchEvaluationVerdicts(jobId),
+        fetchEvaluationTracesDetails(jobId),
+        fetchFailureClusters(jobId),
       ]);
-      if (sc) setScorecard(sc);
-      if (rep) setReport(rep);
+      setScorecard(sc);
+      setReport(rep);
       setVerdicts(verd);
       setTraces(trc);
       setClusters(clus);
     } catch (e) {
       console.error('Failed loading evaluation results:', e);
+      setResultsError('Evaluation completed, but its result report could not be loaded. Retry the result request.');
     }
   };
 
@@ -130,6 +141,7 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
     setVerdicts([]);
     setTraces([]);
     setClusters([]);
+    setResultsError('');
     setUserDeclinedRepair(false);
 
     try {
@@ -149,6 +161,21 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
   const isCompleted = evalJob?.status === 'completed';
   const isFailed = evalJob?.status === 'failed';
   const isEvaluating = evalJob?.status && ['pending', 'running', 'evaluating', 'aggregating'].includes(evalJob.status);
+  const passedVerdicts = verdicts.filter((verdict) => verdict.passed).length;
+  const failedVerdicts = verdicts.filter((verdict) => !verdict.passed).length;
+  const findingCount = verdicts.reduce((total, verdict) => total + (verdict.findings?.length || 0), 0);
+  const highestPriorityCluster = [...clusters].sort((a, b) => {
+    const severityRank = { critical: 4, high: 3, medium: 2, low: 1 };
+    return (severityRank[b.severity?.toLowerCase() as keyof typeof severityRank] || 0)
+      - (severityRank[a.severity?.toLowerCase() as keyof typeof severityRank] || 0);
+  })[0];
+  const releaseDecision = scorecard
+    ? scorecard.critical_failures > 0 || scorecard.composite < 70
+      ? 'BLOCK RELEASE'
+      : scorecard.composite < 85
+        ? 'REVIEW BEFORE RELEASE'
+        : 'READY FOR RELEASE'
+    : '';
 
   const renderVerdictBadge = (status?: string, passed?: boolean) => {
     const st = (status || (passed ? 'PASS' : 'FAIL')).toUpperCase();
@@ -190,10 +217,10 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
   const renderDimScore = (val: number | null | undefined, label: string, weight: string) => {
     const isNA = val === null || val === undefined;
     return (
-      <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-        <span className="text-[10px] text-slate-500 block uppercase tracking-wider">{label} ({weight})</span>
+      <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 space-y-1">
+        <span className="text-[10px] text-slate-300 block uppercase tracking-wider font-semibold">{label} ({weight})</span>
         {isNA ? (
-          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 inline-block font-mono">
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 inline-block font-mono">
             N/A
           </span>
         ) : (
@@ -208,25 +235,25 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5 sm:space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-100 flex items-center space-x-3">
-            <Zap className="w-6 h-6 text-indigo-400 fill-current" />
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center space-x-2.5">
+            <Zap className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-400 fill-current" />
             <span>Evaluation & Reliability Engine Report</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-300 mt-1">
             Evidence-backed, 10-dimension evaluation engine analyzing execution traces, tool discipline, safety bounds, and model fidelity.
           </p>
         </div>
 
         {/* Launch / Select Agent Controls */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2 w-full sm:w-auto">
           <select
             value={selectedAgentId}
             onChange={(e) => setSelectedAgentId(e.target.value)}
-            className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-xs focus:outline-none focus:border-indigo-500 transition"
+            className="flex-1 sm:flex-none px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs focus:outline-none focus:border-indigo-500 transition"
           >
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
@@ -238,12 +265,12 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
           <button
             onClick={handleLaunchEvaluation}
             disabled={running || !selectedAgentId}
-            className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-600 to-indigo-600 hover:from-indigo-400 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/20 flex items-center space-x-2 transition disabled:opacity-50"
+            className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-500 via-purple-600 to-indigo-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-xs shadow-md shadow-indigo-500/20 flex items-center space-x-1.5 transition disabled:opacity-50 whitespace-nowrap"
           >
             {running ? (
-              <><RefreshCw className="w-4 h-4 animate-spin" /><span>Evaluating...</span></>
+              <><RefreshCw className="w-3.5 h-3.5 animate-spin" /><span>Evaluating...</span></>
             ) : (
-              <><Zap className="w-4 h-4" /><span>Launch Evaluation</span></>
+              <><Zap className="w-3.5 h-3.5" /><span>Launch Evaluation</span></>
             )}
           </button>
         </div>
@@ -304,6 +331,54 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
         </div>
       )}
 
+      {resultsError && (
+        <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-500/40 text-sm text-rose-200 flex items-center justify-between gap-4">
+          <span>{resultsError}</span>
+          {evalJob?.id && <button onClick={() => loadResults(evalJob.id)} className="shrink-0 px-3 py-1.5 rounded-lg bg-rose-800 hover:bg-rose-700 text-xs font-bold">Retry Results</button>}
+        </div>
+      )}
+
+      {isCompleted && !scorecard && !resultsError && (
+        <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-500/30 text-sm text-amber-200">
+          Evaluation finished. Loading the scorecard and scenario evidence...
+        </div>
+      )}
+
+      {scorecard && (
+        <section className="p-5 rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-cyan-950/30 via-slate-950 to-indigo-950/30 space-y-4">
+          <div className="flex items-start justify-between flex-wrap gap-4">
+            <div>
+              <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-cyan-300">Evaluation decision snapshot</p>
+              <h2 className="text-xl font-extrabold text-slate-100 mt-1">{scorecard.agent_name}</h2>
+              <p className="text-xs text-slate-400 mt-1">{scorecard.agent_version} · {scorecard.total_scenarios} scenarios · evidence-backed result</p>
+            </div>
+            <span className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-extrabold ${
+              releaseDecision === 'READY FOR RELEASE'
+                ? 'bg-emerald-950 text-emerald-300 border-emerald-500/40'
+                : releaseDecision === 'REVIEW BEFORE RELEASE'
+                  ? 'bg-amber-950 text-amber-300 border-amber-500/40'
+                  : 'bg-rose-950 text-rose-300 border-rose-500/40'
+            }`}>{releaseDecision}</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-cyan-500/20"><p className="text-[10px] text-slate-500 uppercase">Reliability</p><p className="text-2xl font-bold text-cyan-300">{scorecard.composite.toFixed(1)}<span className="text-xs text-slate-500"> / 100</span></p></div>
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-emerald-500/20"><p className="text-[10px] text-slate-500 uppercase">Passed</p><p className="text-2xl font-bold text-emerald-300">{passedVerdicts || scorecard.passed}<span className="text-xs text-slate-500"> / {scorecard.total_scenarios}</span></p></div>
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-500/20"><p className="text-[10px] text-slate-500 uppercase">Failed</p><p className="text-2xl font-bold text-rose-300">{failedVerdicts || scorecard.failed}</p></div>
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/20"><p className="text-[10px] text-slate-500 uppercase">Findings</p><p className="text-2xl font-bold text-amber-300">{findingCount || scorecard.critical_failures}</p></div>
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-indigo-500/20"><p className="text-[10px] text-slate-500 uppercase">Coverage</p><p className="text-2xl font-bold text-indigo-300">{scorecard.total_scenarios ? Math.round(((passedVerdicts || scorecard.passed) / scorecard.total_scenarios) * 100) : 0}%</p></div>
+          </div>
+          {highestPriorityCluster ? (
+            <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/25 text-xs">
+              <p className="font-bold text-rose-200">Highest-priority issue: {highestPriorityCluster.title || highestPriorityCluster.label}</p>
+              <p className="text-slate-300 mt-1">{highestPriorityCluster.root_cause_pattern || highestPriorityCluster.representative_evidence}</p>
+              <p className="text-emerald-300 mt-1"><span className="font-bold">Recommended fix:</span> {highestPriorityCluster.recommended_fix || highestPriorityCluster.remediation_suggestion}</p>
+            </div>
+          ) : (
+            <p className="text-xs text-emerald-300">No failure cluster was reported. Review individual scenario evidence below before release.</p>
+          )}
+        </section>
+      )}
+
       {/* SECTION A: Evaluation Overview Dashboard */}
       {scorecard && (
         <div className="space-y-6">
@@ -340,6 +415,67 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
               <div className="text-2xl font-extrabold text-rose-400">{scorecard.critical_failures}</div>
               <p className="text-[11px] text-slate-400">Policy violations & uncontained side effects</p>
             </div>
+          </div>
+
+          {/* SECTION D: Explainable Report Rationale */}
+          {report && report.explainability && (
+            <div className="p-6 rounded-2xl glass-panel border border-indigo-500/20 bg-slate-950 space-y-3 font-mono">
+              <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-2">
+                <Info className="w-4 h-4 text-indigo-400" />
+                Explainable Evidence & Evaluation Rationale
+              </h3>
+              <div className="space-y-2 text-xs">
+                {report.explainability.map((line: string, idx: number) => (
+                  <div key={idx} className="p-3 rounded-xl bg-slate-900/80 border border-slate-850 text-slate-300">
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION F: Failure Clusters Integration */}
+          {clusters.length > 0 && <FailureClustersView clusters={clusters} />}
+
+          {/* SECTION G: Evaluation -> Fix My Agent Integration Banner */}
+          <div className="p-6 rounded-2xl glass-panel border border-rose-500/40 bg-gradient-to-r from-rose-950/30 via-slate-950 to-slate-950 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-slate-100 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-rose-400" />
+                  <span>Issues Detected — Repair Recommendation</span>
+                </h3>
+                <div className="flex items-center space-x-4 text-xs font-mono">
+                  <span className="text-rose-400 font-bold">❌ {scorecard.failed} test cases failed</span>
+                  <span className="text-amber-400 font-bold">⚠️ {scorecard.critical_failures} critical reliability issues</span>
+                </div>
+                <p className="text-xs text-slate-300 font-semibold mt-1">
+                  Would you like Fix My Agent to attempt autonomous repairs based on this evaluation report?
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setUserDeclinedRepair(true)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 transition"
+                >
+                  Not Now
+                </button>
+                <button
+                  onClick={() => navigate("/fix-agent")}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 via-indigo-600 to-cyan-500 hover:from-rose-400 hover:to-cyan-400 text-white font-extrabold text-xs shadow-lg shadow-rose-500/25 flex items-center space-x-2 transition hover:scale-[1.02]"
+                >
+                  <Wrench className="w-4 h-4" />
+                  <span>Fix Agent</span>
+                </button>
+              </div>
+            </div>
+
+            {userDeclinedRepair && (
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-850 text-xs text-slate-400 font-mono">
+                Review mode active. Agent configuration remains unchanged. You can navigate to 'Fix My Agent' anytime.
+              </div>
+            )}
           </div>
 
           {/* SECTION B: Model Binding & Fidelity Banner */}
@@ -388,23 +524,6 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
                 {renderDimScore(scorecard.dimension_scores.output_quality, 'OUTPUT QUALITY', '5%')}
                 {renderDimScore(scorecard.dimension_scores.efficiency, 'EFFICIENCY', '5%')}
                 {renderDimScore(scorecard.dimension_scores.compliance, 'COMPLIANCE', '5%')}
-              </div>
-            </div>
-          )}
-
-          {/* SECTION D: Explainable Report Rationale */}
-          {report && report.explainability && (
-            <div className="p-6 rounded-2xl glass-panel border border-indigo-500/20 bg-slate-950 space-y-3 font-mono">
-              <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-2">
-                <Info className="w-4 h-4 text-indigo-400" />
-                Explainable Evidence & Evaluation Rationale
-              </h3>
-              <div className="space-y-2 text-xs">
-                {report.explainability.map((line: string, idx: number) => (
-                  <div key={idx} className="p-3 rounded-xl bg-slate-900/80 border border-slate-850 text-slate-300">
-                    {line}
-                  </div>
-                ))}
               </div>
             </div>
           )}
@@ -511,50 +630,28 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
               </div>
             </div>
           )}
+        </div>
+      )}
 
-          {/* SECTION F: Failure Clusters Integration */}
-          {clusters.length > 0 && <FailureClustersView clusters={clusters} />}
-
-          {/* SECTION G: Evaluation -> Fix My Agent Integration Banner */}
-          <div className="p-6 rounded-2xl glass-panel border border-rose-500/40 bg-gradient-to-r from-rose-950/30 via-slate-950 to-slate-950 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <div className="space-y-1">
-                <h3 className="text-base font-extrabold text-slate-100 flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-rose-400" />
-                  <span>Issues Detected — Repair Recommendation</span>
-                </h3>
-                <div className="flex items-center space-x-4 text-xs font-mono">
-                  <span className="text-rose-400 font-bold">❌ {scorecard.failed} test cases failed</span>
-                  <span className="text-amber-400 font-bold">⚠️ {scorecard.critical_failures} critical reliability issues</span>
-                </div>
-                <p className="text-xs text-slate-300 font-semibold mt-1">
-                  Would you like Fix My Agent to attempt autonomous repairs based on this evaluation report?
-                </p>
-              </div>
-
-              <div className="flex items-center space-x-3">
-                <button
-                  onClick={() => setUserDeclinedRepair(true)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 transition"
-                >
-                  Not Now
-                </button>
-                <button
-                  onClick={() => navigate("/fix-agent")}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 via-indigo-600 to-cyan-500 hover:from-rose-400 hover:to-cyan-400 text-white font-extrabold text-xs shadow-lg shadow-rose-500/25 flex items-center space-x-2 transition hover:scale-[1.02]"
-                >
-                  <Wrench className="w-4 h-4" />
-                  <span>Fix Agent</span>
-                </button>
-              </div>
-            </div>
-
-            {userDeclinedRepair && (
-              <div className="p-3 rounded-xl bg-slate-900 border border-slate-850 text-xs text-slate-400 font-mono">
-                Review mode active. Agent configuration remains unchanged. You can navigate to 'Fix My Agent' anytime.
-              </div>
-            )}
+      {/* Engine 6 Transition Banner */}
+      {isCompleted && (
+        <div className="p-4 sm:p-5 rounded-2xl glass-panel border border-cyan-500/40 bg-gradient-to-r from-slate-950 via-cyan-950/20 to-slate-950 flex items-center justify-between flex-wrap gap-4 shadow-xl">
+          <div className="space-y-1">
+            <h3 className="text-sm font-extrabold text-cyan-300 flex items-center gap-2">
+              <Wrench className="w-4 h-4 text-cyan-400" />
+              <span>Step 6: Automated Remediation & Self-Healing</span>
+            </h3>
+            <p className="text-xs text-slate-300">
+              Generate AST-level code patches, hardened system prompts, and verify score improvements for identified failure clusters.
+            </p>
           </div>
+          <button
+            onClick={() => navigate(`/fix-agent?agentId=${selectedAgentId}&jobId=${evalJob?.id}`)}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-rose-600 hover:from-cyan-400 hover:to-rose-500 text-white font-extrabold text-xs shadow-lg shadow-cyan-500/25 flex items-center space-x-2 transition"
+          >
+            <span>Proceed to 6. Fix My Agent</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
       )}
 

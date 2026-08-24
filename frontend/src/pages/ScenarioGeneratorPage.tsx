@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useLocation } from 'react-router-dom';
 import { fetchAgents, fetchStrategyPlan, generateScenarios, fetchScenarioLibrary, fetchCoverageReport } from '../api/client';
 import type { AgentRecord, StrategyPlan, Scenario, CoverageGapReport } from '../api/client';
 import { ScenarioStrategyView } from '../components/ScenarioStrategyView';
 import { ScenarioLibraryView } from '../components/ScenarioLibraryView';
 import { CoverageGapWidget } from '../components/CoverageGapWidget';
-import { Layers, RefreshCw, Sparkles } from 'lucide-react';
+import { Layers, RefreshCw, Sparkles, ArrowRight, Radio } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
@@ -14,6 +14,10 @@ interface ScenarioGeneratorPageProps {
 
 export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({}) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const agentIdFromUrl = queryParams.get('agentId');
+
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [strategy, setStrategy] = useState<StrategyPlan | null>(null);
@@ -26,11 +30,13 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({}) 
   useEffect(() => {
     fetchAgents().then((list) => {
       setAgents(list);
-      if (list.length > 0) {
+      if (agentIdFromUrl && list.some(a => a.id === agentIdFromUrl)) {
+        setSelectedAgentId(agentIdFromUrl);
+      } else if (list.length > 0) {
         setSelectedAgentId(list[0].id);
       }
     });
-  }, []);
+  }, [agentIdFromUrl]);
 
   useEffect(() => {
     if (!selectedAgentId) return;
@@ -73,22 +79,22 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({}) 
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-5">
       <div>
-        <h1 className="text-2xl font-extrabold text-slate-100">Scenario Intelligence Engine</h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100">Scenario Intelligence Engine</h1>
+        <p className="text-xs sm:text-sm text-slate-300 mt-1">
           Auto-generate 8-category adversarial and normal test suites for any agent. Every scenario passes a critic review before entering the library.
         </p>
       </div>
 
       {/* Agent + Controls */}
-      <div className="p-5 rounded-2xl glass-panel border border-slate-800 flex flex-wrap items-center gap-4">
+      <div className="p-3.5 sm:p-5 rounded-2xl glass-panel border border-slate-700/80 flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-48">
-          <label className="text-xs font-semibold text-slate-400 block mb-1">Target Agent:</label>
+          <label className="text-xs font-semibold text-slate-300 block mb-1">Target Agent:</label>
           <select
             value={selectedAgentId}
             onChange={(e) => setSelectedAgentId(e.target.value)}
-            className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500 transition"
+            className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500 transition"
           >
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
@@ -101,21 +107,21 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({}) 
 
         <div className="flex items-end space-x-2">
           <div>
-            <label className="text-xs font-semibold text-slate-400 block mb-1">Target Count:</label>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">Target Count:</label>
             <input
               type="number"
               min={5}
               max={100}
               value={targetCount}
               onChange={(e) => setTargetCount(Number(e.target.value))}
-              className="w-20 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500 transition text-center"
+              className="w-20 p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500 transition text-center"
             />
           </div>
 
           <button
             onClick={handleLoadStrategy}
             disabled={loadingStrategy || !selectedAgentId}
-            className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 font-bold text-xs flex items-center space-x-1.5 transition disabled:opacity-50"
+            className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 font-bold text-xs flex items-center space-x-1.5 transition disabled:opacity-50"
           >
             {loadingStrategy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Layers className="w-3.5 h-3.5" />}
             <span>Load Strategy Plan</span>
@@ -153,8 +159,8 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({}) 
 
       {/* Scenario Library */}
       {scenarios.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <h2 className="text-base font-bold text-slate-100">
               Scenario Library ({scenarios.filter(s => s.validation_status === 'VALIDATED').length} ready
               {scenarios.filter(s => s.validation_status === 'FAILED_GENERATION').length > 0 && (
@@ -164,12 +170,27 @@ export const ScenarioGeneratorPage: React.FC<ScenarioGeneratorPageProps> = ({}) 
               )}
               )
             </h2>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => navigate(`/dependencies?agentId=${selectedAgentId}`)}
+                className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold font-mono transition"
+              >
+                3. Dep Gateway →
+              </button>
+              <button
+                onClick={() => navigate(`/executions?agentId=${selectedAgentId}`)}
+                className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold font-mono flex items-center space-x-1.5 shadow-md shadow-indigo-500/20 transition"
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span>4. Run Execution Sandbox →</span>
+              </button>
+            </div>
           </div>
           <ScenarioLibraryView
             scenarios={scenarios}
             onRunSelected={(ids) => {
               console.log('Run selected scenarios:', ids);
-              navigate("/evaluations");
+              navigate(`/executions?agentId=${selectedAgentId}`);
             }}
           />
         </div>

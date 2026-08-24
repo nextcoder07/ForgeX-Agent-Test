@@ -565,13 +565,13 @@ export async function runEvaluationJob(agentId: string, batchSize: number = 25):
 }
 
 export async function fetchScorecard(evalId: string): Promise<ReliabilityScorecard> {
-  const res = await fetch(`${API_BASE_URL}/evaluations/${evalId}/scorecard`);
+  const res = await fetch(`${API_BASE_URL}/evaluations/jobs/${evalId}/scorecard`);
   if (!res.ok) throw new Error(`Failed to fetch scorecard: ${res.statusText}`);
   return res.json();
 }
 
 export async function fetchFailureClusters(evalId: string): Promise<FailureCluster[]> {
-  const res = await fetch(`${API_BASE_URL}/evaluations/${evalId}/clusters`);
+  const res = await fetch(`${API_BASE_URL}/evaluations/jobs/${evalId}/clusters`);
   if (!res.ok) throw new Error(`Failed to fetch failure clusters: ${res.statusText}`);
   return res.json();
 }
@@ -601,6 +601,23 @@ export async function fetchCalibrationReport(): Promise<CalibrationReport> {
 export async function fetchPipelineRun(runId: string = 'default'): Promise<PipelineRun> {
   const res = await fetch(`${API_BASE_URL}/pipeline/runs/${runId}`);
   if (!res.ok) throw new Error(`Failed to fetch pipeline run: ${res.statusText}`);
+  return res.json();
+}
+
+export async function startFullEvaluationPipeline(
+  agentId: string,
+  requestedMode: string = 'simulation',
+  secrets: Record<string, string> = {},
+): Promise<PipelineRun> {
+  const res = await fetch(`${API_BASE_URL}/pipeline/run-full-evaluation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_id: agentId, requested_mode: requestedMode, secrets }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail?.message || `Failed to start full evaluation: ${res.statusText}`);
+  }
   return res.json();
 }
 

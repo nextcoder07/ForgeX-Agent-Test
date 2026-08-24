@@ -95,14 +95,20 @@ const STATUS_CONFIG = {
   },
 };
 
+import { useLocation } from 'react-router-dom';
+
 interface DependencySetupPageProps {
   agent?: AgentRecord;
 }
 
 export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent: initialAgent }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const agentIdFromUrl = queryParams.get('agentId');
+
   const [agentsList, setAgentsList] = useState<AgentRecord[]>([]);
-  const [selectedAgentId, setSelectedAgentId] = useState<string>(initialAgent?.id || '');
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(initialAgent?.id || agentIdFromUrl || '');
   const [currentAgent, setCurrentAgent] = useState<AgentRecord | null>(initialAgent || null);
   
   const [dependencies, setDependencies] = useState<AgentDependency[]>([]);
@@ -117,15 +123,17 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
   useEffect(() => {
     fetchAgents().then(list => {
       setAgentsList(list);
-      if (!selectedAgentId && list.length > 0) {
+      const targetId = agentIdFromUrl || selectedAgentId;
+      if (targetId && list.some(a => a.id === targetId)) {
+        setSelectedAgentId(targetId);
+        const found = list.find(a => a.id === targetId);
+        if (found) setCurrentAgent(found);
+      } else if (list.length > 0) {
         setSelectedAgentId(list[0].id);
         setCurrentAgent(list[0]);
-      } else if (selectedAgentId) {
-        const found = list.find(a => a.id === selectedAgentId);
-        if (found) setCurrentAgent(found);
       }
     }).catch(console.error);
-  }, []);
+  }, [agentIdFromUrl]);
 
   // Reload dependency data whenever selectedAgentId changes
   useEffect(() => {
@@ -253,31 +261,31 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
   }
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="space-y-5 sm:space-y-6 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
       {/* Header & Agent Selector */}
       <div className="space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-violet-500 p-0.5">
-              <div className="w-9 h-9 bg-slate-950 rounded-[10px] flex items-center justify-center">
-                <Shield className="w-5 h-5 text-cyan-400" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-violet-500 p-0.5">
+              <div className="w-8 h-8 sm:w-9 sm:h-9 bg-slate-950 rounded-[8px] flex items-center justify-center">
+                <Shield className="w-4 h-4 text-cyan-400" />
               </div>
             </div>
             <div>
-              <h1 className="text-2xl font-extrabold text-slate-100">Agent Dependency Setup</h1>
-              <p className="text-xs text-slate-400 mt-0.5 font-mono">
+              <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100">Agent Dependency Setup</h1>
+              <p className="text-xs text-slate-300 mt-0.5 font-mono">
                 {currentAgent ? `${currentAgent.display_name || currentAgent.name} · ${currentAgent.id}` : 'Select an agent to inspect dependencies'}
               </p>
             </div>
           </div>
 
           {/* Agent Selection Dropdown */}
-          <div className="flex items-center space-x-3">
-            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Select Agent:</label>
+          <div className="flex items-center space-x-2 w-full sm:w-auto">
+            <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider hidden sm:inline">Select Agent:</label>
             <select
               value={selectedAgentId}
               onChange={(e) => setSelectedAgentId(e.target.value)}
-              className="bg-slate-900 border border-slate-700 text-slate-100 text-xs font-mono rounded-xl px-3 py-2 focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+              className="flex-1 sm:flex-none bg-slate-900 border border-slate-700 text-slate-100 text-xs font-mono rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none"
             >
               {agentsList.map(a => (
                 <option key={a.id} value={a.id}>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { fetchPipelineRun } from '../api/client';
 import type { PipelineRun, PipelineStage } from '../api/client';
 import { Radio, CheckCircle2, Clock, Cpu, Sparkles, RefreshCw, ChevronRight, Activity, Terminal } from 'lucide-react';
@@ -9,6 +10,7 @@ interface PipelineMonitorProps {
 }
 
 export const PipelineMonitor: React.FC<PipelineMonitorProps> = ({ runId = 'default' }) => {
+  const navigate = useNavigate();
   const [pipeline, setPipeline] = useState<PipelineRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedStage, setSelectedStage] = useState<PipelineStage | null>(null);
@@ -30,6 +32,8 @@ export const PipelineMonitor: React.FC<PipelineMonitorProps> = ({ runId = 'defau
 
   useEffect(() => {
     loadPipeline();
+    const interval = window.setInterval(loadPipeline, 2000);
+    return () => window.clearInterval(interval);
   }, [runId]);
 
   if (!pipeline) {
@@ -181,6 +185,33 @@ export const PipelineMonitor: React.FC<PipelineMonitorProps> = ({ runId = 'defau
                   </pre>
                 </div>
               )}
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                {selectedStage.details.execution_job_id && (
+                  <button
+                    onClick={() => navigate(`/executions?agentId=${pipeline.agent_id}`)}
+                    className="rounded-lg border border-emerald-500/40 bg-emerald-950/50 px-2.5 py-1.5 text-[10px] font-bold text-emerald-300"
+                  >
+                    Open Sandbox Traces
+                  </button>
+                )}
+                {selectedStage.details.evaluation_job_id && (
+                  <button
+                    onClick={() => navigate(`/evaluations/${selectedStage.details.evaluation_job_id}`)}
+                    className="rounded-lg border border-indigo-500/40 bg-indigo-950/50 px-2.5 py-1.5 text-[10px] font-bold text-indigo-300"
+                  >
+                    Open Evaluation Scorecard
+                  </button>
+                )}
+                {selectedStage.details.repair_session_id && (
+                  <button
+                    onClick={() => navigate(`/fix-agent?agentId=${pipeline.agent_id}`)}
+                    className="rounded-lg border border-rose-500/40 bg-rose-950/50 px-2.5 py-1.5 text-[10px] font-bold text-rose-300"
+                  >
+                    Open Fix My Agent
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <p className="text-xs text-slate-500 italic text-center py-8">Select a stage on the left to inspect its real telemetry.</p>

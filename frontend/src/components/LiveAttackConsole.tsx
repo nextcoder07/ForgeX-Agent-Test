@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { runLiveAttack, fetchAgents } from '../api/client';
-import type { LiveAttackResponse, AgentRecord } from '../api/client';
+import { runLiveAttack, fetchAgents, fetchScenarioLibrary } from '../api/client';
+import type { LiveAttackResponse, AgentRecord, Scenario } from '../api/client';
 import {
   Flame,
   Send,
@@ -35,6 +35,9 @@ export const LiveAttackConsole: React.FC<LiveAttackConsoleProps> = ({ preselecte
   const [error, setError] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [scenarioMode, setScenarioMode] = useState<'presets' | 'scenarios'>('presets');
+
   useEffect(() => {
     fetchAgents()
       .then((a) => {
@@ -42,7 +45,17 @@ export const LiveAttackConsole: React.FC<LiveAttackConsoleProps> = ({ preselecte
         if (!preselectedAgentId && a.length > 0) setSelectedAgentId(a[0].id);
       })
       .catch(console.error);
-  }, []);
+  }, [preselectedAgentId]);
+
+  useEffect(() => {
+    if (selectedAgentId) {
+      fetchScenarioLibrary(selectedAgentId)
+        .then(setScenarios)
+        .catch(console.error);
+    } else {
+      setScenarios([]);
+    }
+  }, [selectedAgentId]);
 
   const handleAttack = async () => {
     if (!attackPrompt.trim()) return;
@@ -86,11 +99,11 @@ export const LiveAttackConsole: React.FC<LiveAttackConsoleProps> = ({ preselecte
         {/* Left: Preset attacks + Input */}
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-semibold text-slate-400 block mb-1">Target Agent:</label>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">Target Agent:</label>
             <select
               value={selectedAgentId}
               onChange={(e) => setSelectedAgentId(e.target.value)}
-              className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-rose-500 transition"
+              className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 font-mono text-xs focus:outline-none focus:border-rose-500 transition"
             >
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -103,20 +116,55 @@ export const LiveAttackConsole: React.FC<LiveAttackConsoleProps> = ({ preselecte
             </select>
           </div>
 
+          {/* Mode Selector */}
+          <div className="flex space-x-2 border-b border-slate-700/80 pb-2">
+            <button
+              onClick={() => setScenarioMode('presets')}
+              className={`text-xs font-bold px-3 py-1.5 rounded-lg transition ${scenarioMode === 'presets' ? 'bg-slate-800 text-slate-100 border border-slate-700' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Quick Presets
+            </button>
+            <button
+              onClick={() => setScenarioMode('scenarios')}
+              className={`text-xs font-bold px-3 py-1.5 rounded-lg transition ${scenarioMode === 'scenarios' ? 'bg-slate-800 text-slate-100 border border-slate-700' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Agent Scenarios ({scenarios.length})
+            </button>
+          </div>
+
           <div>
-            <label className="text-xs font-semibold text-slate-400 block mb-1">Quick Attack Presets:</label>
-            <div className="grid grid-cols-2 gap-2">
-              {ATTACK_PRESETS.map((preset) => (
+            <label className="text-xs font-semibold text-slate-300 block mb-1">
+              {scenarioMode === 'presets' ? 'Quick Attack Presets:' : 'Select Scenario to Load:'}
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+              {scenarioMode === 'presets' && ATTACK_PRESETS.map((preset) => (
                 <button
                   key={preset.label}
                   onClick={() => setAttackPrompt(preset.prompt)}
-                  className="p-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-rose-500/50 text-left transition group"
+                  className="p-2 rounded-lg bg-slate-900/90 border border-slate-700/80 hover:border-rose-500/60 text-left transition group"
                 >
-                  <span className="text-[11px] font-semibold text-rose-400 group-hover:text-rose-300 block">
+                  <span className="text-[11px] font-semibold text-rose-300 group-hover:text-rose-200 block">
                     {preset.label}
                   </span>
-                  <span className="text-[10px] text-slate-400 line-clamp-2 mt-0.5">
+                  <span className="text-[10px] text-slate-300 line-clamp-2 mt-0.5">
                     {preset.prompt.substring(0, 55)}…
+                  </span>
+                </button>
+              ))}
+              {scenarioMode === 'scenarios' && scenarios.length === 0 && (
+                <div className="col-span-2 text-xs text-slate-400 py-4 text-center">No scenarios available for this agent.</div>
+              )}
+              {scenarioMode === 'scenarios' && scenarios.map((scenario) => (
+                <button
+                  key={scenario.id}
+                  onClick={() => setAttackPrompt(scenario.user_messages.join('\n\n'))}
+                  className="p-2 rounded-lg bg-slate-900/90 border border-slate-700/80 hover:border-indigo-500/60 text-left transition group"
+                >
+                  <span className="text-[11px] font-semibold text-indigo-300 group-hover:text-indigo-200 block truncate">
+                    [{scenario.category.toUpperCase()}] {scenario.title}
+                  </span>
+                  <span className="text-[10px] text-slate-300 line-clamp-2 mt-0.5">
+                    {scenario.user_messages[0]?.substring(0, 55)}…
                   </span>
                 </button>
               ))}
@@ -124,13 +172,13 @@ export const LiveAttackConsole: React.FC<LiveAttackConsoleProps> = ({ preselecte
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-slate-400 block mb-1">Attack Prompt:</label>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">Attack Prompt:</label>
             <textarea
               ref={textareaRef}
               value={attackPrompt}
               onChange={(e) => setAttackPrompt(e.target.value)}
-              rows={5}
-              className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 focus:border-rose-500 focus:ring-1 focus:ring-rose-500/40 text-slate-100 font-mono text-xs outline-none transition resize-none"
+              rows={4}
+              className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500/40 text-slate-100 font-mono text-xs outline-none transition resize-none placeholder:text-slate-500"
               placeholder="Type an adversarial attack or select a preset above..."
             />
           </div>

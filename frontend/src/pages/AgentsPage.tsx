@@ -105,19 +105,27 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
     : [];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-5">
       <div>
-        <h1 className="text-2xl font-extrabold text-slate-100">Agents & X-Ray Inspector</h1>
-        <p className="text-sm text-slate-400 mt-1">
-          View all registered agents. Inspect their source code, tool inventory, constitutional rules, and auto-discovered architecture map.
+        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center space-x-2.5">
+          <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" />
+          <span>Agents Registry & Specification X-Ray</span>
+        </h1>
+        <p className="text-xs sm:text-sm text-slate-300 mt-1">
+          Inspect source code files, reconstructed tools, policy rules, and system topology graphs for all registered agents.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Agent Sidebar List */}
-        <div className="lg:col-span-1 space-y-2 max-h-[75vh] overflow-y-auto custom-scrollbar pr-1">
+      {/* Main Grid: Agent Selector + Agent X-Ray */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        {/* Left Sidebar: Agent Selector */}
+        <div className="space-y-2">
+          <div className="text-[10px] font-mono text-slate-300 uppercase tracking-wider px-1">
+            Registered Agents ({agents.length})
+          </div>
+
           {loading ? (
-            <div className="p-4 text-center text-xs text-slate-400">
+            <div className="p-3 text-center text-xs text-slate-300">
               <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1 text-cyan-400" />
               Loading agents...
             </div>
@@ -126,36 +134,36 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
               <button
                 key={agent.id}
                 onClick={() => selectAgent(agent)}
-                className={`w-full p-3 rounded-xl text-left border transition-all ${
+                className={`w-full p-2.5 rounded-xl text-left border transition-all ${
                   selectedAgent?.id === agent.id
-                    ? 'bg-cyan-950/40 border-cyan-500/50 shadow-md'
-                    : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
+                    ? 'bg-cyan-950/60 border-cyan-500/60 shadow-md font-semibold'
+                    : 'bg-slate-900/70 border-slate-700/80 hover:border-slate-600'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <Cpu className={`w-3.5 h-3.5 ${selectedAgent?.id === agent.id ? 'text-cyan-400' : 'text-slate-500'}`} />
+                    <Cpu className={`w-3.5 h-3.5 ${selectedAgent?.id === agent.id ? 'text-cyan-400' : 'text-slate-400'}`} />
                     <span className="text-xs font-bold text-slate-100 truncate">{agent.display_name || agent.name}</span>
                   </div>
                   {selectedAgent?.id === agent.id && (
                     <ChevronRight className="w-3 h-3 text-cyan-400 shrink-0" />
                   )}
                 </div>
-                <p className="text-[10px] text-slate-400 font-mono mt-0.5 ml-5">Registered: {agent.name}</p>
+                <p className="text-[10px] text-slate-300 font-mono mt-0.5 ml-5">Registered: {agent.name}</p>
                 <div className="flex items-center space-x-2 mt-1 ml-5">
-                  <span className="px-1.5 py-0.5 text-[9px] font-mono rounded bg-indigo-950 text-indigo-300 border border-indigo-500/20">
+                  <span className="px-1.5 py-0.5 text-[9px] font-mono rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30">
                     {agent.version_label}
                   </span>
-                  <span className="text-[9px] text-slate-500">{agent.tools.length} tools</span>
+                  <span className="text-[9px] text-slate-300">{agent.tools.length} tools</span>
                 </div>
-                <p className="text-[9px] text-slate-600 font-mono mt-1 ml-5 truncate">{agent.domain} · {agent.id}</p>
+                <p className="text-[9px] text-slate-400 font-mono mt-1 ml-5 truncate">{agent.domain} · {agent.id}</p>
               </button>
             ))
           )}
 
           <button
             onClick={() => navigate("/intake")}
-            className="w-full py-2 rounded-xl border border-dashed border-slate-700 text-xs text-slate-400 hover:border-cyan-500/50 hover:text-cyan-300 flex items-center justify-center space-x-1.5 transition"
+            className="w-full py-2 rounded-xl border border-dashed border-slate-700 text-xs text-slate-300 hover:border-cyan-500/60 hover:text-cyan-300 flex items-center justify-center space-x-1.5 transition"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>Add New Agent</span>
@@ -167,15 +175,15 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
           {selectedAgent ? (
             <>
               {/* Agent Header */}
-              <div className="p-5 rounded-2xl glass-panel border border-slate-700 bg-gradient-to-r from-slate-950 via-indigo-950/20 to-slate-950 space-y-2">
+              <div className="p-4 sm:p-5 rounded-2xl glass-panel border border-slate-700 bg-gradient-to-r from-slate-950 via-indigo-950/30 to-slate-950 space-y-2">
                 <div className="flex items-start justify-between flex-wrap gap-3">
                   <div>
-                    <h2 className="text-lg font-extrabold text-slate-100">{selectedAgent.display_name || selectedAgent.name}</h2>
+                    <h2 className="text-base sm:text-lg font-extrabold text-slate-100">{selectedAgent.display_name || selectedAgent.name}</h2>
                     <p className="text-[11px] text-cyan-300 mt-0.5">Registered name: {selectedAgent.name}</p>
-                    <p className="text-sm text-slate-400 mt-0.5">{selectedAgent.description}</p>
+                    <p className="text-xs sm:text-sm text-slate-300 mt-0.5">{selectedAgent.description}</p>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <span className="px-2.5 py-1 text-[10px] font-mono rounded-lg bg-indigo-950 text-indigo-300 border border-indigo-500/30">
+                    <span className="px-2.5 py-1 text-[10px] font-mono rounded-lg bg-indigo-950 text-indigo-300 border border-indigo-500/40">
                       {selectedAgent.version_label}
                     </span>
                     <span className="px-2.5 py-1 text-[10px] font-mono rounded-lg bg-slate-900 text-slate-400 border border-slate-700">

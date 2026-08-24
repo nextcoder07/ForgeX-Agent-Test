@@ -40,13 +40,7 @@ export default function App() {
           />
           <Route 
             path="/dependencies" 
-            element={
-              lastRegisteredAgent ? (
-                <DependencySetupPage agent={lastRegisteredAgent} />
-              ) : (
-                <Navigate to="/dashboard" replace />
-              )
-            } 
+            element={<DependencySetupPage agent={lastRegisteredAgent || undefined} />} 
           />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/scenarios" element={<ScenarioGeneratorPage />} />

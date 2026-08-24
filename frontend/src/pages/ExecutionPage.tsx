@@ -27,12 +27,18 @@ import {
 } from '../api/client';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
+import { useLocation } from 'react-router-dom';
+
 interface ExecutionPageProps {
   onExecutionEvaluated?: (evalJob: any) => void; // Callback to pass eval job results to evaluation page
 }
 
 export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluated }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const agentIdFromUrl = queryParams.get('agentId');
+
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -50,11 +56,13 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     // Load agents
     fetchAgents().then(list => {
       setAgents(list);
-      if (list.length > 0) {
+      if (agentIdFromUrl && list.some(a => a.id === agentIdFromUrl)) {
+        setSelectedAgentId(agentIdFromUrl);
+      } else if (list.length > 0) {
         setSelectedAgentId(list[0].id);
       }
     });
-  }, []);
+  }, [agentIdFromUrl]);
 
   // Fetch scenarios whenever selected agent changes
   useEffect(() => {
@@ -130,7 +138,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
       if (onExecutionEvaluated) {
         onExecutionEvaluated(evalJob);
       }
-      // App.tsx now handles navigation to 'evaluations' with the correct job ID
+      navigate(`/evaluations/${evalJob.id || evalJob.job_id}?agentId=${selectedAgentId}`);
     } catch (e) {
       console.error('[SEND_TO_EVAL] Failed to trigger evaluation:', e);
       // Don't navigate if evaluation creation failed
@@ -147,30 +155,30 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     : 0;
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="space-y-5 sm:space-y-6 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
       {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-2xl font-extrabold text-slate-100 flex items-center space-x-3">
-          <Cpu className="w-6 h-6 text-indigo-400" />
+      <div className="space-y-1">
+        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center space-x-2.5">
+          <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-400" />
           <span>Sandbox Execution Console</span>
         </h1>
-        <p className="text-sm text-slate-400">
+        <p className="text-xs sm:text-sm text-slate-300">
           Run your registered agent against target scenario batches inside the sandboxed environment to collect raw execution traces.
         </p>
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         
         {/* Left Side: Agent Selection & Config */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="p-5 rounded-2xl glass-panel border border-slate-800 bg-slate-950/80 space-y-4">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+        <div className="lg:col-span-1 space-y-4">
+          <div className="p-3.5 sm:p-4 rounded-2xl glass-panel border border-slate-700/80 bg-slate-950/80 space-y-3">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
               1. Choose Target Agent
             </h2>
             
-            <div className="space-y-2">
-              <label className="text-xs text-slate-500 block">Active Target</label>
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-300 block">Active Target</label>
               <select
                 value={selectedAgentId}
                 onChange={e => setSelectedAgentId(e.target.value)}

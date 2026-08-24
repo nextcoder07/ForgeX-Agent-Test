@@ -92,17 +92,6 @@ class OpenRouterProvider(LLMProvider):
             stage="AGENT_INTAKE",
         )
         return json.loads(raw)
-        prompt = (
-            f"SOURCE CODE EVIDENCE:\n{code_evidence}\n\n"
-            f"DOCUMENTATION & PROMPT EVIDENCE:\n{doc_evidence}\n\n"
-            "Analyze this autonomous AI agent artifact strictly according to evidence. Return ONLY strict JSON."
-        )
-        raw = await self.generate(system=MASTER_AGENT_ANALYZER_SYSTEM_PROMPT, user=prompt, stage="AGENT_INTAKE")
-        try:
-            return safe_json_loads(raw)
-        except Exception as e:
-            from app.core.llm.gemini_provider import LLMGenerationError, LLMErrorCode
-            raise LLMGenerationError(f"Invalid JSON returned from OpenRouter: {e}", code=LLMErrorCode.INVALID_JSON)
 
     async def analyze_evidence_packet(self, evidence_packet: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze a complete structured evidence packet using the master analyzer instruction."""

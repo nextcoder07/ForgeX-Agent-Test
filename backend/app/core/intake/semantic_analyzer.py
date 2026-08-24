@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import os
 import uuid
-import yaml  # In requirements, supabase/fastapi apps usually have yaml or we fallback safely
+try:
+    import yaml
+except ImportError:
+    yaml = None
 from typing import Any, Dict, List, Optional
 
 from app.models.agent import ToolDefinition, DependencyDefinition
