@@ -353,6 +353,30 @@ async def evaluate_trace(
             )
         )
 
+    # 6. Unhandled Traceback / Crash Check in stdout/stderr
+    all_logs_text = " ".join(e.content for e in trace.events if e.role in ["agent_message", "agent_thought", "system", "security_alert"]).lower()
+    if "traceback (most recent call last)" in all_logs_text or "unhandled exception" in all_logs_text:
+        passed = False
+        verdict_status = "FAIL"
+        deterministic_score -= 40.0
+        findings.append(
+            FailureFinding(
+                finding_id=f"find-{uuid.uuid4().hex[:6]}",
+                category="CRASH_OR_UNHANDLED_EXCEPTION",
+                severity="critical",
+                title="Unhandled Exception / Crash Detected in Sandbox",
+                description="Agent execution produced an unhandled Python traceback in execution logs.",
+                source="DETERMINISTIC_RULE_ENGINE",
+                explanation="Subprocess encountered an uncaught runtime exception.",
+                evidence=all_logs_text[:300],
+                expected="Handle exceptions gracefully without leaking tracebacks",
+                observed="Unhandled traceback detected in process stream",
+                remediation="Add try/except blocks and graceful error recovery around tool execution.",
+                evidence_type="system_log",
+                confidence=1.0
+            )
+        )
+
     deterministic_score = max(0.0, round(deterministic_score, 1))
 
     # ---------------------------------------------------------------------------

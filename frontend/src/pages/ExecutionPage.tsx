@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Cpu,
   Layers,
@@ -26,8 +26,7 @@ import {
   evaluateExecutionJob,
 } from '../api/client';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
-
-import { useLocation } from 'react-router-dom';
+import { PipelineObservabilityPage } from './PipelineObservabilityPage';
 
 interface ExecutionPageProps {
   onExecutionEvaluated?: (evalJob: any) => void; // Callback to pass eval job results to evaluation page
@@ -35,9 +34,9 @@ interface ExecutionPageProps {
 
 export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluated }) => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const queryParams = new URLSearchParams(location.search);
-  const agentIdFromUrl = queryParams.get('agentId');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const execTab = (searchParams.get('tab') || 'run') as 'run' | 'telemetry';
+  const agentIdFromUrl = searchParams.get('agentId') || '';
 
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
@@ -49,6 +48,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
   const [running, setRunning] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
   const [loadingScenarios, setLoadingScenarios] = useState(false);
+  const [executionBlockedMsg, setExecutionBlockedMsg] = useState<string | null>(null);
 
   const pollIntervalRef = useRef<number | null>(null);
 
@@ -68,6 +68,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
   useEffect(() => {
     if (!selectedAgentId) return;
     setLoadingScenarios(true);
+    setExecutionBlockedMsg(null);
     fetchScenarioLibrary(selectedAgentId)
       .then(list => {
         setScenarios(list);
@@ -95,6 +96,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     if (selectedScenarioIds.length === 0) return;
     setRunning(true);
     setExecutionJob(null);
+    setExecutionBlockedMsg(null);
 
     try {
       const job = await runExecutionJob(selectedAgentId, selectedScenarioIds, true);
@@ -116,9 +118,10 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
         }
       }, 1500);
 
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to run execution:', e);
       setRunning(false);
+      setExecutionBlockedMsg(e.message || 'Execution blocked. Missing required credentials or dependencies.');
     }
   };
 
@@ -138,7 +141,8 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
       if (onExecutionEvaluated) {
         onExecutionEvaluated(evalJob);
       }
-      navigate(`/evaluations/${evalJob.id || evalJob.job_id}?agentId=${selectedAgentId}`);
+      navigate(`/results?agentId=${selectedAgentId}`);
+
     } catch (e) {
       console.error('[SEND_TO_EVAL] Failed to trigger evaluation:', e);
       // Don't navigate if evaluation creation failed
@@ -160,12 +164,61 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
       <div className="space-y-1">
         <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center space-x-2.5">
           <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-400" />
-          <span>Sandbox Execution Console</span>
+          <span>Execute</span>
         </h1>
         <p className="text-xs sm:text-sm text-slate-300">
-          Run your registered agent against target scenario batches inside the sandboxed environment to collect raw execution traces.
+          Run scenarios in the sandbox and monitor live telemetry.
         </p>
       </div>
+
+      {/* Tab bar */}
+      <div className="flex items-center space-x-1 border-b border-slate-800">
+        {([
+          { id: 'run', label: 'Run Tests', icon: Play },
+          { id: 'telemetry', label: 'Live Telemetry', icon: Activity },
+        ] as const).map(t => (
+          <button
+            key={t.id}
+            onClick={() => setSearchParams({ tab: t.id })}
+            className={`flex items-center space-x-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-all cursor-pointer ${
+              execTab === t.id
+                ? 'border-cyan-400 text-cyan-300 bg-slate-900/40'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/20'
+            }`}
+          >
+            <t.icon className="w-3.5 h-3.5" />
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Telemetry tab */}
+      {execTab === 'telemetry' && <PipelineObservabilityPage />}
+
+      {/* Run tab content starts below */}
+      {execTab === 'run' && <>
+
+      {/* 🛑 Blocked Execution Warning Banner */}
+      {executionBlockedMsg && (
+        <div className="p-4 rounded-2xl glass-panel border border-rose-500/40 bg-rose-950/30 flex items-center justify-between flex-wrap gap-3 animate-fadeIn">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 rounded-xl bg-rose-500/20">
+              <AlertTriangle className="w-5 h-5 text-rose-400" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-rose-200">Execution Blocked by Dependency Gateway</p>
+              <p className="text-[11px] text-slate-300 mt-0.5">{executionBlockedMsg}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate(`/dependencies?agentId=${selectedAgentId}&blocked=true`)}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-500 to-amber-600 hover:from-rose-400 hover:to-amber-500 text-white font-bold text-xs shadow-lg shadow-rose-500/20 flex items-center space-x-1.5 transition hover:scale-[1.02]"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>Configure Missing Dependencies in Gateway →</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -173,9 +226,18 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
         {/* Left Side: Agent Selection & Config */}
         <div className="lg:col-span-1 space-y-4">
           <div className="p-3.5 sm:p-4 rounded-2xl glass-panel border border-slate-700/80 bg-slate-950/80 space-y-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-              1. Choose Target Agent
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                1. Choose Target Agent
+              </h2>
+              <button
+                onClick={() => navigate(`/dependencies?agentId=${selectedAgentId}`)}
+                className="text-[10px] font-mono text-cyan-400 hover:text-cyan-300 flex items-center space-x-1"
+              >
+                <Shield className="w-3 h-3" />
+                <span>Gateway</span>
+              </button>
+            </div>
             
             <div className="space-y-1.5">
               <label className="text-xs text-slate-300 block">Active Target</label>
@@ -209,6 +271,14 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                     <span>{selectedAgent.version_label || 'v1.0'}</span>
                   </p>
                 </div>
+
+                <button
+                  onClick={() => navigate(`/dependencies?agentId=${selectedAgentId}`)}
+                  className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-cyan-500/30 text-cyan-400 font-bold text-xs flex items-center justify-center space-x-2 transition"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Configure Agent Dependencies & Keys →</span>
+                </button>
 
                 <div className="space-y-2">
                   <label className="text-xs text-slate-500 block">System Prompt configuration</label>
@@ -375,7 +445,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
 
       {/* Process activity log */}
       <LiveProcessMonitor />
-
+      </>}
     </div>
   );
 };

@@ -1,19 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
-import type { PageId } from './components/Navbar';
 import { DashboardPage } from './pages/DashboardPage';
-import { AgentIntakePage } from './pages/AgentIntakePage';
-import { DependencySetupPage } from './pages/DependencySetupPage';
 import { AgentsPage } from './pages/AgentsPage';
 import { ScenarioGeneratorPage } from './pages/ScenarioGeneratorPage';
-import { EvaluationRunPage } from './pages/EvaluationRunPage';
-import { LiveAttackPage } from './pages/LiveAttackPage';
-import { CalibrationPage } from './pages/CalibrationPage';
-import { RegressionPage } from './pages/RegressionPage';
-import { PipelineObservabilityPage } from './pages/PipelineObservabilityPage';
+import { DependencySetupPage } from './pages/DependencySetupPage';
 import { ExecutionPage } from './pages/ExecutionPage';
-import { FixMyAgentPage } from './pages/FixMyAgentPage';
+import { ResultsPage } from './pages/ResultsPage';
+import { ImprovePage } from './pages/ImprovePage';
 import type { AgentRecord } from './api/client';
 
 export default function App() {
@@ -32,33 +26,49 @@ export default function App() {
       <Navbar />
       <main className="pb-16">
         <Routes>
+          {/* Root */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route 
-            path="/intake" 
-            element={<AgentIntakePage onAgentRegistered={handleAgentRegistered} />} 
-          />
-          <Route 
-            path="/dependencies" 
-            element={<DependencySetupPage agent={lastRegisteredAgent || undefined} />} 
-          />
-          <Route path="/agents" element={<AgentsPage />} />
+
+          {/* 1. Agents — contains intake, x-ray, and versions as tabs */}
+          <Route path="/agents" element={<AgentsPage onAgentRegistered={handleAgentRegistered} />} />
+          <Route path="/agents/:agentId" element={<AgentsPage onAgentRegistered={handleAgentRegistered} />} />
+
+          {/* 2. Scenarios — contains generate, library, adversarial as tabs */}
           <Route path="/scenarios" element={<ScenarioGeneratorPage />} />
+
+          {/* 3. Setup — contains AI model slots, services & credentials, sandbox as tabs */}
+          <Route path="/setup" element={<DependencySetupPage agent={lastRegisteredAgent || undefined} />} />
+
+          {/* 4. Execute — contains run + live telemetry tabs */}
           <Route path="/executions" element={<ExecutionPage />} />
-          
-          <Route path="/evaluations" element={<EvaluationRunPage />} />
-          <Route path="/evaluations/:jobId" element={<EvaluationRunPage />} />
-          
-          <Route path="/fix-agent" element={<FixMyAgentPage />} />
-          <Route path="/live-attack" element={<LiveAttackPage />} />
-          
-          <Route path="/failures" element={<EvaluationRunPage />} />
-          <Route path="/failures/:jobId" element={<EvaluationRunPage />} />
-          
-          <Route path="/scorecard" element={<RegressionPage />} />
-          <Route path="/calibration" element={<CalibrationPage />} />
-          <Route path="/pipeline" element={<PipelineObservabilityPage />} />
-          
+
+          {/* 5. Results — contains scorecard, failures, calibration settings tabs */}
+          <Route path="/results" element={<ResultsPage />} />
+          <Route path="/results/:jobId" element={<ResultsPage />} />
+
+          {/* 6. Improve — contains failures, repairs, regression, model training tabs */}
+          <Route path="/improve" element={<ImprovePage />} />
+          <Route path="/improve/:jobId" element={<ImprovePage />} />
+
+          {/* ── Legacy redirects — don't break old links ── */}
+          <Route path="/intake" element={<Navigate to="/agents?tab=intake" replace />} />
+          <Route path="/dependencies" element={<Navigate to="/setup" replace />} />
+          <Route path="/models" element={<Navigate to="/setup?tab=ai-models" replace />} />
+          <Route path="/evaluations" element={<Navigate to="/results" replace />} />
+          <Route path="/evaluations/:jobId" element={<Navigate to="/results" replace />} />
+          <Route path="/diagnosis" element={<Navigate to="/improve?tab=failures" replace />} />
+          <Route path="/diagnosis/:jobId" element={<Navigate to="/improve?tab=failures" replace />} />
+          <Route path="/fix-agent" element={<Navigate to="/improve?tab=repairs" replace />} />
+          <Route path="/regression" element={<Navigate to="/improve?tab=regression" replace />} />
+          <Route path="/training" element={<Navigate to="/improve?tab=training" replace />} />
+          <Route path="/live-attack" element={<Navigate to="/scenarios?tab=adversarial" replace />} />
+          <Route path="/failures" element={<Navigate to="/improve?tab=failures" replace />} />
+          <Route path="/failures/:jobId" element={<Navigate to="/improve?tab=failures" replace />} />
+          <Route path="/scorecard" element={<Navigate to="/results?tab=failures" replace />} />
+          <Route path="/calibration" element={<Navigate to="/results?tab=settings" replace />} />
+          <Route path="/pipeline" element={<Navigate to="/executions?tab=telemetry" replace />} />
+
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>

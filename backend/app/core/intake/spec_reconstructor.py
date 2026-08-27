@@ -279,6 +279,10 @@ async def process_agent_intake(
     detected_secrets = service_facts.get("credential_references") or DependencyDetector.detect_environment_secrets(all_code + "\n" + all_docs)
     agent_id_temp = f"agent-{hasher.hexdigest()[:8]}"
     detected_model_deps = DependencyDetector.detect_model_dependencies(agent_id_temp, all_code, detected_secrets)
+    runtime_manifest["detected_model_dependencies"] = [
+        d.model_dump() if hasattr(d, "model_dump") else d.dict() if hasattr(d, "dict") else d
+        for d in detected_model_deps
+    ]
     agent_category = DependencyDetector.classify_agent_category(all_code, detected_model_deps, dedup_tools, extracted_deps)
 
     # 3. Build Structured Evidence Packet

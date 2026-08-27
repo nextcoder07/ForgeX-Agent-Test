@@ -37,6 +37,7 @@ class GenerateScenariosRequest(BaseModel):
     agent_id: str
     target_count: int = 25
     scenario_type: Optional[str] = None  # e.g. "normal", "adversarial", "security", "tool_misuse"
+    category_counts: Optional[Dict[str, int]] = None  # e.g. {"normal": 2, "edge": 3, "safety": 4, "chaos": 1}
     count: Optional[int] = None           # Alias for target_count
     difficulty: Optional[str] = None      # "easy", "medium", "hard"
     user_instructions: Optional[str] = None
@@ -44,11 +45,20 @@ class GenerateScenariosRequest(BaseModel):
 
 
 @router.get("/strategy/{agent_id}", response_model=StrategyPlan)
-def get_test_strategy(agent_id: str):
+def get_test_strategy(agent_id: str, target_count: int = 20, category_counts: Optional[str] = None):
     agent = store.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    return build_test_strategy(agent)
+    
+    parsed_counts = None
+    if category_counts:
+        try:
+            import json
+            parsed_counts = json.loads(category_counts)
+        except Exception:
+            pass
+
+    return build_test_strategy(agent, desired_count=target_count, category_counts=parsed_counts)
 
 
 @router.get("/plan/{agent_id}", response_model=ScenarioPlan)
@@ -67,9 +77,13 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
+    count_val = getattr(payload, "count", None)
+    if count_val and count_val > 0:
+        payload.target_count = count_val
+
     run_id = f"gen-run-{uuid.uuid4().hex[:8]}"
     llm = get_platform_provider()
-    
+
     # 1. Deterministic Plan
     plan = build_deterministic_scenario_plan(agent, payload)
     
@@ -150,9 +164,13 @@ async def generate_and_validate_scenarios(payload: GenerateScenariosRequest):
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
     target_count = payload.count if payload.count is not None else payload.target_count
+    if payload.category_counts:
+        target_count = sum(payload.category_counts.values())
+
     gen_req = ScenarioGenerationRequest(
         agent_id=payload.agent_id,
         target_count=target_count,
+        category_counts=payload.category_counts,
         user_instructions=payload.user_instructions
     )
     

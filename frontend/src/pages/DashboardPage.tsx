@@ -133,11 +133,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
             </div>
             <div className="p-3 rounded-xl bg-slate-900/90 border border-indigo-500/30 text-center">
               <p className="text-xl sm:text-2xl font-extrabold text-indigo-300 font-mono">{loading ? '–' : scenarios.length}</p>
-              <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Scenarios Library</p>
+              <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Scenarios Designed</p>
             </div>
             <div className="p-3 rounded-xl bg-slate-900/90 border border-emerald-500/30 text-center">
               <p className="text-xl sm:text-2xl font-extrabold text-emerald-300 font-mono">{loading ? '–' : validatedScenarios.length}</p>
-              <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Validated Tests</p>
+              <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Spec-Validated</p>
             </div>
             <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 text-center">
               <p className="text-xl sm:text-2xl font-extrabold text-amber-300 font-mono">

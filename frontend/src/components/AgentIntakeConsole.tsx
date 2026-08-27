@@ -314,15 +314,47 @@ export const AgentIntakeConsole: React.FC<AgentIntakeConsoleProps> = ({ onAnalys
       )}
 
       {activeTab === 'endpoint' && (
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-400">Agent REST Endpoint URL:</label>
-          <input
-            type="text"
-            value={endpointUrl}
-            onChange={(e) => setEndpointUrl(e.target.value)}
-            className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500 transition"
-            placeholder="https://api.myagent.com/v1/run"
-          />
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">
+              Locally Running Agent Network URL (HTTP / REST / WebSocket):
+            </label>
+            <p className="text-[11px] text-slate-400 mb-2">
+              Connect an agent running locally on your computer or local network. ForgeX will dispatch scenario prompts directly over HTTP.
+            </p>
+            <input
+              type="text"
+              value={endpointUrl}
+              onChange={(e) => setEndpointUrl(e.target.value)}
+              className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500 transition"
+              placeholder="http://localhost:8000/run_agent or http://192.168.1.10:8000"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <span className="text-[10px] text-slate-500 font-mono uppercase">Quick Presets:</span>
+            <button
+              type="button"
+              onClick={() => setEndpointUrl('http://localhost:8000/run_agent')}
+              className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300"
+            >
+              localhost:8000/run_agent
+            </button>
+            <button
+              type="button"
+              onClick={() => setEndpointUrl('http://localhost:5000/chat')}
+              className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300"
+            >
+              localhost:5000/chat
+            </button>
+            <button
+              type="button"
+              onClick={() => setEndpointUrl('http://localhost:3000/api/agent')}
+              className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300"
+            >
+              localhost:3000/api/agent
+            </button>
+          </div>
         </div>
       )}
 

@@ -17,46 +17,36 @@ import {
   X,
   ChevronRight,
   ChevronDown,
+  Bug,
+  Server,
+  Database,
 } from 'lucide-react';
 
 export type PageId =
   | 'dashboard'
-  | 'intake'
-  | 'dependencies'
   | 'agents'
   | 'scenarios'
+  | 'setup'
   | 'executions'
-  | 'evaluations'
-  | 'failures'
-  | 'scorecard'
-  | 'live-attack'
-  | 'calibration'
-  | 'pipeline'
-  | 'fix-agent';
+  | 'results'
+  | 'improve';
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   // Determine active page from current pathname
   const currentPath = location.pathname.split('/')[1] || 'dashboard';
 
-  const navItems: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }>; category?: string }[] = [
+  const navItems: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
-    { id: 'intake', label: '1. Agent Intake', icon: Sparkles },
-    { id: 'scenarios', label: '2. Scenario Intel', icon: Layers },
-    { id: 'dependencies', label: '3. Dep Gateway', icon: Layers },
-    { id: 'executions', label: '4. Sandbox Run', icon: Radio },
-    { id: 'evaluations', label: '5. Evaluation', icon: Zap },
-    { id: 'fix-agent', label: '6. Fix My Agent', icon: Wrench },
-    { id: 'agents', label: 'Agents X-Ray', icon: Cpu },
-    { id: 'live-attack', label: 'Live Attack', icon: Flame },
-    { id: 'failures', label: 'Failure Clusters', icon: ShieldCheck },
-    { id: 'scorecard', label: 'Regression Diff', icon: GitCompare },
-    { id: 'calibration', label: 'Judge Calibration', icon: CheckCircle2 },
-    { id: 'pipeline', label: 'Pipeline Telemetry', icon: Radio },
+    { id: 'agents', label: '1. Agents', icon: Sparkles },
+    { id: 'scenarios', label: '2. Scenarios', icon: Layers },
+    { id: 'setup', label: '3. Setup', icon: Server },
+    { id: 'executions', label: '4. Execute', icon: Radio },
+    { id: 'results', label: '5. Results', icon: Zap },
+    { id: 'improve', label: '6. Improve', icon: Wrench },
   ];
 
   const handleNav = (page: PageId) => {
@@ -97,16 +87,16 @@ export const Navbar: React.FC = () => {
 
           {/* Desktop Navigation Items */}
           <nav className="hidden xl:flex items-center space-x-1">
-            {navItems.slice(0, 7).map((item) => {
+            {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentPath === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => handleNav(item.id)}
-                  className={`px-2 py-1 rounded-lg text-xs font-medium flex items-center space-x-1 transition-all duration-200 ${
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all duration-200 cursor-pointer ${
                     isActive
-                      ? 'bg-cyan-950/80 text-cyan-200 border border-cyan-500/50 shadow-sm shadow-cyan-500/20 font-semibold'
+                      ? 'bg-cyan-950 text-cyan-200 border border-cyan-500/50 shadow-sm shadow-cyan-500/20'
                       : 'text-slate-300 hover:text-white hover:bg-slate-900/80'
                   }`}
                 >
@@ -115,52 +105,6 @@ export const Navbar: React.FC = () => {
                 </button>
               );
             })}
-
-            {/* Desktop More Modules Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setMoreDropdownOpen(!moreDropdownOpen)}
-                className={`px-2 py-1 rounded-lg text-xs font-medium flex items-center space-x-1 transition-all duration-200 ${
-                  navItems.slice(7).some(i => i.id === currentPath)
-                    ? 'bg-cyan-950/80 text-cyan-200 border border-cyan-500/50 font-semibold'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-900/80'
-                }`}
-              >
-                <span>More ({navItems.length - 7})</span>
-                <ChevronDown className="w-3.5 h-3.5 text-cyan-400" />
-              </button>
-
-              {moreDropdownOpen && (
-                <div
-                  onMouseLeave={() => setMoreDropdownOpen(false)}
-                  className="absolute right-0 top-full mt-1.5 w-56 p-1.5 rounded-xl border border-slate-700 bg-[#030712]/98 backdrop-blur-2xl shadow-2xl shadow-black/80 space-y-1 z-50 animate-in fade-in duration-150"
-                >
-                  {navItems.slice(7).map((item) => {
-                    const Icon = item.icon;
-                    const isActive = currentPath === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          handleNav(item.id);
-                          setMoreDropdownOpen(false);
-                        }}
-                        className={`w-full px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition ${
-                          isActive
-                            ? 'bg-cyan-950 text-cyan-200 border border-cyan-500/50 font-semibold'
-                            : 'text-slate-300 hover:text-white hover:bg-slate-900/80'
-                        }`}
-                      >
-                        <div className="flex items-center space-x-2">
-                          <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
-                          <span>{item.label}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </nav>
 
           {/* Status Badge & Mobile Hamburger Button */}
@@ -173,72 +117,37 @@ export const Navbar: React.FC = () => {
             {/* Mobile Hamburger Toggle Button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 hover:text-white hover:bg-slate-800 transition focus:outline-none"
-              aria-label="Toggle Menu"
+              className="xl:hidden p-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 hover:text-white opacity-100 cursor-pointer"
             >
-              {mobileMenuOpen ? <X className="w-4 h-4 text-rose-400" /> : <Menu className="w-4 h-4 text-cyan-400" />}
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Horizontal Fast-Bar for Tablets/Desktops */}
-        <div className="hidden md:flex xl:hidden overflow-x-auto space-x-1 py-1.5 border-t border-slate-800 custom-scrollbar">
+      {/* Mobile Menu Drawer */}
+      {mobileMenuOpen && (
+        <div className="xl:hidden border-t border-slate-800 bg-[#030712]/98 backdrop-blur-2xl p-4 space-y-2 animate-in slide-in-from-top-4 duration-200">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPath === item.id;
             return (
               <button
                 key={item.id}
-                onClick={() => handleNav(item.id)}
-                className={`px-2 py-0.5 rounded-md text-[11px] font-medium whitespace-nowrap flex items-center space-x-1 transition ${
+                onClick={() => handleMobileNav(item.id)}
+                className={`w-full px-3 py-2 rounded-xl text-xs font-semibold flex items-center space-x-2.5 transition cursor-pointer ${
                   isActive
-                    ? 'bg-cyan-950 text-cyan-200 border border-cyan-500/50'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-900/60'
+                    ? 'bg-cyan-950 text-cyan-200 border border-cyan-500/50 shadow-sm shadow-cyan-500/20'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-900/80'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5 text-cyan-400" />
+                <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
                 <span>{item.label}</span>
               </button>
             );
           })}
         </div>
-
-        {/* Mobile Full Dropdown Navigation Drawer */}
-        {mobileMenuOpen && (
-          <div className="absolute top-full left-0 right-0 py-2.5 px-3 border-b border-slate-800 bg-[#030712]/98 backdrop-blur-2xl shadow-2xl shadow-black/80 space-y-1 animate-in slide-in-from-top duration-200">
-            <div className="px-1 py-0.5 flex items-center justify-between text-[10px] font-mono text-slate-300 uppercase tracking-wider mb-1">
-              <span>Platform Navigation</span>
-              <span className="text-[9px] text-cyan-300 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-500/40">13 Modules</span>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 pb-2">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = currentPath === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => handleMobileNav(item.id)}
-                    className={`w-full p-2 rounded-lg text-[11px] font-medium flex items-center justify-between transition-all duration-200 ${
-                      isActive
-                        ? 'bg-cyan-950 text-cyan-200 border border-cyan-500/60 shadow-sm shadow-cyan-500/10 font-semibold'
-                        : 'bg-slate-900/60 text-slate-200 border border-slate-800 hover:border-slate-700 hover:bg-slate-800/80'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <div className={`p-1 rounded-md ${isActive ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-300'}`}>
-                        <Icon className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="text-left">{item.label}</span>
-                    </div>
-                    <ChevronRight className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </header>
   );
 };

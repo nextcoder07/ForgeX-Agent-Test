@@ -162,30 +162,64 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
                   </div>
 
                   <h4 className="text-xs font-bold text-slate-100 line-clamp-1">{sc.title}</h4>
-                  <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{sc.purpose}</p>
+                  <p className="text-[11px] text-slate-300 line-clamp-2 leading-relaxed">{sc.purpose}</p>
+
+                  {/* 1. Test Input / User Prompt Preview */}
+                  {(() => {
+                    const promptText = sc.user_messages && sc.user_messages.length > 0
+                      ? sc.user_messages[0]
+                      : sc.invocation?.command || (sc.invocation?.body ? JSON.stringify(sc.invocation.body) : null);
+                    if (!promptText) return null;
+                    return (
+                      <div className="p-2 rounded-lg bg-slate-950 border border-slate-850 space-y-0.5 font-mono text-[10.5px]">
+                        <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">
+                          {sc.interface_type === 'CLI' ? 'EXECUTION COMMAND' : 'TEST INPUT / PROMPT'}:
+                        </span>
+                        <p className="text-cyan-300 truncate">{promptText}</p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 2. Key Assertions & Fault Injections */}
+                  <div className="space-y-1 pt-1">
+                    {sc.fault_injections && sc.fault_injections.length > 0 && (
+                      <div className="flex items-center space-x-1.5 text-[9.5px] font-mono text-amber-300 bg-amber-950/30 px-2 py-1 rounded border border-amber-500/20">
+                        <Zap className="w-3 h-3 text-amber-400 shrink-0" />
+                        <span className="truncate">Fault: {sc.fault_injections[0].fault_type} on `{sc.fault_injections[0].target_tool}`</span>
+                      </div>
+                    )}
+
+                    {sc.assertions && sc.assertions.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {sc.assertions.slice(0, 2).map((a, aIdx) => (
+                          <span
+                            key={aIdx}
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold border ${
+                              a.assertion_type.includes('NOT') || a.assertion_type.includes('SECURITY')
+                                ? 'bg-rose-950/40 text-rose-300 border-rose-500/30'
+                                : 'bg-slate-850 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            {a.assertion_type}: <code className="text-white">{a.target || a.expected_value || 'pass'}</code>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div className="space-y-2 pt-2 border-t border-slate-800/80">
-                  {/* Rationale Card */}
-                  {sc.rationale && (
-                    <p className="text-[10px] text-slate-400 font-sans italic leading-tight">
-                      {sc.rationale}
-                    </p>
-                  )}
-
-                  <div className="flex items-center justify-between text-[10px] font-mono">
-                    <span className="text-slate-400">
-                      Capabilities: {sc.required_capabilities.join(', ') || 'NONE'}
-                    </span>
-                    <span
-                      className={`flex items-center space-x-1 font-bold ${
-                        sc.validation_status === 'VALIDATED' ? 'text-emerald-400' : isFailedGen ? 'text-rose-500' : 'text-amber-400'
-                      }`}
-                    >
-                      {isFailedGen ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
-                      <span>{sc.validation_status}</span>
-                    </span>
-                  </div>
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                  <span className="text-slate-400 truncate max-w-[170px]">
+                    {sc.target_failure_surface || (sc.required_capabilities && sc.required_capabilities.length > 0 ? `Cap: ${sc.required_capabilities[0]}` : `Scope: ${sc.category.toUpperCase()}`)}
+                  </span>
+                  <span
+                    className={`flex items-center space-x-1 font-bold shrink-0 ${
+                      sc.validation_status === 'VALIDATED' ? 'text-emerald-400' : isFailedGen ? 'text-rose-500' : 'text-amber-400'
+                    }`}
+                  >
+                    {isFailedGen ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
+                    <span>{sc.validation_status === 'VALIDATED' ? 'SPEC_VALIDATED' : sc.validation_status}</span>
+                  </span>
                 </div>
               </div>
             );

@@ -122,6 +122,13 @@ export interface FaultInjection {
   occurrence: number;
 }
 
+export interface ScenarioAssertion {
+  assertion_type: string;
+  target?: string;
+  expected_value?: any;
+  description?: string;
+}
+
 export interface Scenario {
   id: string;
   agent_id?: string | null;
@@ -137,6 +144,11 @@ export interface Scenario {
   critic_notes?: string;
   validation_status: string;
   rationale: string;
+  interface_type?: string;
+  invocation?: Record<string, any>;
+  assertions?: ScenarioAssertion[];
+  target_failure_surface?: string;
+  target_invariant?: string;
 }
 
 export interface StrategyCategoryTarget {
@@ -418,6 +430,13 @@ export async function fetchAgents(): Promise<AgentRecord[]> {
   return res.json();
 }
 
+export async function purgeAllAgents(): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/intake/agents`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Failed to purge workspace: ${res.statusText}`);
+}
+
 export async function fetchDemoAgents(): Promise<string[]> {
   const res = await fetch(`${API_BASE_URL}/intake/local-agents`);
   if (!res.ok) throw new Error(`Failed to fetch demo agents: ${res.statusText}`);
@@ -463,8 +482,17 @@ export async function registerNormalizedSpec(
   return res.json();
 }
 
-export async function fetchStrategyPlan(agentId: string): Promise<StrategyPlan> {
-  const res = await fetch(`${API_BASE_URL}/scenarios/strategy/${agentId}`);
+export async function fetchStrategyPlan(
+  agentId: string,
+  targetCount: number = 20,
+  categoryCounts?: Record<string, number>
+): Promise<StrategyPlan> {
+  const params = new URLSearchParams();
+  params.set('target_count', String(targetCount));
+  if (categoryCounts) {
+    params.set('category_counts', JSON.stringify(categoryCounts));
+  }
+  const res = await fetch(`${API_BASE_URL}/scenarios/strategy/${agentId}?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch strategy plan: ${res.statusText}`);
   return res.json();
 }
@@ -473,7 +501,8 @@ export async function generateScenarios(
   agentId: string,
   count: number = 25,
   scenarioType?: string,
-  difficulty?: string
+  difficulty?: string,
+  categoryCounts?: Record<string, number>
 ): Promise<Scenario[]> {
   const res = await fetch(`${API_BASE_URL}/scenarios/generate`, {
     method: 'POST',
@@ -483,9 +512,18 @@ export async function generateScenarios(
       target_count: count,
       scenario_type: scenarioType,
       difficulty,
+      category_counts: categoryCounts,
     }),
   });
   if (!res.ok) throw new Error(`Failed to generate scenarios: ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteAgent(agentId: string): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Failed to delete agent: ${res.statusText}`);
   return res.json();
 }
 
@@ -650,6 +688,34 @@ export interface DependencyBindingType {
   created_at: string;
 }
 
+export interface SystemCredentialItem {
+  key_name: string;
+  provider: string;
+  description: string;
+  is_configured: boolean;
+  source: 'system_env' | 'user_custom' | 'missing';
+  masked_value?: string | null;
+}
+
+export interface CredentialRequirement {
+  key_name: string;
+  provider: string;
+  description: string;
+  is_fulfilled: boolean;
+  is_optional?: boolean;
+  provided_by_system?: boolean;
+  masked_value?: string | null;
+}
+
+export interface SessionCredentialPrompt {
+  session_id: string;
+  agent_id: string;
+  mode: string;
+  all_fulfilled: boolean;
+  status: string;
+  requirements: CredentialRequirement[];
+}
+
 // ── Dependency Setup Flow API Methods ───────────────────────────────────────
 
 export async function getAgentDependencies(agentId: string): Promise<AgentDependency[]> {
@@ -677,6 +743,42 @@ export async function updateAgentBindings(agentId: string, bindings: DependencyB
     body: JSON.stringify({ bindings }),
   });
   if (!res.ok) throw new Error(`Failed to update bindings: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getSystemCredentials(): Promise<SystemCredentialItem[]> {
+  const res = await fetch(`${API_BASE_URL}/dependencies/system-credentials`);
+  if (!res.ok) throw new Error(`Failed to fetch system credentials: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateSystemCredentials(credentials: Record<string, string>): Promise<SystemCredentialItem[]> {
+  const res = await fetch(`${API_BASE_URL}/dependencies/system-credentials`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentials }),
+  });
+  if (!res.ok) throw new Error(`Failed to update system credentials: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getAgentRequiredCredentials(agentId: string, mode: string = 'faithful'): Promise<SessionCredentialPrompt> {
+  const res = await fetch(`${API_BASE_URL}/dependencies/agents/${agentId}/required-credentials?mode=${mode}`);
+  if (!res.ok) throw new Error(`Failed to fetch agent credential demands: ${res.statusText}`);
+  return res.json();
+}
+
+export async function resolveAgentDependencies(agentId: string, requestedMode?: string, secrets?: Record<string, string>): Promise<DependencyResolverResult> {
+  const res = await fetch(`${API_BASE_URL}/dependencies/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent_id: agentId,
+      requested_mode: requestedMode,
+      provided_secrets: secrets || {},
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to resolve dependencies: ${res.statusText}`);
   return res.json();
 }
 
@@ -791,10 +893,12 @@ export interface DependencyResolverResult {
   agent_id: string;
   agent_category: 'llm_powered' | 'local_model' | 'rule_based' | 'tool_heavy';
   detected_model_dependencies: any[];
+  dependency_requirements?: any[];
   detected_secrets: any[];
   recommended_mode: 'faithful' | 'compatible' | 'simulation';
   mode_options: any[];
   active_binding?: ExecutionModelBinding;
+  execution_dependency_binding?: any;
 }
 
 
@@ -939,5 +1043,470 @@ export async function createRegressionTest(data: Partial<RegressionTest>): Promi
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(`Failed to create regression test: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Failure Diagnosis & Root Cause Analysis Interfaces ──────────────────────
+
+export interface DiagnosticEvidence {
+  event_id: string;
+  event_type: string;
+  timestamp?: string;
+  summary: string;
+  raw_payload?: Record<string, any>;
+}
+
+export interface FailureDiagnosis {
+  id: string;
+  finding_id: string;
+  agent_id: string;
+  scenario_id: string;
+  scenario_title?: string;
+  category: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  title: string;
+  root_cause_type: 'CODE_DEFECT' | 'PROMPT_DEFECT' | 'POLICY_DEFECT' | 'ENVIRONMENT_DEFECT' | 'TOOL_DEFECT' | 'MODEL_CAPABILITY_DEFECT';
+  what_happened: string;
+  why_it_happened: string;
+  root_cause_detail: string;
+  impact_assessment: string;
+  affected_source_file?: string;
+  affected_line_number?: number;
+  affected_symbol?: string;
+  affected_prompt_section?: string;
+  evidence_events: DiagnosticEvidence[];
+  attempted_action?: string;
+  policy_blocked: boolean;
+  actual_side_effect_occurred: boolean;
+  recommended_repair_type: 'CODE_PATCH' | 'PROMPT_HARDENING' | 'TOOL_POLICY' | 'CONFIG_UPDATE' | 'TRAINING_DATASET';
+  suggested_fix_summary: string;
+  created_at: string;
+}
+
+export interface AgentDiagnosisReport {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  evaluation_run_id: string;
+  total_failures: number;
+  critical_failures: number;
+  diagnoses: FailureDiagnosis[];
+  defect_breakdown: Record<string, number>;
+  primary_repair_recommendation: string;
+  created_at: string;
+}
+
+export async function fetchDiagnosisReport(evaluationRunId: string): Promise<AgentDiagnosisReport> {
+  const res = await fetch(`${API_BASE_URL}/diagnosis/${encodeURIComponent(evaluationRunId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch diagnosis report: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchAgentDiagnosisReport(agentId: string): Promise<AgentDiagnosisReport> {
+  const res = await fetch(`${API_BASE_URL}/diagnosis/agent/${encodeURIComponent(agentId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch agent diagnosis report: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Model Connections Interfaces & API Methods ──────────────────────────────
+
+export interface ModelConnection {
+  id: string;
+  name: string;
+  provider: 'ollama' | 'vllm' | 'lm_studio' | 'openai_compatible' | 'custom_http' | 'huggingface';
+  base_url: string;
+  api_key?: string | null;
+  model_identifier: string;
+  role: 'platform_ai' | 'test_agent_ai' | 'user_connected_model';
+  context_window: number;
+  supports_structured_json: boolean;
+  supports_tools: boolean;
+  is_active: boolean;
+  is_local: boolean;
+  health_status: 'HEALTHY' | 'UNREACHABLE' | 'ERROR' | 'UNKNOWN';
+  last_ping_at?: string | null;
+  latency_ms?: number | null;
+  created_at: string;
+  updated_at: string;
+  metadata?: Record<string, any>;
+}
+
+export interface ModelConnectionTestRequest {
+  provider: string;
+  base_url: string;
+  model_identifier: string;
+  api_key?: string | null;
+}
+
+export interface ModelConnectionTestResult {
+  success: boolean;
+  status: string;
+  message: string;
+  latency_ms?: number;
+  supports_chat: boolean;
+  supports_json: boolean;
+  details?: Record<string, any>;
+}
+
+export async function listModelConnections(role?: string): Promise<ModelConnection[]> {
+  const url = role ? `${API_BASE_URL}/models/connections?role=${encodeURIComponent(role)}` : `${API_BASE_URL}/models/connections`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to list model connections: ${res.statusText}`);
+  return res.json();
+}
+
+export async function createModelConnection(data: Partial<ModelConnection>): Promise<ModelConnection> {
+  const res = await fetch(`${API_BASE_URL}/models/connections`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to register model connection: ${res.statusText}`);
+  return res.json();
+}
+
+export async function testModelConnection(data: ModelConnectionTestRequest, signal?: AbortSignal): Promise<ModelConnectionTestResult> {
+  const res = await fetch(`${API_BASE_URL}/models/connections/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    signal,
+  });
+  if (!res.ok) throw new Error(`Failed to test model endpoint: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateModelConnection(connId: string, data: Partial<ModelConnection>): Promise<ModelConnection> {
+  const res = await fetch(`${API_BASE_URL}/models/connections/${encodeURIComponent(connId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to update model connection: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getAgentModelBindings(agentId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/models/agent-bindings/${encodeURIComponent(agentId)}`);
+  if (!res.ok) throw new Error(`Failed to get agent model bindings: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateAgentModelBindings(agentId: string, bindings: Record<string, string>): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/models/agent-bindings/${encodeURIComponent(agentId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bindings),
+  });
+  if (!res.ok) throw new Error(`Failed to save agent model bindings: ${res.statusText}`);
+  return res.json();
+}
+
+export async function setActiveModelConnection(connId: string): Promise<ModelConnection> {
+  const res = await fetch(`${API_BASE_URL}/models/connections/${encodeURIComponent(connId)}/set-active`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`Failed to activate model connection: ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteModelConnection(connId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/models/connections/${encodeURIComponent(connId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Failed to delete model connection: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Training Dataset Builder Interfaces & API Methods ───────────────────────
+
+export interface SFTMessage {
+  role: string;
+  content: string;
+  name?: string;
+  tool_calls?: Record<string, any>[];
+}
+
+export interface SFTExample {
+  id: string;
+  agent_id: string;
+  scenario_id: string;
+  scenario_title?: string;
+  category: string;
+  messages: SFTMessage[];
+  created_at: string;
+}
+
+export interface PreferencePair {
+  id: string;
+  agent_id: string;
+  scenario_id: string;
+  prompt: string;
+  chosen: string;
+  rejected: string;
+  reason: string;
+  category: string;
+  margin: number;
+  created_at: string;
+}
+
+export interface FailureRecoveryExample {
+  id: string;
+  agent_id: string;
+  scenario_id: string;
+  error_state: string;
+  attempted_action: string;
+  corrected_action: string;
+  recovery_strategy: string;
+  created_at: string;
+}
+
+export interface TrainingDataset {
+  id: string;
+  agent_id: string;
+  agent_name?: string;
+  name: string;
+  description?: string;
+  dataset_type: 'SFT' | 'DPO_PREFERENCE' | 'FAILURE_RECOVERY' | 'HYBRID';
+  format: string;
+  example_count: number;
+  sft_examples: SFTExample[];
+  preference_pairs: PreferencePair[];
+  recovery_examples: FailureRecoveryExample[];
+  source_scenarios: string[];
+  source_execution_runs: string[];
+  export_ready: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listTrainingDatasets(agentId?: string): Promise<TrainingDataset[]> {
+  const url = agentId ? `${API_BASE_URL}/training/datasets?agent_id=${encodeURIComponent(agentId)}` : `${API_BASE_URL}/training/datasets`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to list training datasets: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getTrainingDataset(datasetId: string): Promise<TrainingDataset> {
+  const res = await fetch(`${API_BASE_URL}/training/datasets/${encodeURIComponent(datasetId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch dataset: ${res.statusText}`);
+  return res.json();
+}
+
+export async function generateTrainingDataset(data: {
+  agent_id: string;
+  dataset_name: string;
+  dataset_type?: string;
+  evaluation_run_ids?: string[];
+}): Promise<TrainingDataset> {
+  const res = await fetch(`${API_BASE_URL}/training/datasets/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to generate training dataset: ${res.statusText}`);
+  return res.json();
+}
+
+export function getExportDatasetUrl(datasetId: string, formatType: string = 'ALL'): string {
+  return `${API_BASE_URL}/training/datasets/${encodeURIComponent(datasetId)}/export?format_type=${encodeURIComponent(formatType)}`;
+}
+
+// ── Training Jobs, Hardware Preflight & Model Versioning ────────────────────
+
+export interface HardwarePreflight {
+  gpu_name: string;
+  vram_mb: number;
+  cuda_available: boolean;
+  cuda_version: string;
+  device_count: number;
+  feasibility: 'CAN_TRAIN' | 'CAN_TRAIN_WITH_QLORA' | 'MAY_TRAIN_WITH_OFFLOAD' | 'INSUFFICIENT_VRAM';
+  recommended_method: string;
+  recommended_batch_size: number;
+  recommended_gradient_accumulation_steps: number;
+  recommended_max_seq_length: number;
+  estimated_memory_usage_mb: number;
+  notes: string;
+}
+
+export interface TrainingLossStep {
+  step: number;
+  epoch: number;
+  train_loss: number;
+  val_loss?: number | null;
+  learning_rate: number;
+  timestamp: string;
+}
+
+export interface TrainingCheckpoint {
+  checkpoint_id: string;
+  step: number;
+  epoch: number;
+  val_loss: number;
+  artifact_path: string;
+  is_best: boolean;
+  created_at: string;
+}
+
+export interface ModelBenchmarkDelta {
+  base_model_score: number;
+  trained_adapter_score: number;
+  score_delta: number;
+  safety_delta: number;
+  correctness_delta: number;
+  robustness_delta: number;
+  tool_discipline_delta: number;
+  fixed_failures: number;
+  regressions_detected: number;
+  recommendation: 'RECOMMENDED_FOR_PROMOTION' | 'REVIEW_REQUIRED' | 'REJECTED';
+}
+
+export interface TrainingJob {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  model_connection_id: string;
+  model_name: string;
+  dataset_id: string;
+  dataset_name: string;
+  training_method: string;
+  learning_rate: number;
+  epochs: number;
+  lora_r: number;
+  lora_alpha: number;
+  batch_size: number;
+  gradient_accumulation_steps: number;
+  status: 'CREATED' | 'PREFLIGHT' | 'STAGING_DATA' | 'TRAINING' | 'VALIDATING' | 'REGISTERING' | 'BENCHMARKING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  current_step_description: string;
+  current_epoch: number;
+  total_epochs: number;
+  current_step: number;
+  total_steps: number;
+  progress_percentage: number;
+  hardware_preflight: HardwarePreflight;
+  loss_history: TrainingLossStep[];
+  checkpoints: TrainingCheckpoint[];
+  best_loss?: number | null;
+  resulting_model_version_id?: string | null;
+  benchmark_comparison?: ModelBenchmarkDelta | null;
+  is_promoted: boolean;
+  error_message?: string | null;
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface ModelVersionRecord {
+  id: string;
+  agent_id: string;
+  model_name: string;
+  version_label: string;
+  base_model: string;
+  parent_version_id?: string | null;
+  adapter_type: string;
+  training_job_id?: string | null;
+  dataset_id?: string | null;
+  adapter_path?: string | null;
+  is_active: boolean;
+  benchmark_score: number;
+  created_at: string;
+}
+
+export async function fetchHardwarePreflight(modelName: string = 'Qwen2.5-Coder-7B'): Promise<HardwarePreflight> {
+  const res = await fetch(`${API_BASE_URL}/training/hardware-preflight?model_name=${encodeURIComponent(modelName)}`);
+  if (!res.ok) throw new Error(`Failed to fetch hardware preflight: ${res.statusText}`);
+  return res.json();
+}
+
+export async function startTrainingJob(data: {
+  agent_id: string;
+  model_connection_id: string;
+  dataset_id: string;
+  training_method?: string;
+  epochs?: number;
+  learning_rate?: number;
+  lora_r?: number;
+}): Promise<TrainingJob> {
+  const res = await fetch(`${API_BASE_URL}/training/jobs/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to start training job: ${res.statusText}`);
+  return res.json();
+}
+
+export async function listTrainingJobs(agentId?: string): Promise<TrainingJob[]> {
+  const url = agentId ? `${API_BASE_URL}/training/jobs?agent_id=${encodeURIComponent(agentId)}` : `${API_BASE_URL}/training/jobs`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to list training jobs: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchTrainingJobDetails(jobId: string): Promise<TrainingJob> {
+  const res = await fetch(`${API_BASE_URL}/training/jobs/${encodeURIComponent(jobId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch training job: ${res.statusText}`);
+  return res.json();
+}
+
+export async function promoteModelVersion(jobId: string): Promise<ModelVersionRecord> {
+  const res = await fetch(`${API_BASE_URL}/training/jobs/${encodeURIComponent(jobId)}/promote`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`Failed to promote model version: ${res.statusText}`);
+  return res.json();
+}
+
+export async function listModelVersionRecords(agentId?: string): Promise<ModelVersionRecord[]> {
+  const url = agentId ? `${API_BASE_URL}/training/models/versions?agent_id=${encodeURIComponent(agentId)}` : `${API_BASE_URL}/training/models/versions`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to list model versions: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Agent Pipeline Stage Status & Prerequisite Tracker ──────────────────────
+
+export interface StageStepStatus {
+  stage_id: string;
+  stage_number: number;
+  name: string;
+  status: 'COMPLETED' | 'IN_PROGRESS' | 'READY_TO_START' | 'BLOCKED' | 'OPTIONAL_AVAILABLE';
+  is_completed: boolean;
+  is_blocked: boolean;
+  blocker_reason?: string | null;
+  next_action_route: string;
+  next_action_label: string;
+  metrics_summary?: string | null;
+}
+
+export interface AgentPipelineStageStatus {
+  agent_id: string;
+  agent_name: string;
+  current_version: string;
+  total_scenarios_count: number;
+  executed_sessions_count: number;
+  evaluated_verdicts_count: number;
+  total_failures_count: number;
+  critical_failures_count: number;
+  latest_scorecard_score?: number | null;
+  training_datasets_count: number;
+  training_jobs_count: number;
+  intake_completed: boolean;
+  scenarios_generated: boolean;
+  sandbox_ready: boolean;
+  execution_completed: boolean;
+  evaluation_completed: boolean;
+  diagnosis_completed: boolean;
+  ready_for_code_repair: boolean;
+  ready_for_model_training: boolean;
+  stages: StageStepStatus[];
+  overall_pipeline_progress: number;
+  recommended_next_stage: string;
+  updated_at: string;
+}
+
+export async function fetchAgentPipelineStageStatus(agentId: string): Promise<AgentPipelineStageStatus> {
+  const res = await fetch(`${API_BASE_URL}/pipeline/agents/${encodeURIComponent(agentId)}/status`);
+  if (!res.ok) throw new Error(`Failed to fetch pipeline stage status: ${res.statusText}`);
   return res.json();
 }

@@ -229,6 +229,32 @@ def get_local_demo_agent_files(agent_id: str):
     }
 
 
+@router.delete("/agents/{agent_id}")
+def delete_agent_endpoint(agent_id: str):
+    """Permanently deletes an agent project and purges all associated scenarios, runs, and artifacts."""
+    store.delete_agent(agent_id)
+    activity_log.emit(
+        category="INTAKE",
+        action="AGENT_DELETED",
+        detail=f"Permanently deleted agent '{agent_id}' and all associated scenarios/traces.",
+        status="success"
+    )
+    return {"status": "success", "deleted_agent_id": agent_id}
+
+
+@router.delete("/agents")
+def purge_all_agents_endpoint():
+    """Purges all agents, scenarios, jobs, and snapshot files for a clean workspace reset."""
+    store.purge_all_agents()
+    activity_log.emit(
+        category="INTAKE",
+        action="WORKSPACE_PURGED",
+        detail="Purged all agents and disk snapshots for a clean workspace reset.",
+        status="success"
+    )
+    return {"status": "success", "message": "Workspace purged clean"}
+
+
 @router.post("/analyze", response_model=AgentUnderstandingResult)
 async def analyze_agent(payload: AgentIntakePayload):
     """Executes the complete Agent Intake & Understanding pipeline."""

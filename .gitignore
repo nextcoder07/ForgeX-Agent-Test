@@ -25,3 +25,6 @@ dist/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Runtime snapshot files (contain user API keys / session data — NEVER commit)
+backend/app/services/__snapshot_*.json

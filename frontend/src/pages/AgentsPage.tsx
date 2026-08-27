@@ -1,46 +1,85 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from "react-router-dom";
-import { fetchAgents, fetchDemoAgents, fetchDemoAgentFiles } from '../api/client';
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { fetchAgents, deleteAgent } from '../api/client';
 import type { AgentRecord } from '../api/client';
 import { CodeFileInspector } from '../components/CodeFileInspector';
 import { AgentMapGraph } from '../components/AgentMapGraph';
+import { AgentIntakePage } from './AgentIntakePage';
 import {
   Cpu,
   RefreshCw,
-  ChevronRight,
+  Sparkles,
+  Network,
+  FileCode,
+  Layers,
+  Trash2,
+  Plus,
   Wrench,
   ShieldAlert,
-  FileCode,
-  Network,
-  Layers,
-  Sparkles,
+  ChevronRight,
 } from 'lucide-react';
-import type { PageId } from '../components/Navbar';
 
 interface AgentsPageProps {
+  onAgentRegistered?: (agent: AgentRecord) => void;
 }
 
-export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
+export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Top-level tabs: Register (intake), Library (agent list + x-ray)
+  const topTab = (searchParams.get('tab') || 'library') as 'register' | 'library';
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<AgentRecord | null>(null);
   const [agentFiles, setAgentFiles] = useState<Record<string, string>>({});
   const [agentMeta, setAgentMeta] = useState<Record<string, string>>({});
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState<'files' | 'tools' | 'constitution' | 'map'>('files');
 
+  const handleAgentRegisteredInternal = (agent: AgentRecord) => {
+    onAgentRegistered?.(agent);
+    loadAgents();
+    setSearchParams({ tab: 'library' });
+  };
+
   useEffect(() => {
+    loadAgents();
+  }, []);
+
+  const loadAgents = () => {
+    setLoading(true);
     fetchAgents()
       .then((list) => {
         setAgents(list);
         if (list.length > 0) {
           selectAgent(list[0]);
+        } else {
+          setSelectedAgent(null);
         }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  const handleDeleteAgent = async () => {
+    if (!selectedAgent) return;
+    const confirmDelete = window.confirm(
+      `Are you sure you want to permanently delete agent "${selectedAgent.display_name || selectedAgent.name}" and all associated scenarios, files, execution traces, and databases?`
+    );
+    if (!confirmDelete) return;
+
+    setDeleting(true);
+    try {
+      await deleteAgent(selectedAgent.id);
+      loadAgents();
+    } catch (err) {
+      console.error('Failed to delete agent:', err);
+      alert(`Failed to delete agent: ${err}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const selectAgent = async (agent: AgentRecord) => {
     setSelectedAgent(agent);
@@ -57,23 +96,8 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
       return;
     }
 
-    // Resolve the actual test-agents folder instead of deriving it from a registry ID.
-    try {
-      const localAgents = await fetchDemoAgents();
-      const candidates = [agent.source_name, agent.name, agent.display_name]
-        .filter(Boolean)
-        .map((value) => String(value).toLowerCase());
-      const localId = localAgents.find((folder) => candidates.includes(folder.toLowerCase()))
-        || localAgents.find((folder) => candidates.some((candidate) => folder.toLowerCase().includes(candidate) || candidate.includes(folder.toLowerCase())));
-      if (!localId) return;
-      const data = await fetchDemoAgentFiles(localId);
-      if (data.files) setAgentFiles(data.files);
-      if (data.metadata) setAgentMeta(data.metadata);
-    } catch {
-      // Not a local demo agent — normal registered agent
-    } finally {
-      setLoadingFiles(false);
-    }
+    // source_files not present — silently skip
+    setLoadingFiles(false);
   };
 
   // Build graph nodes and edges from agent data for display
@@ -106,60 +130,112 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-5">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center space-x-2.5">
-          <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" />
-          <span>Agents Registry & Specification X-Ray</span>
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-300 mt-1">
-          Inspect source code files, reconstructed tools, policy rules, and system topology graphs for all registered agents.
-        </p>
+      {/* Header */}
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center space-x-2.5">
+            <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" />
+            <span>Agents</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            Register agents, inspect their architecture, and manage versions.
+          </p>
+        </div>
       </div>
 
-      {/* Main Grid: Agent Selector + Agent X-Ray */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      {/* Top tab bar */}
+      <div className="flex items-center justify-between border-b border-slate-800 pb-0 flex-wrap gap-2">
+        <div className="flex items-center space-x-1">
+          {([
+            { id: 'library', label: 'Agent Library', icon: Layers },
+            { id: 'register', label: '+ Register New Agent', icon: Plus },
+          ] as const).map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setSearchParams({ tab: tab.id })}
+              className={`flex items-center space-x-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-all cursor-pointer ${
+                topTab === tab.id
+                  ? 'border-cyan-400 text-cyan-300 bg-slate-900/40'
+                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/20'
+              }`}
+            >
+              <tab.icon className="w-3.5 h-3.5" />
+              <span>{tab.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={async () => {
+            if (window.confirm("Purge all workspace data and delete all agents/scenarios/traces from disk?")) {
+              try {
+                const { purgeAllAgents } = await import('../api/client');
+                await purgeAllAgents();
+                loadAgents();
+              } catch (e) {
+                alert(`Purge failed: ${e}`);
+              }
+            }
+          }}
+          className="mb-1 px-3 py-1.5 rounded-lg border border-rose-500/30 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 font-mono text-[11px] font-bold flex items-center space-x-1 transition cursor-pointer"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>Purge All Workspace Data</span>
+        </button>
+      </div>
+
+      {/* Register tab — full AgentIntakePage embedded */}
+      {topTab === 'register' && (
+        <AgentIntakePage onAgentRegistered={handleAgentRegisteredInternal} />
+      )}
+
+      {/* Library tab — agent list + X-Ray panel */}
+      {topTab === 'library' && (
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 lg:h-[calc(100vh-11rem)] lg:min-h-0">
         {/* Left Sidebar: Agent Selector */}
-        <div className="space-y-2">
+        <div className="flex min-h-0 flex-col gap-2">
           <div className="text-[10px] font-mono text-slate-300 uppercase tracking-wider px-1">
             Registered Agents ({agents.length})
           </div>
 
-          {loading ? (
-            <div className="p-3 text-center text-xs text-slate-300">
-              <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1 text-cyan-400" />
-              Loading agents...
-            </div>
-          ) : (
-            agents.map((agent) => (
-              <button
-                key={agent.id}
-                onClick={() => selectAgent(agent)}
-                className={`w-full p-2.5 rounded-xl text-left border transition-all ${
-                  selectedAgent?.id === agent.id
-                    ? 'bg-cyan-950/60 border-cyan-500/60 shadow-md font-semibold'
-                    : 'bg-slate-900/70 border-slate-700/80 hover:border-slate-600'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Cpu className={`w-3.5 h-3.5 ${selectedAgent?.id === agent.id ? 'text-cyan-400' : 'text-slate-400'}`} />
-                    <span className="text-xs font-bold text-slate-100 truncate">{agent.display_name || agent.name}</span>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+            {loading ? (
+              <div className="p-3 text-center text-xs text-slate-300">
+                <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1 text-cyan-400" />
+                Loading agents...
+              </div>
+            ) : (
+              agents.map((agent) => (
+                <button
+                  key={agent.id}
+                  onClick={() => selectAgent(agent)}
+                  className={`w-full p-2.5 rounded-xl text-left border transition-all ${
+                    selectedAgent?.id === agent.id
+                      ? 'bg-cyan-950/60 border-cyan-500/60 shadow-md font-semibold'
+                      : 'bg-slate-900/70 border-slate-700/80 hover:border-slate-600'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2 min-w-0">
+                      <Cpu className={`w-3.5 h-3.5 shrink-0 ${selectedAgent?.id === agent.id ? 'text-cyan-400' : 'text-slate-400'}`} />
+                      <span className="text-xs font-bold text-slate-100 truncate">{agent.display_name || agent.name}</span>
+                    </div>
+                    {selectedAgent?.id === agent.id && (
+                      <ChevronRight className="w-3 h-3 text-cyan-400 shrink-0" />
+                    )}
                   </div>
-                  {selectedAgent?.id === agent.id && (
-                    <ChevronRight className="w-3 h-3 text-cyan-400 shrink-0" />
-                  )}
-                </div>
-                <p className="text-[10px] text-slate-300 font-mono mt-0.5 ml-5">Registered: {agent.name}</p>
-                <div className="flex items-center space-x-2 mt-1 ml-5">
-                  <span className="px-1.5 py-0.5 text-[9px] font-mono rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30">
-                    {agent.version_label}
-                  </span>
-                  <span className="text-[9px] text-slate-300">{agent.tools.length} tools</span>
-                </div>
-                <p className="text-[9px] text-slate-400 font-mono mt-1 ml-5 truncate">{agent.domain} · {agent.id}</p>
-              </button>
-            ))
-          )}
+                  <p className="text-[10px] text-slate-300 font-mono mt-0.5 ml-5">Registered: {agent.name}</p>
+                  <div className="flex items-center space-x-2 mt-1 ml-5">
+                    <span className="px-1.5 py-0.5 text-[9px] font-mono rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30">
+                      {agent.version_label}
+                    </span>
+                    <span className="text-[9px] text-slate-300">{agent.tools.length} tools</span>
+                  </div>
+                  <p className="text-[9px] text-slate-400 font-mono mt-1 ml-5 truncate">{agent.domain} · {agent.id}</p>
+                </button>
+              ))
+            )}
+          </div>
 
           <button
             onClick={() => navigate("/intake")}
@@ -189,15 +265,32 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
                     <span className="px-2.5 py-1 text-[10px] font-mono rounded-lg bg-slate-900 text-slate-400 border border-slate-700">
                       {selectedAgent.domain}
                     </span>
+                    <button
+                      onClick={handleDeleteAgent}
+                      disabled={deleting}
+                      className="px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-500/40 flex items-center space-x-1 transition disabled:opacity-50 cursor-pointer"
+                      title="Permanently delete agent, files, and all test records from database"
+                    >
+                      <Trash2 className="w-3 h-3 text-rose-400" />
+                      <span>{deleting ? 'Deleting...' : 'Delete Agent'}</span>
+                    </button>
                   </div>
                 </div>
 
                 {/* Quick Stats */}
-                <div className="flex items-center space-x-4 pt-2 border-t border-slate-800/80 text-[11px] font-mono text-slate-400">
-                  <span>ID: <span className="text-cyan-300">{selectedAgent.id}</span></span>
-                  <span>Tools: <span className="text-indigo-300">{selectedAgent.tools.length}</span></span>
-                  <span>Deps: <span className="text-emerald-300">{selectedAgent.dependencies.length}</span></span>
-                  <span>Goals: <span className="text-amber-300">{selectedAgent.constitution.goals.length}</span></span>
+                <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[11px] font-mono text-slate-400 flex-wrap gap-2">
+                  <div className="flex items-center space-x-4">
+                    <span>ID: <span className="text-cyan-300">{selectedAgent.id}</span></span>
+                    <span>Tools: <span className="text-indigo-300">{selectedAgent.tools.length}</span></span>
+                    <span>Deps: <span className="text-emerald-300">{selectedAgent.dependencies.length}</span></span>
+                    <span>Goals: <span className="text-amber-300">{selectedAgent.constitution.goals.length}</span></span>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/scenarios?agentId=${selectedAgent.id}`)}
+                    className="text-[10px] font-mono font-bold text-cyan-300 hover:text-cyan-200 flex items-center gap-1"
+                  >
+                    Generate Scenarios →
+                  </button>
                 </div>
               </div>
 
@@ -324,6 +417,7 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({}) => {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };

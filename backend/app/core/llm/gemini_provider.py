@@ -215,7 +215,7 @@ def safe_json_loads(text: str) -> Any:
     try:
         return json.loads(cleaned, strict=False)
     except Exception:
-        # Fix unescaped backslashes that are not valid JSON escape sequences (\", \\, \/, \b, \f, \n, \r, \t, \uXXXX)
+        # Fix unescaped backslashes that are not valid JSON escape sequences
         fixed = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', cleaned)
         return json.loads(fixed, strict=False)
 
@@ -223,7 +223,7 @@ def safe_json_loads(text: str) -> Any:
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str = "", model_name: str = ""):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
         self.last_input_tokens = 0
         self.last_output_tokens = 0
 
@@ -280,39 +280,51 @@ class GeminiProvider(LLMProvider):
             status="success"
         )
 
-        try:
-            from google.genai import types
-            res = client.models.generate_content(
-                model=self.model_name,
-                contents=user,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    temperature=temperature,
-                    response_mime_type="application/json",
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                    http_options=types.HttpOptions(timeout=45000),
-                ),
-            )
-            if res and res.text:
-                res_text = res.text
-                input_tokens, output_tokens = _response_token_counts(res)
-                self.last_input_tokens = input_tokens
-                self.last_output_tokens = output_tokens
+        res_text = None
+        models_to_try = [self.model_name]
+        if self.model_name not in ("gemini-2.5-flash", "gemini-2.0-flash"):
+            models_to_try.extend(["gemini-2.5-flash", "gemini-2.0-flash"])
 
-                duration = (time.time() - start_time) * 1000.0
-                activity_log.emit(
-                    category="LLM",
-                    action="RESPONSE",
-                    detail=f"[{key_id}] {self.model_name} response received",
-                    response_summary=res.text[:200],
-                    duration_ms=duration,
-                    status="success"
+        last_error = None
+        for current_model in models_to_try:
+            try:
+                from google.genai import types
+                res = client.models.generate_content(
+                    model=current_model,
+                    contents=user,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system,
+                        temperature=temperature,
+                        response_mime_type="application/json",
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                        http_options=types.HttpOptions(timeout=30000),
+                    ),
                 )
-            else:
-                raise Exception("API returned an empty text response")
+                if res and res.text:
+                    res_text = res.text
+                    input_tokens, output_tokens = _response_token_counts(res)
+                    self.last_input_tokens = input_tokens
+                    self.last_output_tokens = output_tokens
 
-        except Exception as e:
-            raise e
+                    duration = (time.time() - start_time) * 1000.0
+                    activity_log.emit(
+                        category="LLM",
+                        action="RESPONSE",
+                        detail=f"[{key_id}] {current_model} response received",
+                        response_summary=res.text[:200],
+                        duration_ms=duration,
+                        status="success"
+                    )
+                    break
+                else:
+                    raise Exception("API returned an empty text response")
+
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Gemini model '{current_model}' failed ({e}). Trying next fallback model if available...")
+
+        if not res_text and last_error:
+            raise last_error
 
         # Record AI Generation Run to store
         import uuid
@@ -337,14 +349,13 @@ class GeminiProvider(LLMProvider):
         if res_text:
             return res_text
 
-        # Raise explicit structured error
         raise LLMGenerationError(
-            message=f"Gemini invocation failed on stage '{stage}': {last_exception}",
-            code=last_error_code,
+            message=f"Gemini invocation failed on stage '{stage}': {last_error}",
+            code=LLMErrorCode.SERVER_ERROR,
             provider="gemini",
             model=self.model_name,
-            key_id=last_key_id,
-            retryable=last_error_code in (LLMErrorCode.RATE_LIMITED, LLMErrorCode.QUOTA_EXCEEDED, LLMErrorCode.SERVER_ERROR)
+            key_id=key_id,
+            retryable=True
         )
 
     async def analyze(self, code_evidence: str, doc_evidence: str) -> Dict[str, Any]:

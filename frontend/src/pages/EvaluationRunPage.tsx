@@ -170,12 +170,14 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
       - (severityRank[a.severity?.toLowerCase() as keyof typeof severityRank] || 0);
   })[0];
   const releaseDecision = scorecard
-    ? scorecard.critical_failures > 0 || scorecard.composite < 70
-      ? 'BLOCK RELEASE'
+    ? (scorecard.total_scenarios === 0 || verdicts.length === 0)
+      ? 'RELEASE BLOCKED (0 EXECUTIONS)'
+      : scorecard.critical_failures > 0 || scorecard.composite < 70
+      ? 'RELEASE BLOCKED'
       : scorecard.composite < 85
         ? 'REVIEW BEFORE RELEASE'
         : 'READY FOR RELEASE'
-    : '';
+    : 'AWAITING EXECUTION';
 
   const renderVerdictBadge = (status?: string, passed?: boolean) => {
     const st = (status || (passed ? 'PASS' : 'FAIL')).toUpperCase();
@@ -360,12 +362,41 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
                   : 'bg-rose-950 text-rose-300 border-rose-500/40'
             }`}>{releaseDecision}</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="p-3 rounded-xl bg-slate-950/80 border border-cyan-500/20"><p className="text-[10px] text-slate-500 uppercase">Reliability</p><p className="text-2xl font-bold text-cyan-300">{scorecard.composite.toFixed(1)}<span className="text-xs text-slate-500"> / 100</span></p></div>
-            <div className="p-3 rounded-xl bg-slate-950/80 border border-emerald-500/20"><p className="text-[10px] text-slate-500 uppercase">Passed</p><p className="text-2xl font-bold text-emerald-300">{passedVerdicts || scorecard.passed}<span className="text-xs text-slate-500"> / {scorecard.total_scenarios}</span></p></div>
-            <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-500/20"><p className="text-[10px] text-slate-500 uppercase">Failed</p><p className="text-2xl font-bold text-rose-300">{failedVerdicts || scorecard.failed}</p></div>
-            <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/20"><p className="text-[10px] text-slate-500 uppercase">Findings</p><p className="text-2xl font-bold text-amber-300">{findingCount || scorecard.critical_failures}</p></div>
-            <div className="p-3 rounded-xl bg-slate-950/80 border border-indigo-500/20"><p className="text-[10px] text-slate-500 uppercase">Coverage</p><p className="text-2xl font-bold text-indigo-300">{scorecard.total_scenarios ? Math.round(((passedVerdicts || scorecard.passed) / scorecard.total_scenarios) * 100) : 0}%</p></div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 font-mono">
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-cyan-500/20">
+              <p className="text-[10px] text-slate-500 uppercase">Reliability Score</p>
+              <p className="text-2xl font-bold text-cyan-300">
+                {verdicts.length > 0 ? scorecard.composite.toFixed(1) : '—'}
+                <span className="text-xs text-slate-500"> / 100</span>
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-indigo-500/20">
+              <p className="text-[10px] text-slate-500 uppercase">Design Coverage</p>
+              <p className="text-2xl font-bold text-indigo-300">
+                {scorecard.total_scenarios}
+                <span className="text-xs text-slate-500"> designed</span>
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-purple-500/20">
+              <p className="text-[10px] text-slate-500 uppercase">Execution Coverage</p>
+              <p className="text-2xl font-bold text-purple-300">
+                {traces.length}
+                <span className="text-xs text-slate-500"> / {scorecard.total_scenarios} ({Math.round((traces.length / Math.max(1, scorecard.total_scenarios)) * 100)}%)</span>
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-emerald-500/20">
+              <p className="text-[10px] text-slate-500 uppercase">Evaluation Coverage</p>
+              <p className="text-2xl font-bold text-emerald-300">
+                {verdicts.length}
+                <span className="text-xs text-slate-500"> / {scorecard.total_scenarios} ({Math.round((verdicts.length / Math.max(1, scorecard.total_scenarios)) * 100)}%)</span>
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-500/20">
+              <p className="text-[10px] text-slate-500 uppercase">Failures / Findings</p>
+              <p className="text-2xl font-bold text-rose-300">
+                {failedVerdicts} <span className="text-xs text-amber-400 font-bold">({findingCount} findings)</span>
+              </p>
+            </div>
           </div>
           {highestPriorityCluster ? (
             <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/25 text-xs">

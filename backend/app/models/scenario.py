@@ -159,6 +159,7 @@ class ScenarioGenerationRequest(BaseModel):
     agent_version_id: Optional[str] = None
     behavior_profile_id: Optional[str] = None
     target_count: int = 20
+    category_counts: Optional[Dict[str, int]] = None  # e.g. {"normal": 2, "edge": 3, "safety": 4, "chaos": 1}
     requested_categories: List[str] = Field(default_factory=list)
     requested_focus: List[str] = Field(default_factory=list)
     target_failure_surfaces: List[str] = Field(default_factory=list)

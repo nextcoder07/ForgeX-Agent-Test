@@ -54,6 +54,12 @@ class AgentComponent(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+import datetime as dt
+
+def _now() -> str:
+    return dt.datetime.utcnow().isoformat() + "Z"
+
+
 class AgentVersion(BaseModel):
     id: str
     agent_id: str
@@ -65,7 +71,7 @@ class AgentVersion(BaseModel):
     tools: List[ToolDefinition] = Field(default_factory=list)
     dependencies: List[DependencyDefinition] = Field(default_factory=list)
     constitution: AgentConstitution = Field(default_factory=AgentConstitution)
-    created_at: str
+    created_at: str = Field(default_factory=_now)
 
 
 class AgentRecord(BaseModel):
@@ -88,4 +94,4 @@ class AgentRecord(BaseModel):
     runtime_manifest: Dict[str, Any] = Field(default_factory=dict)
     execution_status: str = "EXECUTION_BLOCKED"
     input_type: str = "package"
-    created_at: str
+    created_at: str = Field(default_factory=_now)

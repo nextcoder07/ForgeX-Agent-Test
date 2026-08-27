@@ -1,72 +1,66 @@
+"""
+Unified Key Manager & AI Rotation Provider.
+Supports dynamic loading of AI_API_KEY_1..AI_API_KEY_n, OPENROUTER_API_KEY, GEMINI_API_KEY,
+Ollama Local Server, and Least-Recently-Used (LRU) round-robin key rotation.
+"""
+
+from __future__ import annotations
+
 import os
 import time
 import logging
-import threading
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
-class AIKey:
-    def __init__(self, key_id: str, value: str, api_name: str, model_name: str):
-        self.key_id = key_id
-        self.value = value         # The actual API key value (secret)
-        self.api_name = api_name.lower()
-        self.model_name = model_name
-        self.status = "AVAILABLE"  # "AVAILABLE", "STOPPED", "COOLDOWN"
-        self.failure_count = 0
-        self.last_error = ""
-        self.last_used_at = 0.0
-        self.cooldown_until = 0.0
 
-    def to_safe_dict(self) -> Dict[str, Any]:
-        """Expose key status safely without exposing raw key secrets."""
-        return {
-            "key_id": self.key_id,
-            "api_name": self.api_name,
-            "model_name": self.model_name,
-            "status": self.status,
-            "failure_count": self.failure_count,
-            "last_error": self.last_error,
-            "last_used_at": self.last_used_at,
-            "cooldown_until": self.cooldown_until
-        }
+@dataclass
+class AIKey:
+    key_id: str
+    value: str
+    api_name: str
+    model_name: str
+    is_active: bool = True
+    cooldown_until: float = 0.0
+    failure_count: int = 0
+    total_calls: int = 0
+    total_tokens: int = 0
+    last_used_at: float = 0.0
+    consecutive_successes: int = 0
+
+    @property
+    def is_available(self) -> bool:
+        return self.is_active and time.time() >= self.cooldown_until
+
 
 class UnifiedKeyManager:
-    """A single thread-safe manager for ALL AI keys across ALL providers."""
-    _instance = None
-    _lock = threading.Lock()
+    """Manages all registered AI API keys with LRU round-robin rotation and cooldowns."""
+    _instance: Optional[UnifiedKeyManager] = None
 
-    def __new__(cls, *args, **kwargs):
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super(UnifiedKeyManager, cls).__new__(cls, *args, **kwargs)
-                cls._instance._initialized = False
-            return cls._instance
+    def __new__(cls) -> UnifiedKeyManager:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance.keys = []
+            cls._instance.load_keys()
+        return cls._instance
 
-    def __init__(self, cooldown_seconds: int = 120):
-        if self._initialized:
-            return
-        self.keys: List[AIKey] = []
-        self.cooldown_seconds = cooldown_seconds
-        self.load_keys()
-        self._initialized = True
-
-    def load_keys(self):
+    def load_keys(self) -> None:
         """Loads all AI API keys dynamically from environment variables."""
         self.keys.clear()
         
-        # 1. Load the new universal AI_API_KEY_n format
+        # 1. Load universal AI_API_KEY_n format
         for index in range(1, 100):
             value = os.getenv(f"AI_API_KEY_{index}", "").strip()
             if not value:
                 continue
-            api_name = os.getenv(f"AI_API_NAME_{index}", "").strip().lower()
+            api_name = os.getenv(f"AI_API_NAME_{index}", "gemini").strip().lower()
             model_name = os.getenv(f"AI_MODEL_{index}", "").strip()
-            
-            if not api_name or not model_name:
-                logger.warning(f"AI_API_KEY_{index} ignored: AI_API_NAME_{index} and AI_MODEL_{index} are required")
-                continue
-                
+            if not model_name:
+                model_name = "gemini-3.6-flash" if api_name in ("gemini", "google") else "openai/gpt-4o-mini"
+
             if not any(k.value == value for k in self.keys):
                 display_id = f"AI API Key {index}"
                 self.keys.append(AIKey(
@@ -79,14 +73,16 @@ class UnifiedKeyManager:
 
         # 2. Legacy fallback for GEMINI_API_KEY and GEMINI_API_KEY_n
         gemini_main = os.getenv("GEMINI_API_KEY", "").strip()
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+
         if gemini_main and not any(k.value == gemini_main for k in self.keys):
             self.keys.append(AIKey(
                 key_id="Gemini Legacy Key Main",
                 value=gemini_main,
                 api_name="gemini",
-                model_name=os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+                model_name=gemini_model
             ))
-            logger.info("Registered GEMINI_API_KEY as 'Gemini Legacy Key Main'")
+            logger.info(f"Registered GEMINI_API_KEY as 'Gemini Legacy Key Main' ({gemini_model})")
 
         for idx in range(1, 10):
             gemini_val = os.getenv(f"GEMINI_API_KEY_{idx}", "").strip()
@@ -95,12 +91,12 @@ class UnifiedKeyManager:
                     key_id=f"Gemini Legacy Key {idx}",
                     value=gemini_val,
                     api_name="gemini",
-                    model_name=os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+                    model_name=gemini_model
                 ))
 
-        # 3. Legacy / explicit fallback for OPENROUTER_API_KEY or OTHERAI_API_KEY
-        openrouter_main = os.getenv("OPENROUTER_API_KEY", "").strip() or os.getenv("OTHERAI_API_KEY", "").strip()
-        openrouter_model = os.getenv("OPENROUTER_MODEL", "").strip() or os.getenv("OTHERAI_MODEL", "openai/gpt-4o-mini")
+        # 3. Fallback for OPENROUTER_API_KEY
+        openrouter_main = os.getenv("OPENROUTER_API_KEY", "").strip()
+        openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip()
         if openrouter_main and not any(k.value == openrouter_main for k in self.keys):
             self.keys.append(AIKey(
                 key_id="OpenRouter Main Key",
@@ -108,267 +104,96 @@ class UnifiedKeyManager:
                 api_name="openrouter",
                 model_name=openrouter_model
             ))
-            logger.info(f"Registered OpenRouter Key ('{openrouter_model}')")
 
-        for idx in range(1, 10):
-            other_val = os.getenv(f"OPENROUTER_API_KEY_{idx}", "").strip() or os.getenv(f"OTHERAI_API_KEY_{idx}", "").strip()
-            if other_val and not any(k.value == other_val for k in self.keys):
-                self.keys.append(AIKey(
-                    key_id=f"OpenRouter Secondary Key {idx}",
-                    value=other_val,
-                    api_name="openrouter",
-                    model_name=openrouter_model
-                ))
-
-        # 4. Standalone / local Ollama registration (OLLAMA_BASE_URL & OLLAMA_MODEL)
-        ollama_url = os.getenv("OLLAMA_BASE_URL", "").strip() or "http://localhost:11434"
-        ollama_model = os.getenv("OLLAMA_MODEL", "").strip() or "qwen2.5-coder:7b"
-        if (os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_MODEL")) and not any(k.api_name == "ollama" and k.value == ollama_url for k in self.keys):
-            self.keys.append(AIKey(
-                key_id="Ollama Local Server",
-                value=ollama_url,
-                api_name="ollama",
-                model_name=ollama_model
-            ))
-            logger.info(f"Registered Ollama Local Server ({ollama_url} - {ollama_model})")
-
-        # 5. Sort keys so cloud keys come first (in registry order), and Ollama local server comes last as fallback
-        self.keys.sort(key=lambda k: 1 if k.api_name in ("ollama", "local") else 0)
-
-        if not self.keys:
-            logger.warning("AI not provided: No API keys or Ollama endpoints configured in environment!")
-
-    def get_all_keys_status(self) -> List[Dict[str, Any]]:
-        with self._lock:
-            self._check_cooldowns_unlocked()
-            return [k.to_safe_dict() for k in self.keys]
-
-    def _check_cooldowns_unlocked(self):
-        now = time.time()
-        for k in self.keys:
-            if k.status == "COOLDOWN" and now >= k.cooldown_until:
-                k.status = "AVAILABLE"
-                logger.info(f"{k.key_id} cooldown expired. Reset to AVAILABLE.")
+        # 4. Ollama Local Endpoint
+        ollama_endpoint = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")).strip()
+        ollama_model = os.getenv("OLLAMA_DEFAULT_MODEL", os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")).strip()
+        self.keys.append(AIKey(
+            key_id="Ollama Local Server",
+            value=ollama_endpoint,
+            api_name="ollama",
+            model_name=ollama_model
+        ))
+        logger.info(f"Registered Ollama Local Server ({ollama_endpoint} - {ollama_model})")
 
     def select_key(self, api_name: Optional[str] = None) -> Optional[AIKey]:
-        """Selects the next eligible key. Optionally filter by api_name."""
-        with self._lock:
-            self._check_cooldowns_unlocked()
-            
-            eligible = [k for k in self.keys if k.status == "AVAILABLE"]
-            if api_name:
-                eligible = [k for k in eligible if k.api_name == api_name.lower()]
-                
-            if not eligible:
-                return None
-            
-            # Always select the first eligible key to maintain strict priority order
-            selected = eligible[0]
-            selected.last_used_at = time.time()
-            return selected
-
-    def mark_key_failed(self, key_id: str, error_type: str, error_msg: str):
-        with self._lock:
+        """Selects the best available key using LRU (Least-Recently-Used) round-robin."""
+        now = time.time()
+        eligible = [
+            k for k in self.keys
+            if k.is_available and (api_name is None or k.api_name.lower() == api_name.lower())
+        ]
+        if not eligible:
+            # Check for keys whose cooldown has expired
             for k in self.keys:
-                if k.key_id == key_id:
-                    k.failure_count += 1
-                    k.last_error = error_msg
-                    
-                    if error_type in ("INVALID_KEY", "AUTHENTICATION_ERROR"):
-                        k.status = "STOPPED"
-                        logger.error(f"{k.key_id} permanently stopped due to authentication failure.")
-                    elif error_type == "QUOTA_EXHAUSTED":
-                        k.status = "COOLDOWN"
-                        k.cooldown_until = time.time() + 600
-                        logger.warning(f"{k.key_id} placed on long cooldown (600s) due to quota limit.")
-                    else:
-                        k.status = "COOLDOWN"
-                        k.cooldown_until = time.time() + 30
-                        logger.warning(f"{k.key_id} placed on short cooldown (30s) due to temporary issue: {error_type}")
-                    break
-
-    def mark_key_success(self, key_id: str):
-        with self._lock:
-            for k in self.keys:
-                if k.key_id == key_id:
+                if k.cooldown_until > 0 and now >= k.cooldown_until:
+                    k.cooldown_until = 0.0
                     k.failure_count = 0
-                    if k.status not in ("STOPPED", "COOLDOWN"):
-                        k.status = "AVAILABLE"
-                    break
+                    if api_name is None or k.api_name.lower() == api_name.lower():
+                        eligible.append(k)
 
-class TestAgentKeyManager:
-    """Dedicated Key Manager for Test Agent sandbox executions."""
-    _lock = threading.Lock()
+        if not eligible:
+            return None
 
-    def __init__(self):
-        self.keys: List[AIKey] = []
-        self.load_keys()
+        # Prioritize cloud keys over local ollama, and sort by least-recently-used
+        eligible.sort(key=lambda k: (1 if k.api_name in ("ollama", "local") else 0, k.last_used_at))
+        chosen = eligible[0]
+        chosen.last_used_at = now
+        chosen.total_calls += 1
+        return chosen
 
-    def load_keys(self):
-        self.keys.clear()
-        for idx in range(1, 50):
-            val = os.getenv(f"TEST_AI_API_KEY_{idx}", "").strip()
-            if not val:
-                continue
-            api_name = os.getenv(f"TEST_AI_API_NAME_{idx}", "openrouter").strip().lower()
-            model_name = os.getenv(f"TEST_AI_MODEL_{idx}", "openai/gpt-4o-mini").strip()
-            self.keys.append(AIKey(
-                key_id=f"Test Agent Key {idx}",
-                value=val,
-                api_name=api_name,
-                model_name=model_name
-            ))
+    def report_success(self, key_id: str, tokens: int = 0) -> None:
+        for k in self.keys:
+            if k.key_id == key_id:
+                k.failure_count = 0
+                k.consecutive_successes += 1
+                k.total_tokens += tokens
+                break
 
-        # Legacy single key fallback
-        legacy_val = os.getenv("TEST_AGENT_GEMINI_API_KEY", "").strip()
-        if legacy_val and not any(k.value == legacy_val for k in self.keys):
-            self.keys.append(AIKey(
-                key_id="Test Agent Legacy Gemini Key",
-                value=legacy_val,
-                api_name="gemini",
-                model_name="gemini-3.6-flash"
-            ))
+    def mark_key_success(self, key_id: str, tokens: int = 0) -> None:
+        self.report_success(key_id, tokens)
 
-    def select_active_key(self) -> Optional[AIKey]:
-        with self._lock:
-            now = time.time()
-            for k in self.keys:
-                if k.status == "COOLDOWN" and now >= k.cooldown_until:
-                    k.status = "AVAILABLE"
-            eligible = [k for k in self.keys if k.status == "AVAILABLE"]
-            return eligible[0] if eligible else None
+    def report_failure(self, key_id: str, error: Any = None) -> None:
+        now = time.time()
+        for k in self.keys:
+            if k.key_id == key_id:
+                k.failure_count += 1
+                k.consecutive_successes = 0
+                # Set cooldown to 180s on server timeout / rate-limit
+                k.cooldown_until = now + 180.0
+                logger.warning(f"Key '{key_id}' placed on cooldown (180s) due to failure: {error}")
+                break
 
-    def get_active_test_credentials(self) -> Dict[str, str]:
-        with self._lock:
-            now = time.time()
-            for k in self.keys:
-                if k.status == "COOLDOWN" and now >= k.cooldown_until:
-                    k.status = "AVAILABLE"
+    def mark_key_failed(self, key_id: str, error_type: str = "ERROR", error_msg: str = "") -> None:
+        self.report_failure(key_id, f"{error_type}: {error_msg}")
 
-            eligible = [k for k in self.keys if k.status == "AVAILABLE"]
-            if not eligible:
-                # Fallback to UnifiedKeyManager primary keys if no dedicated test key is available
-                ukm = UnifiedKeyManager()
-                fallback_key = ukm.select_key()
-                if fallback_key:
-                    return {
-                        "OPENAI_API_KEY": fallback_key.value,
-                        "GEMINI_API_KEY": fallback_key.value,
-                        "ANTHROPIC_API_KEY": fallback_key.value,
-                        "OPENROUTER_API_KEY": fallback_key.value,
-                        "TEST_AI_API_KEY": fallback_key.value,
-                    }
-                return {}
-
-            selected = eligible[0]
-            selected.last_used_at = now
-            val = selected.value
-            return {
-                "OPENAI_API_KEY": val,
-                "GEMINI_API_KEY": val,
-                "GOOGLE_API_KEY": val,
-                "ANTHROPIC_API_KEY": val,
-                "OPENROUTER_API_KEY": val,
-                "MISTRAL_API_KEY": val,
-                "GROQ_API_KEY": val,
-                "TOGETHER_API_KEY": val,
-                "NEBIUS_API_KEY": val,
-                "COHERE_API_KEY": val,
-                "EXA_API_KEY": val,
-                "TAVILY_API_KEY": val,
-                "TEST_AI_API_KEY": val,
-                "TEST_AI_API_NAME": selected.api_name,
-                "TEST_AI_MODEL": selected.model_name,
-            }
-
-class ConversationSession:
-    def __init__(self, conversation_id: str, system_prompt: str = ""):
-        self.conversation_id = conversation_id
-        self.system_prompt = system_prompt
-        self.messages: List[Dict[str, str]] = []
-        self.summary: str = ""
-        self.last_active_key_id: Optional[str] = None
-        self.created_at = time.time()
-
-    def add_message(self, role: str, content: str):
-        self.messages.append({"role": role, "content": content})
-        if len(self.messages) > 16:
-            self._compact_history()
-
-    def _compact_history(self):
-        logger.info(f"Compacting history for conversation {self.conversation_id}")
-        if not self.summary:
-            middle = self.messages[2:-4]
-            summary_items = [f"{t['role'].upper()}: {t['content'][:100]}" for t in middle]
-            self.summary = "Rolling summary of previous steps: " + " | ".join(summary_items)
-            
-        compacted = []
-        compacted.extend(self.messages[:2])
-        compacted.append({"role": "user", "content": f"[CONTINUITY CONTEXT SUMMARY: {self.summary}]"})
-        compacted.extend(self.messages[-4:])
-        self.messages = compacted
 
 class SessionManager:
-    _instance = None
-    _lock = threading.Lock()
+    """Helper for managing user / stage AI session keys."""
+    def __init__(self):
+        self.manager = UnifiedKeyManager()
 
-    def __new__(cls, *args, **kwargs):
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super(SessionManager, cls).__new__(cls, *args, **kwargs)
-                cls._instance.sessions = {}
-            return cls._instance
-
-    def get_or_create_session(self, conversation_id: str, system_prompt: str = "") -> ConversationSession:
-        with self._lock:
-            if conversation_id not in self.sessions:
-                self.sessions[conversation_id] = ConversationSession(conversation_id, system_prompt)
-            return self.sessions[conversation_id]
-
-class ErrorCategory:
-    KEY_SPECIFIC = "KEY_SPECIFIC"       
-    PROJECT_QUOTA = "PROJECT_QUOTA"     
-    PERMANENT_ERROR = "PERMANENT_ERROR" 
-
-def classify_error(e: Exception) -> tuple[str, str]:
-    err_str = str(e).lower()
-    status_code = getattr(e, "code", getattr(e, "status_code", None))
-
-    if (
-        "generaterequestsperday" in err_str
-        or "perproject" in err_str
-        or "daily" in err_str
-        or "free_tier_requests" in err_str
-        or "quota exceeded for metric" in err_str
-    ):
-        return "PROJECT_QUOTA_EXHAUSTED", ErrorCategory.PROJECT_QUOTA
-
-    if status_code == 429 or "429" in err_str or "resource_exhausted" in err_str or "rate limit" in err_str or "quota" in err_str:
-        return "QUOTA_EXHAUSTED", ErrorCategory.KEY_SPECIFIC
-
-    elif status_code == 401 or "401" in err_str or "unauthenticated" in err_str or "invalid authentication" in err_str or "api key not valid" in err_str:
-        return "INVALID_KEY", ErrorCategory.KEY_SPECIFIC
-
-    elif status_code == 403 or "403" in err_str or "permission denied" in err_str:
-        return "AUTHENTICATION_ERROR", ErrorCategory.KEY_SPECIFIC
-
-    elif status_code == 400 or "400" in err_str or "invalid argument" in err_str:
-        if "safety" in err_str or "blocked" in err_str:
-            return "SAFETY_POLICY_ERROR", ErrorCategory.PERMANENT_ERROR
-        return "INVALID_REQUEST", ErrorCategory.PERMANENT_ERROR
-
-    elif status_code == 404 or "404" in err_str or "not found" in err_str:
-        return "MODEL_NOT_FOUND", ErrorCategory.PERMANENT_ERROR
-
-    elif status_code in (500, 502, 503, 504) or "500" in err_str or "503" in err_str or "unavailable" in err_str or "internal error" in err_str:
-        return "TEMPORARY_SERVER_ERROR", ErrorCategory.KEY_SPECIFIC
-
-    elif "timeout" in err_str or "connection" in err_str or "network" in err_str:
-        return "NETWORK_ERROR", ErrorCategory.KEY_SPECIFIC
-
-    return "UNKNOWN_ERROR", ErrorCategory.KEY_SPECIFIC
-
-def is_rotation_eligible(error_category: str) -> bool:
-    return error_category in (ErrorCategory.KEY_SPECIFIC, ErrorCategory.PROJECT_QUOTA)
+    def get_key(self, api_name: Optional[str] = None) -> Optional[AIKey]:
+        return self.manager.select_key(api_name)
 
 
+def classify_error(err: Any) -> tuple[str, str]:
+    """Classifies an error into (error_type, error_category)."""
+    err_str = str(err).lower()
+    if "429" in err_str or "quota" in err_str or "rate" in err_str:
+        return "RATE_LIMITED", "RATE_LIMITED"
+    if "504" in err_str or "gateway" in err_str or "timeout" in err_str:
+        return "SERVER_ERROR", "SERVER_ERROR"
+    if "404" in err_str or "not found" in err_str:
+        return "MODEL_NOT_FOUND", "MODEL_NOT_FOUND"
+    if "401" in err_str or "unauthorized" in err_str or "invalid api key" in err_str:
+        return "AUTHENTICATION_ERROR", "AUTHENTICATION_ERROR"
+    return "UNKNOWN", "UNKNOWN"
+
+
+def is_rotation_eligible(err: Any) -> bool:
+    if isinstance(err, tuple):
+        category = err[1]
+    else:
+        category = str(err)
+    return category in ("RATE_LIMITED", "SERVER_ERROR", "AUTHENTICATION_ERROR", "UNKNOWN")

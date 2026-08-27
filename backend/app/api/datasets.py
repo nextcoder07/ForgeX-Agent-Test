@@ -10,7 +10,9 @@ from fastapi import APIRouter, Response, HTTPException
 from app.core.dataset_exporter import (
     extract_ml_dataset_records,
     export_dataset_jsonl,
-    export_dataset_csv
+    export_dataset_csv,
+    export_dataset_sharegpt,
+    export_dataset_alpaca
 )
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
@@ -48,15 +50,30 @@ def get_dataset_summary(agent_id: Optional[str] = None):
 
 @router.get("/export")
 def export_dataset(agent_id: Optional[str] = None, format: str = "jsonl"):
-    """Exports structured ML training dataset file in JSONL or CSV format."""
+    """Exports structured ML training dataset file in JSONL, CSV, ShareGPT, or Alpaca format."""
     records = extract_ml_dataset_records(agent_id=agent_id)
+    fmt = format.lower()
 
-    if format.lower() == "csv":
+    if fmt == "csv":
         csv_content = export_dataset_csv(records)
         return Response(
             content=csv_content,
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="agent_reliability_dataset.csv"'}
+        )
+    elif fmt == "sharegpt":
+        sharegpt_content = export_dataset_sharegpt(records)
+        return Response(
+            content=sharegpt_content,
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="agent_sharegpt_dataset.json"'}
+        )
+    elif fmt == "alpaca":
+        alpaca_content = export_dataset_alpaca(records)
+        return Response(
+            content=alpaca_content,
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="agent_alpaca_dataset.json"'}
         )
 
     jsonl_content = export_dataset_jsonl(records)

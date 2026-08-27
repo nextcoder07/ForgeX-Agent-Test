@@ -176,10 +176,10 @@ class EvidencePackage(BaseModel):
     session_id: str
     scenario_id: str
     agent_version_id: str
-    observation_summary: ObservationSummary
+    observation_summary: Optional[ObservationSummary] = Field(default_factory=ObservationSummary)
     evidence_references: List[str] = Field(default_factory=list)
-    trajectory_hash: str
-    sealing_timestamp: str
+    trajectory_hash: str = ""
+    sealing_timestamp: str = ""
 
 
 class StateChange(BaseModel):

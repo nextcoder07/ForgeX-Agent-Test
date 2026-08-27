@@ -236,19 +236,22 @@ def _run_sandbox_scenarios_task(
                 store.save_execution_action(act)
 
             # Build EvidencePackage
+            obs_sum = getattr(t_primary, "observation_summary", None) or ObservationSummary()
+            traj_hash = getattr(t_primary, "trajectory_hash", None) or f"hash-{uuid.uuid4().hex[:8]}"
+
             evidence_pkg = EvidencePackage(
                 session_id=session_id,
                 scenario_id=sc.id,
                 agent_version_id=agent.version_label,
-                observation_summary=t_primary.observation_summary,
+                observation_summary=obs_sum,
                 evidence_references=[f"ref-act-{a.id}" for a in actions],
-                trajectory_hash=t_primary.trajectory_hash,
+                trajectory_hash=traj_hash,
                 sealing_timestamp=_now()
             )
 
             session.actions = actions
-            session.observation_summary = t_primary.observation_summary
-            session.trajectory_hash = t_primary.trajectory_hash
+            session.observation_summary = obs_sum
+            session.trajectory_hash = traj_hash
             session.evidence_package = evidence_pkg
             session.status = ExecutionLifecycleState.EVIDENCE_SEALED.value
             session.finished_at = _now()

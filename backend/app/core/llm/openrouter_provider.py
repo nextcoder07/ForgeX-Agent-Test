@@ -37,7 +37,7 @@ class OpenRouterProvider(LLMProvider):
             "temperature": temperature,
             "response_format": {"type": "json_object"},
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
         if response.status_code >= 400:
             raise RuntimeError(f"OpenRouter {key_id} returned HTTP {response.status_code}: {response.text[:500]}")

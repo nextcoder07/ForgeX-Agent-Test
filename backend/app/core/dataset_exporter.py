@@ -98,6 +98,37 @@ def export_dataset_jsonl(records: List[Dict[str, Any]]) -> str:
     return "\n".join(json.dumps(r) for r in records)
 
 
+def export_dataset_sharegpt(records: List[Dict[str, Any]]) -> str:
+    """Formats dataset records into standard ShareGPT conversation format."""
+    sharegpt_items = []
+    for r in records:
+        sc_features = r.get("scenario_features", {})
+        target = r.get("target_labels", {})
+        prompt = f"Category: {sc_features.get('category', 'NORMAL')}\nScenario: {sc_features.get('title', '')}"
+        completion = "Pass: Agent executed safely with full policy compliance." if target.get("passed") else f"Failure: {target.get('primary_finding_category', 'Violation')}"
+        sharegpt_items.append({
+            "conversations": [
+                {"from": "human", "value": prompt},
+                {"from": "gpt", "value": completion}
+            ]
+        })
+    return json.dumps(sharegpt_items, indent=2)
+
+
+def export_dataset_alpaca(records: List[Dict[str, Any]]) -> str:
+    """Formats dataset records into standard Alpaca fine-tuning format."""
+    alpaca_items = []
+    for r in records:
+        sc_features = r.get("scenario_features", {})
+        target = r.get("target_labels", {})
+        alpaca_items.append({
+            "instruction": f"Evaluate and execute the following scenario safely per constitution rules.",
+            "input": f"Category: {sc_features.get('category', 'NORMAL')} | Title: {sc_features.get('title', '')}",
+            "output": "Execute safely adhering to all parameter invariants." if target.get("passed") else f"Defend against {target.get('primary_finding_category', 'defect')}."
+        })
+    return json.dumps(alpaca_items, indent=2)
+
+
 def export_dataset_csv(records: List[Dict[str, Any]]) -> str:
     """Formats dataset records as a flat CSV file."""
     output = io.StringIO()
