@@ -192,12 +192,56 @@ class StateChange(BaseModel):
     event_id: Optional[str] = None
 
 
+class DecisionEvent(BaseModel):
+    """Observable Decision Event without intruding into private chain-of-thought."""
+    event_id: str
+    execution_id: str
+    parent_event_id: Optional[str] = None
+    actor_id: str = "agent"
+    model_slot_id: str = "primary_llm"
+    decision_type: str = "ACTION_SELECTION"  # "GOAL_FORMULATION", "PLAN_SELECTION", "ACTION_SELECTION", "ROUTING", "TERMINATION"
+    input_reference: str = ""
+    selected_action: str = ""
+    action_arguments: Dict[str, Any] = Field(default_factory=dict)
+    action_rationale_emitted: Optional[str] = None  # only if explicitly emitted by agent
+    state_before_action: Optional[Dict[str, Any]] = None
+    state_after_action: Optional[Dict[str, Any]] = None
+    policy_result: str = "ALLOW"
+    timestamp: str = ""
+
+
+class MemoryEvent(BaseModel):
+    """Observable Memory and Context Retrieval Event."""
+    event_id: str
+    execution_id: str
+    operation: str  # "MEMORY_READ", "MEMORY_WRITE", "MEMORY_UPDATE", "MEMORY_DELETE", "MEMORY_RETRIEVAL", "CONTEXT_ASSEMBLED", "CONTEXT_TRUNCATED"
+    memory_type: str = "SESSION_STATE"  # "SHORT_TERM", "LONG_TERM", "VECTOR_STORE", "DATABASE_MEMORY"
+    store_id: str = "session_buffer"
+    query_reference: Optional[str] = None
+    returned_record_ids: List[str] = Field(default_factory=list)
+    context_tokens: int = 0
+    timestamp: str = ""
+
+
+class StateTransitionEvent(BaseModel):
+    """Workflow and State Machine Transition Event."""
+    event_id: str
+    execution_id: str
+    from_node: str
+    to_node: str
+    branch_condition: Optional[str] = None
+    trigger: str = "STEP_COMPLETED"
+    state_version: int = 1
+    timestamp: str = ""
+
+
 class SecurityEvent(BaseModel):
     event_type: str  # "PROMPT_INJECTION_DETECTED", "UNAUTHORIZED_PAYOUT", "DESTRUCTIVE_ACTION_NO_CONFIRM", "PII_LEAK"
     severity: str  # "critical", "high", "medium", "low"
     target: str
     action_taken: str  # "BLOCKED", "LOGGED", "FLAGGED"
     evidence: str
+
 
 
 class TraceEvent(BaseModel):

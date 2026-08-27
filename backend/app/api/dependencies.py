@@ -84,6 +84,10 @@ def resolve_agent_dependencies(payload: DependencyResolverRequest):
     return result
 
 
+from app.models.execution_requirement import AgentRequirementsReport
+from app.core.dependencies.requirement_resolver import RequirementResolver
+
+
 @router.get("/agents/{agent_id}/models", response_model=List[AgentModelDependency])
 def get_agent_model_dependencies(agent_id: str):
     """Retrieve all detected model dependencies for an agent."""
@@ -93,3 +97,14 @@ def get_agent_model_dependencies(agent_id: str):
 
     result = DependencyResolver.resolve_mode(agent=agent, provided_secrets=_USER_SYSTEM_CREDENTIALS)
     return result.detected_model_dependencies
+
+
+@router.get("/requirements/{agent_id}", response_model=AgentRequirementsReport)
+def get_agent_requirements_report(agent_id: str):
+    """Retrieve the unified 6-stage requirement resolution report for an agent."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    return RequirementResolver.resolve_agent_requirements(agent=agent, user_overrides=_USER_SYSTEM_CREDENTIALS)
+

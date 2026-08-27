@@ -494,68 +494,113 @@ async def process_agent_intake(
         tracker.start_stage(4, {"deps_count": len(norm_spec.dependencies)})
 
     t4_start = time.time()
-    # 4. Specification Conflict & Ambiguity Validation
+    # 4. Canonical Subsystem Extraction & Architecture Synthesis
+    from app.core.intake.subsystem_detector import SubsystemDetector
+    canonical_subsystems = SubsystemDetector.analyze_source_files(
+        agent_id=agent_id_temp,
+        agent_name=norm_spec.identity.get("name", payload.agent_name_hint or "Discovered Agent"),
+        files=analysis_files
+    )
+    norm_spec.canonical_subsystems = canonical_subsystems
+
+    # 5. Specification Conflict & Ambiguity Validation
     conflicts = detect_specification_conflicts(constitution, dedup_tools, all_code, all_docs)
 
-    # 5. Visual Architecture Map Graph Generation
-    nodes: List[GraphNode] = [
-        GraphNode(id="node-agent", label=norm_spec.identity["name"], type="agent", risk="low", details="LLM Controller & Decision Engine")
-    ]
+    # 6. Visual Architecture Map Graph Generation
+    nodes: List[GraphNode] = []
     edges: List[GraphEdge] = []
 
-    # A. Extracted Tool Nodes
-    for tool in dedup_tools:
+    # Center / Core Agent Node
+    main_agent_id = "node-agent-core"
+    nodes.append(GraphNode(
+        id=main_agent_id,
+        label=norm_spec.identity["name"],
+        type="agent",
+        risk="low",
+        details=f"Core Controller ({canonical_subsystems.archetype})"
+    ))
+
+    # Add Model Slot Nodes
+    for slot in canonical_subsystems.model_slots:
+        slot_node_id = f"node-slot-{slot.slot_id}"
+        nodes.append(GraphNode(
+            id=slot_node_id,
+            label=slot.name,
+            type="subagent" if "reviewer" in slot.role.value.lower() or "planner" in slot.role.value.lower() else "agent",
+            risk="low",
+            details=f"Role: {slot.role.value} | Model: {slot.detected_model} ({slot.detected_provider})"
+        ))
+        edges.append(GraphEdge(source=main_agent_id, target=slot_node_id, label="powers"))
+
+    # Add Planning Node if planning present
+    if canonical_subsystems.planning.planning_present:
+        plan_node_id = "node-subsystem-planning"
+        nodes.append(GraphNode(
+            id=plan_node_id,
+            label=f"Planning ({canonical_subsystems.planning.planning_type.value})",
+            type="agent",
+            risk="low",
+            details=f"Strategy: {canonical_subsystems.planning.planning_type.value} | Dynamic: {canonical_subsystems.planning.dynamic_replanning}"
+        ))
+        edges.append(GraphEdge(source=main_agent_id, target=plan_node_id, label="orchestrates"))
+
+    # Add Memory Subsystem Node if memory present
+    if canonical_subsystems.memory.memory_present:
+        mem_node_id = "node-subsystem-memory"
+        nodes.append(GraphNode(
+            id=mem_node_id,
+            label=f"Memory ({canonical_subsystems.memory.storage_backend})",
+            type="memory",
+            risk="low",
+            details=f"Scope: {canonical_subsystems.memory.persistence_scope} | Types: {', '.join(t.value for t in canonical_subsystems.memory.memory_types)}"
+        ))
+        edges.append(GraphEdge(source=main_agent_id, target=mem_node_id, label="reads/writes"))
+
+    # Add Context / RAG Node if RAG present
+    if canonical_subsystems.context.retrieval_present:
+        rag_node_id = "node-subsystem-rag"
+        nodes.append(GraphNode(
+            id=rag_node_id,
+            label="RAG Retriever",
+            type="database",
+            risk="low",
+            details=f"Retriever: {canonical_subsystems.context.retriever or 'VectorStore'} | Backend: {canonical_subsystems.context.retrieval_backend}"
+        ))
+        edges.append(GraphEdge(source=main_agent_id, target=rag_node_id, label="queries"))
+
+    # Add Tool Nodes
+    for tool in canonical_subsystems.tools:
         tid = f"node-tool-{tool.name}"
         nodes.append(
             GraphNode(
                 id=tid,
                 label=f"{tool.name}()",
                 type="tool",
-                risk=tool.risk.value if hasattr(tool.risk, "value") else str(tool.risk),
-                details=tool.description or f"Tool function {tool.name}"
+                risk="critical" if tool.destructive else ("high" if tool.authorization_required else "low"),
+                details=tool.description or f"Tool function: {tool.name}"
             )
         )
-        edges.append(GraphEdge(source="node-agent", target=tid, label="invokes"))
+        edges.append(GraphEdge(source=main_agent_id, target=tid, label="invokes"))
 
-    # B. Workflow Nodes (for CLI / functional flow agents without explicit tool declarations)
-    for wf_node in behavior_profile.workflow_graph.nodes:
-        if not any(n.id == f"node-wf-{wf_node.id}" or n.label == f"{wf_node.id}()" for n in nodes):
-            w_id = f"node-wf-{wf_node.id}"
-            nodes.append(
-                GraphNode(
-                    id=w_id,
-                    label=f"{wf_node.name}()",
-                    type="tool" if wf_node.node_type == "node" else "agent",
-                    risk="low",
-                    details=f"Workflow function: {wf_node.name} (Dependencies: {', '.join(wf_node.external_dependencies) or 'None'})"
-                )
-            )
-            edges.append(GraphEdge(source="node-agent", target=w_id, label="executes"))
+    # Add External Service Nodes
+    for svc in canonical_subsystems.external_services:
+        sid = f"node-svc-{svc.service_id}"
+        nodes.append(GraphNode(
+            id=sid,
+            label=f"{svc.provider} Gateway",
+            type="api",
+            risk="medium",
+            details=f"External Service Provider: {svc.provider} ({svc.mock_adapter})"
+        ))
+        edges.append(GraphEdge(source=main_agent_id, target=sid, label="integrates"))
 
-    # C. External Service & Backend Nodes
-    for ext in behavior_profile.external_calls:
-        ext_name = ext.get("capability") or ext.get("class_name") or "External API"
-        ext_id = f"node-ext-{ext_name.lower().replace(' ', '_')}"
-        if not any(n.id == ext_id for n in nodes):
-            nodes.append(
-                GraphNode(
-                    id=ext_id,
-                    label=ext_name,
-                    type="backend",
-                    risk="medium",
-                    details=ext.get("evidence") or f"External Service Integration: {ext_name}"
-                )
-            )
-            edges.append(GraphEdge(source="node-agent", target=ext_id, label="calls"))
-
-    # D. Backend target system nodes based on extracted dependencies
-    for dep in norm_spec.dependencies:
-        dep_node_id = f"node-{dep.id}"
-        if not any(n.id == dep_node_id for n in nodes):
-            nodes.append(GraphNode(id=dep_node_id, label=dep.name, type=dep.type, risk="medium", details=f"External dependency: {dep.type}"))
-            for tool in dedup_tools:
-                tid = f"node-tool-{tool.name}"
-                edges.append(GraphEdge(source=tid, target=dep_node_id, label="uses"))
+    # Fallback to general tool list if canonical tools empty
+    if not canonical_subsystems.tools and dedup_tools:
+        for tool in dedup_tools:
+            tid = f"node-tool-{tool.name}"
+            if not any(n.id == tid for n in nodes):
+                nodes.append(GraphNode(id=tid, label=f"{tool.name}()", type="tool", risk=str(tool.risk), details=tool.description or ""))
+                edges.append(GraphEdge(source=main_agent_id, target=tid, label="invokes"))
 
     t4_dur = (time.time() - t4_start) * 1000.0
     if tracker:
@@ -564,14 +609,18 @@ async def process_agent_intake(
     return AgentUnderstandingResult(
         artifact=artifact_record,
         normalized_spec=norm_spec,
+        agent_description=norm_spec.agent_description,
+        behavior_profile=behavior_profile,
+        canonical_subsystems=canonical_subsystems,
         conflicts=conflicts,
         confidence_score=96.4 if analysis_status == "COMPLETE" else 75.0,
         ambiguities=[
-            "Exact managerial authorization workflow for refunds above ₹10,000 is unstated in source code.",
-            "Address update customer verification policy is unstated."
+            "Exact managerial authorization workflow for refunds above threshold is unstated in source code.",
+            "Session isolation parameters across concurrent invocations require runtime verification."
         ],
         graph_nodes=nodes,
         graph_edges=edges,
         semantic_status=semantic_status,
         analysis_status=analysis_status
     )
+

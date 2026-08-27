@@ -5,21 +5,13 @@ import {
   Layers,
   Sparkles,
   Zap,
-  Flame,
-  BarChart3,
-  GitCompare,
-  CheckCircle2,
-  Cpu,
-  ShieldCheck,
+  Server,
   Radio,
   Wrench,
+  Cpu,
+  ShieldCheck,
   Menu,
   X,
-  ChevronRight,
-  ChevronDown,
-  Bug,
-  Server,
-  Database,
 } from 'lucide-react';
 
 export type PageId =
@@ -29,7 +21,8 @@ export type PageId =
   | 'setup'
   | 'executions'
   | 'results'
-  | 'improve';
+  | 'improve'
+  | 'platform-ai';
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -47,6 +40,7 @@ export const Navbar: React.FC = () => {
     { id: 'executions', label: '4. Execute', icon: Radio },
     { id: 'results', label: '5. Results', icon: Zap },
     { id: 'improve', label: '6. Improve', icon: Wrench },
+    { id: 'platform-ai', label: 'ForgeX AI Lab', icon: Cpu },
   ];
 
   const handleNav = (page: PageId) => {

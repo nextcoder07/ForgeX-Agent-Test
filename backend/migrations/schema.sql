@@ -1,7 +1,8 @@
 -- =============================================================================
 -- ForgeX Platform — Single Master Production Database Schema (schema.sql)
--- Complete, self-contained, 100% coverage of all 28 tables, indexes, triggers,
--- capability seeds, and jsonb projection columns across all 6 pipeline stages.
+-- Complete, self-contained, 100% coverage of all 37 tables, indexes, triggers,
+-- capability seeds, and jsonb projection columns across all 6 pipeline stages
+-- plus the independent Platform-AI Meta-Evaluation Quality Lab.
 -- Execute directly in the Supabase SQL Editor or psql CLI.
 -- =============================================================================
 
@@ -181,30 +182,34 @@ CREATE TABLE IF NOT EXISTS scenario_sets (
 
 -- 11. scenarios — individual test cases with complete query projection
 CREATE TABLE IF NOT EXISTS scenarios (
-    id                     TEXT PRIMARY KEY,
-    scenario_set_id        TEXT REFERENCES scenario_sets(id) ON DELETE CASCADE,
-    agent_id               TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    title                  TEXT NOT NULL,
-    purpose                TEXT NOT NULL,
-    category               TEXT NOT NULL,
-    difficulty             TEXT NOT NULL DEFAULT 'medium',
-    status                 TEXT NOT NULL DEFAULT 'validated',
-    interface_type         TEXT NOT NULL DEFAULT 'CHAT',
-    invocation             JSONB,
-    input_artifacts        JSONB,
-    input_values           JSONB,
-    environment_conditions JSONB,
-    target_failure_surface TEXT,
-    target_invariant       TEXT,
-    fault_injections       JSONB,
-    assertions             JSONB,
-    provenance             JSONB,
-    fingerprint            TEXT,
-    validation_status      TEXT NOT NULL DEFAULT 'VALIDATED',
-    critic_status          TEXT NOT NULL DEFAULT 'PASSED',
-    agent_version_id       TEXT REFERENCES agent_versions(id) ON DELETE SET NULL,
-    scenario_spec          JSONB,
-    created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                             TEXT PRIMARY KEY,
+    scenario_set_id                TEXT REFERENCES scenario_sets(id) ON DELETE CASCADE,
+    agent_id                       TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    title                          TEXT NOT NULL,
+    purpose                        TEXT NOT NULL,
+    category                       TEXT NOT NULL,
+    target_subsystem               TEXT NOT NULL DEFAULT 'reasoning_planning',
+    subsystem_evaluation_criteria  JSONB DEFAULT '[]'::jsonb,
+    context_preconditions          JSONB DEFAULT '{}'::jsonb,
+    expected_subsystem_transitions JSONB DEFAULT '[]'::jsonb,
+    difficulty                     TEXT NOT NULL DEFAULT 'medium',
+    status                         TEXT NOT NULL DEFAULT 'validated',
+    interface_type                 TEXT NOT NULL DEFAULT 'CHAT',
+    invocation                     JSONB,
+    input_artifacts                JSONB,
+    input_values                   JSONB,
+    environment_conditions         JSONB,
+    target_failure_surface         TEXT,
+    target_invariant               TEXT,
+    fault_injections               JSONB,
+    assertions                     JSONB,
+    provenance                     JSONB,
+    fingerprint                    TEXT,
+    validation_status              TEXT NOT NULL DEFAULT 'VALIDATED',
+    critic_status                  TEXT NOT NULL DEFAULT 'PASSED',
+    agent_version_id               TEXT REFERENCES agent_versions(id) ON DELETE SET NULL,
+    scenario_spec                  JSONB,
+    created_at                     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- =============================================================================
@@ -478,11 +483,315 @@ CREATE TABLE IF NOT EXISTS model_versions (
 -- 6. PERFORMANCE INDEXES
 -- =============================================================================
 
+CREATE TABLE IF NOT EXISTS stage_judge_audits (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+    stage_name TEXT NOT NULL,
+    tester_session_id TEXT NOT NULL,
+    model_used TEXT NOT NULL,
+    provider_used TEXT NOT NULL,
+    status TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    fidelity_score DOUBLE PRECISION NOT NULL,
+    summary TEXT NOT NULL,
+    input_summary TEXT,
+    output_summary TEXT,
+    strengths JSONB DEFAULT '[]'::jsonb,
+    findings_and_discrepancies JSONB DEFAULT '[]'::jsonb,
+    hallucination_detected BOOLEAN DEFAULT FALSE,
+    recommendations JSONB DEFAULT '[]'::jsonb,
+    latency_ms DOUBLE PRECISION DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 29. multi_agent_stage_audits — cross-agent meta verdicts & training data synthesis
+CREATE TABLE IF NOT EXISTS multi_agent_stage_audits (
+    id TEXT PRIMARY KEY,
+    stage_name TEXT NOT NULL,
+    agent_count INTEGER NOT NULL DEFAULT 0,
+    overall_status TEXT NOT NULL,
+    overall_score INTEGER NOT NULL,
+    overall_improvement_needed TEXT NOT NULL,
+    system_prompt_recommendations JSONB DEFAULT '[]'::jsonb,
+    code_remediation_recommendations JSONB DEFAULT '[]'::jsonb,
+    agent_results JSONB DEFAULT '[]'::jsonb,
+    training_dataset JSONB DEFAULT '[]'::jsonb,
+    local_fallback_model TEXT NOT NULL,
+    tester_fallback_model TEXT NOT NULL,
+    latency_ms DOUBLE PRECISION DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 30. stage_fallback_models — registry of dedicated local fallback LLMs for fine-tuning
+CREATE TABLE IF NOT EXISTS stage_fallback_models (
+    stage_name TEXT PRIMARY KEY,
+    model_slot TEXT NOT NULL,
+    local_model_name TEXT NOT NULL,
+    is_trainable BOOLEAN NOT NULL DEFAULT true,
+    dataset_record_count INTEGER NOT NULL DEFAULT 0,
+    last_trained_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 31. stage_model_bindings — stage-specific primary and fallback bindings
+CREATE TABLE IF NOT EXISTS stage_model_bindings (
+    id TEXT PRIMARY KEY,
+    stage TEXT NOT NULL,
+    stage_name TEXT NOT NULL,
+    primary_connection_id TEXT NOT NULL DEFAULT 'cloud_rotation_pool',
+    fallback_connection_id TEXT NOT NULL,
+    active_connection_id TEXT NOT NULL DEFAULT 'primary',
+    fallback_enabled BOOLEAN NOT NULL DEFAULT true,
+    primary_model TEXT NOT NULL DEFAULT 'gemini-3.6-flash',
+    fallback_model TEXT NOT NULL DEFAULT 'qwen2.5-coder:7b',
+    adapter_reference TEXT,
+    health_status TEXT NOT NULL DEFAULT 'HEALTHY',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 32. platform_model_versions — trainable fallback adapter checkpoints
+CREATE TABLE IF NOT EXISTS platform_model_versions (
+    id TEXT PRIMARY KEY,
+    stage TEXT NOT NULL,
+    base_model TEXT NOT NULL DEFAULT 'qwen2.5-coder:7b',
+    adapter_name TEXT NOT NULL,
+    version_label TEXT NOT NULL,
+    training_job_id TEXT,
+    parent_version_id TEXT,
+    status TEXT NOT NULL DEFAULT 'PROMOTED',
+    benchmark_accuracy DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    held_out_score DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 33. stage_performance_reports — meta-evaluation benchmark history
+CREATE TABLE IF NOT EXISTS stage_performance_reports (
+    id TEXT PRIMARY KEY,
+    stage TEXT NOT NULL,
+    stage_name TEXT NOT NULL,
+    model_connection_id TEXT NOT NULL,
+    model_version_id TEXT NOT NULL,
+    agents_tested INTEGER NOT NULL DEFAULT 0,
+    cases_evaluated INTEGER NOT NULL DEFAULT 0,
+    correct_count INTEGER NOT NULL DEFAULT 0,
+    missed_count INTEGER NOT NULL DEFAULT 0,
+    false_positive_count INTEGER NOT NULL DEFAULT 0,
+    accuracy_pct DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    precision_pct DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    recall_pct DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    coverage_pct DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    quality_score INTEGER NOT NULL DEFAULT 0,
+    failure_categories JSONB DEFAULT '[]'::jsonb,
+    system_prompt_improvements JSONB DEFAULT '[]'::jsonb,
+    code_remediation_rules JSONB DEFAULT '[]'::jsonb,
+    training_candidates_count INTEGER NOT NULL DEFAULT 0,
+    evidence_references JSONB DEFAULT '[]'::jsonb,
+    latency_ms DOUBLE PRECISION DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 34. scorecards — evaluation scorecard store
+CREATE TABLE IF NOT EXISTS scorecards (
+    evaluation_id TEXT PRIMARY KEY,
+    agent_id TEXT,
+    agent_name TEXT,
+    agent_version TEXT,
+    correctness DOUBLE PRECISION DEFAULT 0.0,
+    safety DOUBLE PRECISION DEFAULT 0.0,
+    robustness DOUBLE PRECISION DEFAULT 0.0,
+    tool_discipline DOUBLE PRECISION DEFAULT 0.0,
+    goal_adherence DOUBLE PRECISION DEFAULT 0.0,
+    composite DOUBLE PRECISION DEFAULT 0.0,
+    safety_axis DOUBLE PRECISION DEFAULT 0.0,
+    capability_axis DOUBLE PRECISION DEFAULT 0.0,
+    total_scenarios INTEGER DEFAULT 0,
+    passed INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    blocked INTEGER DEFAULT 0,
+    inconclusive INTEGER DEFAULT 0,
+    critical_failures INTEGER DEFAULT 0,
+    judge_agreement_rate DOUBLE PRECISION,
+    score_formula_version TEXT DEFAULT 'v2.0-weighted',
+    scorecard_spec JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 35. agent_behavior_profiles — extracted behavioral contracts & invariants
+CREATE TABLE IF NOT EXISTS agent_behavior_profiles (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    agent_version_id TEXT,
+    schema_version TEXT NOT NULL DEFAULT 'v1',
+    identity JSONB DEFAULT '{}'::jsonb,
+    goal TEXT DEFAULT '',
+    interface_contract JSONB DEFAULT '{}'::jsonb,
+    output_contract JSONB DEFAULT '{}'::jsonb,
+    dependency_requirements JSONB DEFAULT '[]'::jsonb,
+    workflow_graph JSONB DEFAULT '{}'::jsonb,
+    inputs JSONB DEFAULT '[]'::jsonb,
+    outputs JSONB DEFAULT '[]'::jsonb,
+    state_model JSONB DEFAULT '{}'::jsonb,
+    external_calls JSONB DEFAULT '[]'::jsonb,
+    capabilities JSONB DEFAULT '[]'::jsonb,
+    data_transformations JSONB DEFAULT '[]'::jsonb,
+    invariants JSONB DEFAULT '[]'::jsonb,
+    failure_surfaces JSONB DEFAULT '[]'::jsonb,
+    security_surfaces JSONB DEFAULT '[]'::jsonb,
+    side_effects JSONB DEFAULT '[]'::jsonb,
+    declared_behaviors JSONB DEFAULT '[]'::jsonb,
+    observed_behaviors JSONB DEFAULT '[]'::jsonb,
+    conflicts JSONB DEFAULT '[]'::jsonb,
+    readiness JSONB DEFAULT '{}'::jsonb,
+    confidence_score DOUBLE PRECISION DEFAULT 1.0,
+    analysis_run_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 36. evaluation_verdicts & evaluation_traces — execution evidence payloads
+CREATE TABLE IF NOT EXISTS evaluation_verdicts (
+    id TEXT PRIMARY KEY,
+    evaluation_run_id TEXT NOT NULL,
+    record_type TEXT NOT NULL DEFAULT 'verdicts',
+    status TEXT NOT NULL DEFAULT 'completed',
+    evidence JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS evaluation_traces (
+    id TEXT PRIMARY KEY,
+    evaluation_run_id TEXT NOT NULL,
+    record_type TEXT NOT NULL DEFAULT 'traces',
+    status TEXT NOT NULL DEFAULT 'completed',
+    evidence JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 37. execution_preflights, runs, artifacts & repair sessions
+CREATE TABLE IF NOT EXISTS execution_preflights (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    environment_check TEXT,
+    dependency_check TEXT,
+    tool_check TEXT,
+    status TEXT NOT NULL DEFAULT 'PASSED',
+    details JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS execution_runs (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    scenario_id TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    raw_logs TEXT,
+    structured_events JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS execution_artifacts (
+    id TEXT PRIMARY KEY,
+    execution_run_id TEXT NOT NULL,
+    artifact_name TEXT NOT NULL,
+    artifact_path TEXT NOT NULL,
+    mime_type TEXT,
+    size_bytes BIGINT DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS execution_actions (
+    id TEXT PRIMARY KEY,
+    execution_session_id TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    payload JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS repair_sessions (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    evaluation_run_id TEXT,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    iteration_count INTEGER DEFAULT 0,
+    patches JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS regression_tests (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    scenario_id TEXT,
+    baseline_run_id TEXT,
+    post_repair_run_id TEXT,
+    regression_status TEXT NOT NULL DEFAULT 'PASS',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS diagnosis_reports (
+    id TEXT PRIMARY KEY,
+    evaluation_run_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    findings JSONB DEFAULT '[]'::jsonb,
+    recommendations JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS training_jobs (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    dataset_id TEXT,
+    status TEXT NOT NULL DEFAULT 'QUEUED',
+    loss_curve JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS benchmark_records (
+    id TEXT PRIMARY KEY,
+    stage TEXT NOT NULL,
+    model_v1 TEXT NOT NULL,
+    model_v2 TEXT NOT NULL,
+    accuracy_delta DOUBLE PRECISION DEFAULT 0.0,
+    verdict TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =============================================================================
+-- SEED DATA: STAGE FALLBACKS & MODEL BINDINGS
+-- =============================================================================
+
+INSERT INTO stage_fallback_models (stage_name, model_slot, local_model_name, is_trainable) VALUES
+    ('analysis',   'OLLAMA_INTAKE_MODEL',    'qwen2.5-coder:7b', true),
+    ('scenarios',  'OLLAMA_SCENARIO_MODEL',  'qwen2.5-coder:7b', true),
+    ('execution',  'OLLAMA_OBSERVER_MODEL',  'qwen2.5-coder:7b', true),
+    ('evaluation', 'OLLAMA_EVALUATION_MODEL','qwen2.5-coder:7b', true),
+    ('repair',     'OLLAMA_REPAIR_MODEL',    'qwen2.5-coder:7b', true),
+    ('meta_eval',  'META_EVALUATOR_OLLAMA_MODEL', 'qwen2.5-coder:7b', true)
+ON CONFLICT (stage_name) DO UPDATE SET
+    local_model_name = EXCLUDED.local_model_name,
+    updated_at = now();
+
+INSERT INTO stage_model_bindings (id, stage, stage_name, primary_connection_id, fallback_connection_id, active_connection_id, fallback_enabled, primary_model, fallback_model, adapter_reference, health_status) VALUES
+    ('bind-intake',         'INTAKE_ANALYST',       'Intake Analyst',              'cloud_rotation_pool', 'ollama_intake_connection',   'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-intake-v2',       'HEALTHY'),
+    ('bind-scenario',       'SCENARIO_PLANNER',     'Scenario Planner',            'cloud_rotation_pool', 'ollama_scenario_connection', 'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-scenario-v2',     'HEALTHY'),
+    ('bind-observer',       'EXECUTION_OBSERVER',   'Execution Observer',          'cloud_rotation_pool', 'ollama_observer_connection', 'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-observer-v2',     'HEALTHY'),
+    ('bind-improvement',    'IMPROVEMENT_ANALYST',  'Improvement Analyst',         'cloud_rotation_pool', 'ollama_repair_connection',   'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-repair-v2',       'HEALTHY'),
+    ('bind-meta-evaluator', 'META_EVALUATOR',       'Independent Meta-Evaluator',  'meta_evaluator_pool', 'ollama_meta_connection',     'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-meta-evaluator-v1','HEALTHY')
+ON CONFLICT (id) DO UPDATE SET
+    primary_model = EXCLUDED.primary_model,
+    fallback_model = EXCLUDED.fallback_model,
+    adapter_reference = EXCLUDED.adapter_reference,
+    updated_at = now();
+
+-- =============================================================================
+-- 6. PERFORMANCE INDEXES
+-- =============================================================================
+
 CREATE INDEX IF NOT EXISTS idx_agent_versions_agent_id ON agent_versions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_artifacts_agent_id ON agent_artifacts(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_files_artifact_id ON agent_files(agent_artifact_id);
 CREATE INDEX IF NOT EXISTS idx_scenarios_set_id ON scenarios(scenario_set_id);
 CREATE INDEX IF NOT EXISTS idx_scenarios_agent_id ON scenarios(agent_id);
+CREATE INDEX IF NOT EXISTS idx_scenarios_target_subsystem ON scenarios(target_subsystem);
 CREATE INDEX IF NOT EXISTS idx_eval_runs_agent_id ON evaluation_runs(agent_id);
 CREATE INDEX IF NOT EXISTS idx_scenario_results_run_id ON scenario_results(evaluation_run_id);
 CREATE INDEX IF NOT EXISTS idx_failure_clusters_run_id ON failure_clusters(evaluation_run_id);
@@ -491,6 +800,12 @@ CREATE INDEX IF NOT EXISTS idx_model_versions_agent ON model_versions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_execution_sessions_eval ON execution_sessions(evaluation_run_id);
 CREATE INDEX IF NOT EXISTS idx_execution_steps_session ON execution_steps(execution_session_id);
 CREATE INDEX IF NOT EXISTS idx_execution_metrics_session ON execution_metrics(execution_session_id);
+CREATE INDEX IF NOT EXISTS idx_stage_audits_agent ON stage_judge_audits(agent_id);
+CREATE INDEX IF NOT EXISTS idx_multi_audits_stage ON multi_agent_stage_audits(stage_name);
+CREATE INDEX IF NOT EXISTS idx_behavior_profiles_agent ON agent_behavior_profiles(agent_id);
+CREATE INDEX IF NOT EXISTS idx_scorecards_agent ON scorecards(agent_id);
+CREATE INDEX IF NOT EXISTS idx_stage_perf_stage ON stage_performance_reports(stage);
+
 
 -- =============================================================================
 -- 7. AUTOMATED TIMESTAMP UPDATER TRIGGER
@@ -514,4 +829,10 @@ CREATE OR REPLACE TRIGGER update_model_connections_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+CREATE OR REPLACE TRIGGER update_stage_fallback_models_updated_at
+    BEFORE UPDATE ON stage_fallback_models
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
 -- Done! Complete, non-abbreviated master schema.sql.
+

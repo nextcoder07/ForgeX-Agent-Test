@@ -35,12 +35,17 @@ class RootCauseAnalyzer:
     ) -> AgentDiagnosisReport:
         diagnoses: List[FailureDiagnosis] = []
         defect_breakdown: Dict[str, int] = {
+            "REASONING_PLANNING_DEFECT": 0,
+            "MEMORY_CONTEXT_DEFECT": 0,
+            "TOOL_ACTION_DEFECT": 0,
+            "LEARNING_ADAPTATION_DEFECT": 0,
+            "GOVERNANCE_SECURITY_DEFECT": 0,
             "CODE_DEFECT": 0,
             "PROMPT_DEFECT": 0,
             "POLICY_DEFECT": 0,
             "ENVIRONMENT_DEFECT": 0,
             "TOOL_DEFECT": 0,
-            "MODEL_CAPABILITY_DEFECT": 0
+            "MODEL_BEHAVIOR_DEFECT": 0
         }
 
         trace_map: Dict[str, ExecutionTrace] = {}

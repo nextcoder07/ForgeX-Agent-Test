@@ -92,6 +92,148 @@ export interface GraphEdge {
   label?: string;
 }
 
+export interface PlanningProfile {
+  planning_present: boolean;
+  planning_type: string;
+  planner_component?: string;
+  planner_model_slot?: string;
+  goal_representation?: string;
+  plan_representation?: string;
+  plan_steps: string[];
+  dynamic_replanning: boolean;
+  reflection_present: boolean;
+  loop_present: boolean;
+  termination_condition?: string;
+  max_iterations?: number;
+  branching_conditions: string[];
+  delegation_present: boolean;
+  evidence: string[];
+  confidence: number;
+}
+
+export interface MemoryProfile {
+  memory_present: boolean;
+  memory_types: string[];
+  storage_backend?: string;
+  retrieval_mechanism?: string;
+  write_points: string[];
+  read_points: string[];
+  persistence_scope: string;
+  session_scope?: string;
+  expiration?: string;
+  mutation_behavior: string;
+  evidence: string[];
+  confidence: number;
+}
+
+export interface ContextProfile {
+  retrieval_present: boolean;
+  retrieval_backend?: string;
+  retriever?: string;
+  reranker?: string;
+  chunking?: string;
+  max_context_tokens?: number;
+  truncation_rules: string[];
+  grounding_rules: string[];
+  citation_rules: string[];
+  context_sources: string[];
+  evidence: string[];
+  confidence: number;
+}
+
+export interface ToolProfile {
+  tool_id: string;
+  name: string;
+  description: string;
+  parameters_schema: Record<string, any>;
+  side_effect_type: string;
+  is_read_only: boolean;
+  destructive: boolean;
+  authorization_required: boolean;
+  confirmation_required: boolean;
+  idempotency: boolean;
+  target_service?: string;
+  source_evidence: string;
+  policy_constraints: string[];
+  confidence: number;
+}
+
+export interface ExternalServiceProfile {
+  service_id: string;
+  provider: string;
+  endpoint?: string;
+  required_credentials: string[];
+  availability: string;
+  timeout_seconds: number;
+  mock_adapter?: string;
+  evidence: string;
+}
+
+export interface AgentModelSlot {
+  slot_id: string;
+  agent_id: string;
+  role: string;
+  name: string;
+  code_variable: string;
+  source_location: string;
+  detected_provider: string;
+  detected_model: string;
+  model_usage: string;
+  required: boolean;
+  bound_connection_id: string;
+  owner_type: string;
+  is_trainable: boolean;
+}
+
+export interface LearningProfile {
+  learning_present: boolean;
+  reflection_enabled: boolean;
+  in_context_feedback: boolean;
+  self_correction_present: boolean;
+  feedback_sources: string[];
+  adaptation_mechanisms: string[];
+  fine_tuning_eligible: boolean;
+  evidence: string[];
+}
+
+export interface GovernanceProfile {
+  guardrails_present: boolean;
+  never_rules: string[];
+  always_rules: string[];
+  escalation_triggers: string[];
+  hallucination_safeguards: string[];
+  confirmation_policies: string[];
+  prompt_injection_defense: boolean;
+  evidence: string[];
+}
+
+export interface CommunicationProfile {
+  interface_type: string;
+  multi_turn_dialogue: boolean;
+  intent_classification_present: boolean;
+  emotional_tone_constraints: string[];
+  output_formatting_rules: string[];
+  evidence: string[];
+}
+
+export interface CanonicalAgentRepresentation {
+  agent_id: string;
+  name: string;
+  domain: string;
+  archetype: string;
+  planning: PlanningProfile;
+  memory: MemoryProfile;
+  context: ContextProfile;
+  tools: ToolProfile[];
+  external_services: ExternalServiceProfile[];
+  model_slots: AgentModelSlot[];
+  learning?: LearningProfile;
+  governance?: GovernanceProfile;
+  communication?: CommunicationProfile;
+  data_flows: { source: string; target: string; data_type: string; description?: string }[];
+  policies: string[];
+}
+
 export interface NormalizedAgentSpec {
   identity: Record<string, string>;
   goals: string[];
@@ -103,6 +245,7 @@ export interface NormalizedAgentSpec {
   risks: string[];
   state_management: string;
   architecture_components: string[];
+  canonical_subsystems?: CanonicalAgentRepresentation;
 }
 
 export interface AgentUnderstandingResult {
@@ -113,7 +256,9 @@ export interface AgentUnderstandingResult {
   ambiguities: string[];
   graph_nodes: GraphNode[];
   graph_edges: GraphEdge[];
+  canonical_subsystems?: CanonicalAgentRepresentation;
   pipeline_run_id?: string;
+  inferred_description?: string;
 }
 
 export interface FaultInjection {
@@ -129,11 +274,23 @@ export interface ScenarioAssertion {
   description?: string;
 }
 
+export type TargetSubsystem =
+  | 'reasoning_planning'
+  | 'memory_context'
+  | 'tool_execution'
+  | 'learning_adaptation'
+  | 'governance_security'
+  | 'communication_interface';
+
 export interface Scenario {
   id: string;
   agent_id?: string | null;
   version: number;
   category: 'normal' | 'edge' | 'recovery' | 'adversarial' | 'safety' | 'security' | 'stress' | 'chaos';
+  target_subsystem?: TargetSubsystem;
+  subsystem_evaluation_criteria?: string[];
+  context_preconditions?: Record<string, any>;
+  expected_subsystem_transitions?: Record<string, any>[];
   title: string;
   purpose: string;
   user_messages: string[];
@@ -194,6 +351,94 @@ export interface StateChange {
   field: string;
   before_value: any;
   after_value: any;
+  actor?: string;
+  event_id?: string;
+}
+
+export interface DecisionEvent {
+  event_id: string;
+  execution_id: string;
+  parent_event_id?: string;
+  actor_id: string;
+  model_slot_id: string;
+  decision_type: string;
+  input_reference: string;
+  selected_action: string;
+  action_arguments: Record<string, any>;
+  action_rationale_emitted?: string;
+  state_before_action?: Record<string, any>;
+  state_after_action?: Record<string, any>;
+  policy_result: string;
+  timestamp: string;
+}
+
+export interface MemoryEvent {
+  event_id: string;
+  execution_id: string;
+  operation: string;
+  memory_type: string;
+  store_id: string;
+  query_reference?: string;
+  returned_record_ids: string[];
+  context_tokens: number;
+  timestamp: string;
+}
+
+export interface StateTransitionEvent {
+  event_id: string;
+  execution_id: string;
+  from_node: string;
+  to_node: string;
+  branch_condition?: string;
+  trigger: string;
+  state_version: number;
+  timestamp: string;
+}
+
+export interface ExecutionAction {
+  id: string;
+  action_id?: string;
+  execution_session_id: string;
+  sequence: number;
+  action_type: string;
+  target: string;
+  action_attempt: { payload?: Record<string, any> };
+  policy_decision: { decision?: string; reason?: string };
+  execution_result: { status?: string; executed?: boolean };
+  side_effect: { detected?: boolean; details?: Record<string, any> };
+  timestamp?: string;
+}
+
+export interface ObservationSummary {
+  action_count: number;
+  tool_calls: number;
+  llm_calls: number;
+  network_requests: number;
+  file_reads: number;
+  file_writes: number;
+  database_operations: number;
+  retries: number;
+  timeouts: number;
+  errors: number;
+  blocked_actions: number;
+  policy_blocks: number;
+  network_blocks: number;
+  unexpected_tool_calls: number;
+  state_changes: number;
+  external_side_effects: number;
+  max_retry_streak: number;
+  execution_duration_ms: number;
+  exit_code: number;
+}
+
+export interface EvidencePackage {
+  session_id: string;
+  scenario_id: string;
+  agent_version_id: string;
+  observation_summary?: ObservationSummary;
+  evidence_references: string[];
+  trajectory_hash: string;
+  sealing_timestamp: string;
 }
 
 export interface SecurityEvent {
@@ -220,6 +465,11 @@ export interface ExecutionTrace {
   tool_calls: ToolCallRecord[];
   state_changes: StateChange[];
   security_events: SecurityEvent[];
+  decision_events?: DecisionEvent[];
+  memory_events?: MemoryEvent[];
+  state_transitions?: StateTransitionEvent[];
+  actions?: ExecutionAction[];
+  observation_summary?: ObservationSummary;
   total_latency_ms: number;
   total_tokens: number;
   is_counterfactual: boolean;
@@ -1510,3 +1760,321 @@ export async function fetchAgentPipelineStageStatus(agentId: string): Promise<Ag
   if (!res.ok) throw new Error(`Failed to fetch pipeline stage status: ${res.statusText}`);
   return res.json();
 }
+
+// ── Agent Tester & Parallel Stage Judge Subsystem ───────────────────────────
+
+export interface StageAuditRequest {
+  agent_id: string;
+  stage_name: string;
+  input_data?: Record<string, any>;
+  result_data?: Record<string, any>;
+  session_id?: string;
+  requested_model?: string;
+  custom_criteria?: string[];
+}
+
+export interface StageAuditVerdict {
+  id: string;
+  agent_id: string;
+  stage_name: string;
+  tester_session_id: string;
+  model_used: string;
+  provider_used: string;
+  status: 'PASS' | 'WARNING' | 'DEFECT';
+  score: number;
+  fidelity_score: number;
+  summary: string;
+  input_summary: string;
+  output_summary: string;
+  strengths: string[];
+  findings_and_discrepancies: string[];
+  hallucination_detected: boolean;
+  recommendations: string[];
+  latency_ms: number;
+  created_at: string;
+}
+
+export interface AgentAuditItem {
+  agent_id: string;
+  agent_name: string;
+  status: 'PASS' | 'WARNING' | 'DEFECT';
+  score: number;
+  input_summary: string;
+  output_summary: string;
+  strengths: string[];
+  discrepancies: string[];
+  recommendations: string[];
+  latency_ms?: number;
+}
+
+export interface TrainingRecord {
+  stage: string;
+  agent_id?: string;
+  system_prompt: string;
+  user_input: string;
+  ideal_response: string;
+  rejected_response?: string;
+  reasoning_critique?: string;
+}
+
+export interface MultiAgentAuditRequest {
+  agent_ids: string[];
+  stage_name: string;
+  requested_model?: string;
+  custom_criteria?: string[];
+}
+
+export interface MultiAgentAuditVerdict {
+  id: string;
+  stage_name: string;
+  agent_count: number;
+  overall_status: 'PASS' | 'WARNING' | 'DEFECT';
+  overall_score: number;
+  overall_improvement_needed: string;
+  system_prompt_recommendations: string[];
+  code_remediation_recommendations: string[];
+  agent_results: AgentAuditItem[];
+  training_dataset: TrainingRecord[];
+  local_fallback_model: string;
+  tester_fallback_model: string;
+  latency_ms: number;
+  created_at: string;
+}
+
+export interface StageTesterHealth {
+  active_cloud_keys: number;
+  configured_model: string;
+  local_model_endpoint: string;
+  local_model_name: string;
+  local_model_connected: boolean;
+  local_model_status: string;
+  available_sessions_count: number;
+  stage_fallback_models?: Record<string, string>;
+  tester_fallback_model?: string;
+  status: 'healthy' | 'degraded' | 'offline';
+}
+
+export async function fetchStageTesterHealth(): Promise<StageTesterHealth> {
+  const res = await fetch(`${API_BASE_URL}/agent-testers/health`);
+  if (!res.ok) throw new Error(`Failed to fetch tester health: ${res.statusText}`);
+  return res.json();
+}
+
+export async function runStageAudit(req: StageAuditRequest): Promise<StageAuditVerdict> {
+  const res = await fetch(`${API_BASE_URL}/agent-testers/audit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(`Failed to execute stage audit: ${res.statusText}`);
+  return res.json();
+}
+
+export async function runMultiAgentAudit(req: MultiAgentAuditRequest): Promise<MultiAgentAuditVerdict> {
+  const res = await fetch(`${API_BASE_URL}/agent-testers/audit-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(`Failed to execute multi-agent audit: ${res.statusText}`);
+  return res.json();
+}
+
+export async function listStageAudits(agentId: string, stage?: string): Promise<StageAuditVerdict[]> {
+  const url = stage
+    ? `${API_BASE_URL}/agent-testers/audits/${encodeURIComponent(agentId)}?stage=${encodeURIComponent(stage)}`
+    : `${API_BASE_URL}/agent-testers/audits/${encodeURIComponent(agentId)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to list stage audits: ${res.statusText}`);
+  return res.json();
+}
+
+
+// ── Zero-Friction Unified Requirement Resolution ────────────────────────────
+
+export interface ExecutionRequirement {
+  id: string;
+  agent_id: string;
+  type: string;
+  name: string;
+  detected_from: string;
+  required: boolean;
+  optional: boolean;
+  default_available: boolean;
+  platform_provider?: string;
+  user_value_available: boolean;
+  sandbox_adapter_available: boolean;
+  resolved_value?: string;
+  resolution_method: string;
+  fidelity: 'FAITHFUL' | 'SIMULATED' | 'MODEL_SUBSTITUTED' | 'MOCKED';
+  blocking: boolean;
+  status: 'RESOLVED_PLATFORM' | 'RESOLVED_USER' | 'RESOLVED_SANDBOX' | 'OPTIONAL' | 'NEEDS_USER_INPUT' | 'BLOCKED';
+  description: string;
+  action_label?: string;
+}
+
+export interface AgentRequirementsReport {
+  agent_id: string;
+  agent_name: string;
+  overall_status: 'READY' | 'NEEDS_INPUT' | 'BLOCKED';
+  needs_user_input_count: number;
+  total_requirements_count: number;
+  ai_models: ExecutionRequirement[];
+  external_services: ExecutionRequirement[];
+  environment: ExecutionRequirement[];
+  active_fidelity: string;
+  generated_at: string;
+}
+
+export async function fetchAgentRequirementsReport(agentId: string): Promise<AgentRequirementsReport> {
+  const res = await fetch(`${API_BASE_URL}/dependencies/requirements/${encodeURIComponent(agentId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch requirement resolution report: ${res.statusText}`);
+  return res.json();
+}
+
+// =========================================================================
+// Platform-AI Meta-Evaluation & Quality Lab Interfaces
+// =========================================================================
+export interface StageModelBinding {
+  id: string;
+  stage: 'INTAKE_ANALYST' | 'SCENARIO_PLANNER' | 'EXECUTION_OBSERVER' | 'IMPROVEMENT_ANALYST' | 'META_EVALUATOR';
+  stage_name: string;
+  primary_connection_id: string;
+  fallback_connection_id: string;
+  active_connection_id: string;
+  fallback_enabled: boolean;
+  primary_model: string;
+  fallback_model: string;
+  adapter_reference?: string;
+  health_status: string;
+  updated_at: string;
+}
+
+export interface StagePerformanceReport {
+  stage: 'INTAKE_ANALYST' | 'SCENARIO_PLANNER' | 'EXECUTION_OBSERVER' | 'IMPROVEMENT_ANALYST';
+  stage_name: string;
+  model_connection_id: string;
+  model_version_id: string;
+  agents_tested: number;
+  cases_evaluated: number;
+  correct_count: number;
+  missed_count: number;
+  false_positive_count: number;
+  accuracy_pct: number;
+  precision_pct: number;
+  recall_pct: number;
+  coverage_pct: number;
+  quality_score: number;
+  failure_categories: Array<{
+    agent?: string;
+    category?: string;
+    type?: string;
+    source?: string;
+    impact?: string;
+    scenario?: string;
+    trajectory?: string;
+    reason?: string;
+  }>;
+  system_prompt_improvements: string[];
+  code_remediation_rules: string[];
+  training_candidates_count: number;
+  evidence_references: string[];
+  latency_ms: number;
+}
+
+export interface OverallPlatformPerformance {
+  id: string;
+  evaluated_agent_ids: string[];
+  evaluated_agents_count: number;
+  overall_score: number;
+  overall_status: 'EXCELLENT' | 'OPTIMAL' | 'DEFECT' | 'DEGRADED';
+  stage_reports: Record<string, StagePerformanceReport>;
+  meta_judge_model: string;
+  meta_judge_verdict_summary: string;
+  evaluated_at: string;
+}
+
+export interface StageTrainingExample {
+  id: string;
+  stage: string;
+  agent_id: string;
+  agent_name: string;
+  split: 'TRAIN' | 'VALIDATION' | 'HELD_OUT';
+  source_reference: string;
+  system_prompt: string;
+  user_input: string;
+  model_output: string;
+  ground_truth: string;
+  ideal_response: string;
+  rejected_response: string;
+  reasoning_critique: string;
+  failure_category: string;
+  approval_status: string;
+  created_at: string;
+}
+
+export interface StageDatasetExport {
+  stage: string;
+  total_examples: number;
+  train_count: number;
+  validation_count: number;
+  held_out_count: number;
+  target_local_model: string;
+  examples: StageTrainingExample[];
+}
+
+export interface ModelBenchmarkComparison {
+  stage: string;
+  benchmark_id: string;
+  held_out_sample_count: number;
+  model_v1_version: string;
+  model_v1_accuracy: number;
+  model_v1_quality_score: number;
+  model_v2_version: string;
+  model_v2_accuracy: number;
+  model_v2_quality_score: number;
+  delta_accuracy: number;
+  improved: boolean;
+  recommendation: 'PROMOTE_V2' | 'REJECT_V2' | 'RETRAIN_MORE_DATA';
+  comparison_timestamp: string;
+}
+
+export async function fetchPlatformModelBindings(): Promise<StageModelBinding[]> {
+  const res = await fetch(`${API_BASE_URL}/platform-ai/model-bindings`);
+  if (!res.ok) throw new Error(`Failed to fetch model bindings: ${res.statusText}`);
+  return res.json();
+}
+
+export async function runPlatformMetaEvaluation(agentIds: string[]): Promise<OverallPlatformPerformance> {
+  const res = await fetch(`${API_BASE_URL}/platform-ai/performance`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_ids: agentIds })
+  });
+  if (!res.ok) throw new Error(`Failed to run platform meta-evaluation: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchPlatformStageDataset(stage: string, agentIds?: string[]): Promise<StageDatasetExport> {
+  const params = agentIds && agentIds.length > 0 ? `?agent_ids=${encodeURIComponent(agentIds.join(','))}` : '';
+  const res = await fetch(`${API_BASE_URL}/platform-ai/dataset/${encodeURIComponent(stage)}${params}`);
+  if (!res.ok) throw new Error(`Failed to export stage dataset: ${res.statusText}`);
+  return res.json();
+}
+
+export async function compareModelBenchmarks(
+  stage: string,
+  modelV1: string,
+  modelV2: string
+): Promise<ModelBenchmarkComparison> {
+  const res = await fetch(`${API_BASE_URL}/platform-ai/benchmark-compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stage, model_v1: modelV1, model_v2: modelV2 })
+  });
+  if (!res.ok) throw new Error(`Failed to benchmark models: ${res.statusText}`);
+  return res.json();
+}
+
+
+

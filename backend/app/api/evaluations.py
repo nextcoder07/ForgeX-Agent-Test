@@ -224,6 +224,29 @@ def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List
             status="success"
         )
 
+        # Automatically dispatch parallel Stage Agent Tester for Evaluation in the background
+        try:
+            from app.agent_testers.stage_tester import stage_tester_orchestrator
+            from app.agent_testers.models import StageAuditRequest
+            import asyncio
+            asyncio.create_task(stage_tester_orchestrator.audit_stage(StageAuditRequest(
+                agent_id=agent.id,
+                stage_name="evaluation",
+                input_data={
+                    "total_traces": len(traces),
+                    "scenarios_count": len(scenarios)
+                },
+                result_data={
+                    "composite_score": scorecard.composite,
+                    "passed": scorecard.passed,
+                    "failed": scorecard.failed,
+                    "dimensions": scorecard.dimensions if hasattr(scorecard, "dimensions") else {}
+                }
+            )))
+        except Exception as e:
+            logger.warning(f"Could not trigger background stage tester audit for evaluation: {e}")
+
+
     except Exception as exc:
         full_tb = _tb.format_exc()
         # Log full traceback to server terminal (not exposed to frontend)

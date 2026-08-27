@@ -475,7 +475,32 @@ async def register_normalized_spec(payload: RegisterSpecRequest):
         status="success" if overall == "COMPLETE" else "warning"
     )
 
+    # Automatically dispatch parallel Stage Agent Tester for Analysis in the background
+    try:
+        from app.agent_testers.stage_tester import stage_tester_orchestrator
+        from app.agent_testers.models import StageAuditRequest
+        import asyncio
+        asyncio.create_task(stage_tester_orchestrator.audit_stage(StageAuditRequest(
+            agent_id=rec.id,
+            stage_name="analysis",
+            input_data={
+                "source_files": list((payload.source_files or {}).keys()),
+                "total_bytes": sum(len(c) for c in (payload.source_files or {}).values()),
+                "endpoint_url": payload.endpoint_url
+            },
+            result_data={
+                "name": rec.name,
+                "domain": rec.domain,
+                "tools_count": len(rec.tools),
+                "dependencies_count": len(rec.dependencies),
+                "goals": rec.constitution.goals if rec.constitution else []
+            }
+        )))
+    except Exception as e:
+        logger.warning(f"Could not trigger background stage tester audit for intake: {e}")
+
     return rec
+
 
 
 @router.get("/agents/{agent_id}/sandbox-spec", response_model=SandboxSpecification)

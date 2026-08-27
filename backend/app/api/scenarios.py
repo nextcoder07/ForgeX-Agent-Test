@@ -134,6 +134,33 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
     # Status is PARTIAL if fallback/deterministic builder was used, FAILED only if generated is 0
     run_status = "COMPLETED" if (ready_count > 0 and ai_status == "success") else ("PARTIAL" if ready_count > 0 else "FAILED")
 
+    # Automatically dispatch parallel Stage Agent Tester for Scenarios in the background
+    try:
+        from app.agent_testers.stage_tester import stage_tester_orchestrator
+        from app.agent_testers.models import StageAuditRequest
+        import asyncio
+        asyncio.create_task(stage_tester_orchestrator.audit_stage(StageAuditRequest(
+            agent_id=agent.id,
+            stage_name="scenarios",
+            input_data={
+                "agent_name": agent.name,
+                "domain": agent.domain,
+                "tools": [t.name for t in agent.tools],
+                "requested_count": payload.target_count,
+                "plan_items": [p.category for p in plan.plan_items]
+            },
+            result_data={
+                "generated_count": len(generated),
+                "ready_count": ready_count,
+                "scenarios_sample": [
+                    {"title": s.title, "category": s.category, "expected_risk": s.expected_risk}
+                    for s in validated[:5]
+                ]
+            }
+        )))
+    except Exception as e:
+        logger.warning(f"Could not trigger background stage tester audit for scenarios: {e}")
+
     return ScenarioGenerationRun(
         id=run_id,
         agent_id=agent.id,

@@ -37,21 +37,23 @@ class AIKey:
 
 
 class UnifiedKeyManager:
-    """Manages all registered AI API keys with LRU round-robin rotation and cooldowns."""
+    """Manages all registered AI API keys with LRU round-robin rotation, cooldowns, and stage-specific fallbacks."""
     _instance: Optional[UnifiedKeyManager] = None
 
     def __new__(cls) -> UnifiedKeyManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance.keys = []
+            cls._instance.meta_keys = []
             cls._instance.load_keys()
         return cls._instance
 
     def load_keys(self) -> None:
         """Loads all AI API keys dynamically from environment variables."""
         self.keys.clear()
+        self.meta_keys.clear()
         
-        # 1. Load universal AI_API_KEY_n format
+        # 1. Load universal AI_API_KEY_n format for the 4 Platform Stages
         for index in range(1, 100):
             value = os.getenv(f"AI_API_KEY_{index}", "").strip()
             if not value:
@@ -105,7 +107,7 @@ class UnifiedKeyManager:
                 model_name=openrouter_model
             ))
 
-        # 4. Ollama Local Endpoint
+        # 4. Ollama Local Endpoint for Stage Fallbacks
         ollama_endpoint = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")).strip()
         ollama_model = os.getenv("OLLAMA_DEFAULT_MODEL", os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")).strip()
         self.keys.append(AIKey(
@@ -116,16 +118,77 @@ class UnifiedKeyManager:
         ))
         logger.info(f"Registered Ollama Local Server ({ollama_endpoint} - {ollama_model})")
 
+        # 5. Independent Meta-Evaluator Keys (Rotation Pool + Dedicated Ollama Fallback)
+        for idx in range(1, 20):
+            meta_val = os.getenv(f"META_EVALUATOR_API_KEY_{idx}", "").strip()
+            if not meta_val:
+                continue
+            m_provider = os.getenv(f"META_EVALUATOR_PROVIDER_{idx}", "gemini").strip().lower()
+            m_model = os.getenv(f"META_EVALUATOR_MODEL_{idx}", "gemini-3.6-flash").strip()
+            self.meta_keys.append(AIKey(
+                key_id=f"Meta Evaluator Key {idx}",
+                value=meta_val,
+                api_name=m_provider,
+                model_name=m_model
+            ))
+
+        meta_single = os.getenv("META_EVALUATOR_API_KEY", "").strip()
+        if meta_single and not any(k.value == meta_single for k in self.meta_keys):
+            m_provider = os.getenv("META_EVALUATOR_PROVIDER", "gemini").strip().lower()
+            m_model = os.getenv("META_EVALUATOR_MODEL", "gemini-3.6-flash").strip()
+            self.meta_keys.append(AIKey(
+                key_id="Meta Evaluator Primary Key",
+                value=meta_single,
+                api_name=m_provider,
+                model_name=m_model
+            ))
+
+        # Meta Evaluator Dedicated Local Ollama Fallback
+        meta_ollama_model = os.getenv("META_EVALUATOR_OLLAMA_MODEL", "qwen2.5-coder:7b").strip()
+        self.meta_keys.append(AIKey(
+            key_id="Meta Evaluator Ollama Fallback",
+            value=ollama_endpoint,
+            api_name="ollama",
+            model_name=meta_ollama_model
+        ))
+        logger.info(f"Registered Meta Evaluator Ollama Fallback ({ollama_endpoint} - {meta_ollama_model})")
+
+    @classmethod
+    def get_stage_fallback_model(cls, stage_name: str) -> str:
+        """Returns the dedicated trainable local model / adapter for a given stage."""
+        stage_clean = stage_name.lower().replace("-", "_")
+        if "intake" in stage_clean or "analysis" in stage_clean:
+            return os.getenv("OLLAMA_INTAKE_MODEL", "qwen2.5-coder:7b").strip()
+        elif "scenario" in stage_clean:
+            return os.getenv("OLLAMA_SCENARIO_MODEL", "qwen2.5-coder:7b").strip()
+        elif "observer" in stage_clean or "execution" in stage_clean:
+            return os.getenv("OLLAMA_OBSERVER_MODEL", "qwen2.5-coder:7b").strip()
+        elif "repair" in stage_clean or "fix" in stage_clean or "improvement" in stage_clean:
+            return os.getenv("OLLAMA_REPAIR_MODEL", "qwen2.5-coder:7b").strip()
+        elif "meta" in stage_clean or "evaluator" in stage_clean or "judge" in stage_clean:
+            return os.getenv("META_EVALUATOR_OLLAMA_MODEL", "qwen2.5-coder:7b").strip()
+        return os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b").strip()
+
     def select_key(self, api_name: Optional[str] = None) -> Optional[AIKey]:
         """Selects the best available key using LRU (Least-Recently-Used) round-robin."""
+        return self._select_from_pool(self.keys, api_name)
+
+    def select_meta_key(self, api_name: Optional[str] = None) -> Optional[AIKey]:
+        """Selects the best available key for the independent Meta-Evaluator."""
+        chosen = self._select_from_pool(self.meta_keys, api_name)
+        if chosen is None:
+            # Fallback to general pool if no dedicated meta key configured
+            return self.select_key(api_name)
+        return chosen
+
+    def _select_from_pool(self, pool: List[AIKey], api_name: Optional[str] = None) -> Optional[AIKey]:
         now = time.time()
         eligible = [
-            k for k in self.keys
+            k for k in pool
             if k.is_available and (api_name is None or k.api_name.lower() == api_name.lower())
         ]
         if not eligible:
-            # Check for keys whose cooldown has expired
-            for k in self.keys:
+            for k in pool:
                 if k.cooldown_until > 0 and now >= k.cooldown_until:
                     k.cooldown_until = 0.0
                     k.failure_count = 0
@@ -135,7 +198,6 @@ class UnifiedKeyManager:
         if not eligible:
             return None
 
-        # Prioritize cloud keys over local ollama, and sort by least-recently-used
         eligible.sort(key=lambda k: (1 if k.api_name in ("ollama", "local") else 0, k.last_used_at))
         chosen = eligible[0]
         chosen.last_used_at = now

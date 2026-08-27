@@ -97,6 +97,16 @@ export const DiagnosisPage: React.FC = () => {
 
   const getDefectBadgeColor = (type: string) => {
     switch (type) {
+      case 'REASONING_PLANNING_DEFECT':
+        return 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
+      case 'MEMORY_CONTEXT_DEFECT':
+        return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+      case 'TOOL_ACTION_DEFECT':
+        return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+      case 'LEARNING_ADAPTATION_DEFECT':
+        return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
+      case 'GOVERNANCE_SECURITY_DEFECT':
+        return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
       case 'CODE_DEFECT':
         return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
       case 'PROMPT_DEFECT':
@@ -106,6 +116,7 @@ export const DiagnosisPage: React.FC = () => {
       case 'ENVIRONMENT_DEFECT':
         return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
       case 'MODEL_CAPABILITY_DEFECT':
+      case 'MODEL_BEHAVIOR_DEFECT':
         return 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
       default:
         return 'bg-slate-700 text-slate-300 border-slate-600';

@@ -20,6 +20,15 @@ class ScenarioCategory(str, Enum):
     CHAOS = "chaos"
 
 
+class TargetSubsystem(str, Enum):
+    REASONING_PLANNING = "reasoning_planning"
+    MEMORY_CONTEXT = "memory_context"
+    TOOL_EXECUTION = "tool_execution"
+    LEARNING_ADAPTATION = "learning_adaptation"
+    GOVERNANCE_SECURITY = "governance_security"
+    COMMUNICATION_INTERFACE = "communication_interface"
+
+
 class FaultInjection(BaseModel):
     target_tool: str
     fault_type: str  # "timeout", "http_500", "empty_response", "schema_violation", "contradictory_payload"
@@ -80,9 +89,11 @@ class Scenario(BaseModel):
     agent_version_id: Optional[str] = None
     version: int = 1
     
-    # 1. INTENT
+    # 1. INTENT & TARGET SUBSYSTEM
     title: str
     category: ScenarioCategory
+    target_subsystem: TargetSubsystem = TargetSubsystem.REASONING_PLANNING
+    subsystem_evaluation_criteria: List[str] = Field(default_factory=list)
     status: str = "DRAFT"  # "DRAFT", "GENERATED", "VALIDATING", "REJECTED", "BLOCKED", "READY"
     purpose: str
     target_failure_surface: Optional[str] = None
@@ -93,16 +104,12 @@ class Scenario(BaseModel):
     # 2. INVOCATION CONTRACT
     interface_type: str = "CHAT"  # "CLI", "HTTP", "FUNCTION", "CHAT", "EVENT", "BATCH"
     invocation: Dict[str, Any] = Field(default_factory=dict)
-    # Examples:
-    # CLI: {"type": "command", "executable": "python", "arguments": ["agent.py", "--resume", "..."], "command": "..."}
-    # HTTP: {"type": "http", "method": "POST", "endpoint": "/api", "headers": {}, "body": {}}
-    # FUNCTION: {"type": "function", "module": "agent", "function": "run", "arguments": {}}
-    # CHAT: {"type": "conversation", "messages": ["..."]}
     
-    # 3. ENVIRONMENT & INPUTS
-    input_artifacts: List[Dict[str, Any]] = Field(default_factory=list)  # [{"path": "...", "content": "...", "mime_type": "..."}]
+    # 3. ENVIRONMENT, CONTEXT & PRECONDITIONS
+    input_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
     input_values: Dict[str, Any] = Field(default_factory=dict)
     initial_state: Dict[str, Any] = Field(default_factory=dict)
+    context_preconditions: Dict[str, Any] = Field(default_factory=dict)  # Prior remembered state / session history
     user_input: Optional[str] = None
     user_messages: List[str] = Field(default_factory=list)
     required_capabilities: List[str] = Field(default_factory=list)
@@ -112,10 +119,11 @@ class Scenario(BaseModel):
     safety_constraints: List[str] = Field(default_factory=list)
     execution_limits: Dict[str, Any] = Field(default_factory=dict)
     
-    # 4. EXPECTED BEHAVIOR & ASSERTIONS
+    # 4. EXPECTED BEHAVIOR, SUBSYSTEM TRANSITIONS & ASSERTIONS
     expected_behavior: Any = Field(default_factory=dict)
     expected_outcome: Dict[str, Any] = Field(default_factory=dict)
     expected_state: Dict[str, Any] = Field(default_factory=dict)
+    expected_subsystem_transitions: List[Dict[str, Any]] = Field(default_factory=list)  # Expected decision / memory events
     prohibited_actions: List[str] = Field(default_factory=list)
     assertions: List[ScenarioAssertion] = Field(default_factory=list)
     failure_conditions: List[str] = Field(default_factory=list)
@@ -124,12 +132,12 @@ class Scenario(BaseModel):
     # 5. PROVENANCE & LIFECYCLE
     fingerprint: Optional[str] = None
     provenance: Dict[str, Any] = Field(default_factory=dict)
-    # e.g. {"generated_by": "gemini", "model": "gemini-2.5-flash", "prompt_version": "v2", "scenario_plan_id": "PLAN-01"}
     
     critic_passed: bool = True
     critic_notes: Optional[str] = None
     critic_status: str = "PENDING"  # "PASS", "MODIFY", "REJECT", "PENDING"
     validation_status: str = "VALIDATED"  # "VALIDATED", "BLOCKED_DEPENDENCY", "REJECTED_CRITIC", "UNREVIEWED"
+
 
 
 class ScenarioPlanItem(BaseModel):

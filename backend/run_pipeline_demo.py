@@ -56,7 +56,7 @@ async def main_async():
             print(f" - [{err['scenario_id']}] Field '{err['field']}': {err['message']}")
             
     # 4. Scenario Library Serialization
-    library_path = os.path.join(current_dir, "scratch", "demo_scenario_library.json")
+    library_path = os.path.join(current_dir, "test-agents", "demo_scenario_library.json")
     print(f"\n[Step 4] Saving Scenarios to Library: {library_path}...")
     ScenarioLibrary.save_scenarios(scenarios, library_path)
     print("Scenario library saved successfully.")

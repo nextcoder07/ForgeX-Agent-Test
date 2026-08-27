@@ -92,6 +92,7 @@ class AgentRecord(BaseModel):
     artifact_hash: Optional[str] = None
     source_files: Dict[str, str] = Field(default_factory=dict)
     runtime_manifest: Dict[str, Any] = Field(default_factory=dict)
+    canonical_agent: Optional[Any] = None
     execution_status: str = "EXECUTION_BLOCKED"
     input_type: str = "package"
     created_at: str = Field(default_factory=_now)

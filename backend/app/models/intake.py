@@ -147,12 +147,14 @@ class GraphEdge(BaseModel):
 
 
 from app.models.agent_behavior import AgentBehaviorProfile
+from app.models.canonical_agent import CanonicalAgentRepresentation
 
 
 class NormalizedAgentSpec(BaseModel):
     identity: Dict[str, str]  # name, domain, framework, language, entrypoint
     agent_description: Optional[str] = None
     behavior_profile: Optional[AgentBehaviorProfile] = None
+    canonical_subsystems: Optional[CanonicalAgentRepresentation] = None
     goals: List[str] = Field(default_factory=list)
     instructions: List[str] = Field(default_factory=list)
     tools: List[ToolDefinition] = Field(default_factory=list)
@@ -182,6 +184,7 @@ class AgentUnderstandingResult(BaseModel):
     normalized_spec: NormalizedAgentSpec
     agent_description: Optional[str] = None
     behavior_profile: Optional[AgentBehaviorProfile] = None
+    canonical_subsystems: Optional[CanonicalAgentRepresentation] = None
     conflicts: List[SpecConflict]
     confidence_score: float  # e.g., 96.4%
     ambiguities: List[str]
@@ -190,3 +193,4 @@ class AgentUnderstandingResult(BaseModel):
     pipeline_run_id: Optional[str] = None
     semantic_status: str = "AI_ANALYSIS_COMPLETED"
     analysis_status: str = "COMPLETE"
+

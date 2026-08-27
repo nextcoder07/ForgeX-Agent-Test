@@ -125,8 +125,24 @@ def _clean_and_parse_json(raw: str) -> Any:
                 return json.loads(candidate)
         raise
 
+async def check_local_model_health(endpoint: Optional[str] = None) -> tuple[bool, str]:
+    """Fast check (1.5s timeout) to verify whether local Ollama or local LLM server is connected and reachable."""
+    import httpx
+    ep = (endpoint or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=1.5) as client:
+            res = await client.get(f"{ep}/api/tags")
+            if res.status_code == 200:
+                models = res.json().get("models", [])
+                model_names = [m.get("name") for m in models if isinstance(m, dict)]
+                return True, f"Connected ({len(models)} local models: {', '.join(model_names[:3])})"
+            return False, f"Local server returned HTTP {res.status_code}"
+    except Exception as e:
+        return False, f"Local server unreachable at {ep} ({e})"
+
+
 class OllamaProvider(LLMProvider):
-    """Local model provider (Ollama) — NO API Key required."""
+    """Local model provider (Ollama) — NO API Key required. Pre-checks connectivity before execution."""
     def __init__(self, endpoint: Optional[str] = None, model_name: Optional[str] = None):
         self.endpoint = (endpoint or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
         self.model_name = model_name or os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", "qwen2.5-coder:7b"))
@@ -139,6 +155,12 @@ class OllamaProvider(LLMProvider):
         conversation_id: Optional[str] = None,
         stage: str = "UNKNOWN"
     ) -> str:
+        # Fast local pre-check to prevent long hanging
+        is_conn, status_msg = await check_local_model_health(self.endpoint)
+        if not is_conn:
+            logger.warning(f"Local Ollama provider disconnected: {status_msg}. Using fallback mock engine.")
+            return json.dumps(FallbackMockEngine.mock_agent_understanding(user))
+
         try:
             import httpx
             payload = {
@@ -153,7 +175,7 @@ class OllamaProvider(LLMProvider):
                     "num_ctx": 8192
                 }
             }
-            async with httpx.AsyncClient(trust_env=False, timeout=8.0) as client:
+            async with httpx.AsyncClient(trust_env=False, timeout=6.0) as client:
                 res = await client.post(
                     f"{self.endpoint}/api/generate",
                     json=payload

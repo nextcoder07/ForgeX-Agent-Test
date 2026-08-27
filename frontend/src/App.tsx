@@ -8,6 +8,8 @@ import { DependencySetupPage } from './pages/DependencySetupPage';
 import { ExecutionPage } from './pages/ExecutionPage';
 import { ResultsPage } from './pages/ResultsPage';
 import { ImprovePage } from './pages/ImprovePage';
+import { PlatformAIPerformancePage } from './pages/PlatformAIPerformancePage';
+import { AgentTesterBottomDrawer } from './components/AgentTesterBottomDrawer';
 import type { AgentRecord } from './api/client';
 
 export default function App() {
@@ -22,7 +24,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#030712] text-slate-100">
+    <div className="min-h-screen bg-[#030712] text-slate-100 pb-12">
       <Navbar />
       <main className="pb-16">
         <Routes>
@@ -51,6 +53,11 @@ export default function App() {
           <Route path="/improve" element={<ImprovePage />} />
           <Route path="/improve/:jobId" element={<ImprovePage />} />
 
+          {/* 7. Platform AI Quality Lab — self-evaluation & stage fallback training */}
+          <Route path="/platform-ai" element={<PlatformAIPerformancePage />} />
+          <Route path="/quality-lab" element={<PlatformAIPerformancePage />} />
+
+
           {/* ── Legacy redirects — don't break old links ── */}
           <Route path="/intake" element={<Navigate to="/agents?tab=intake" replace />} />
           <Route path="/dependencies" element={<Navigate to="/setup" replace />} />
@@ -72,6 +79,8 @@ export default function App() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
+      <AgentTesterBottomDrawer currentAgent={lastRegisteredAgent} />
     </div>
   );
 }
+

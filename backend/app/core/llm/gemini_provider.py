@@ -79,8 +79,8 @@ class LLMQuotaExhaustedError(LLMGenerationError):
     """Raised specifically when Gemini API quota or rate limit is exhausted across all available keys."""
     pass
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", LLMConfig.MODEL)
+GEMINI_API_KEY = os.getenv("AI_API_KEY_1", "") or os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("AI_MODEL_1", "") or os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
 # ===========================================================================
 # MASTER GEMINI AGENT ANALYZER SYSTEM INSTRUCTION
@@ -103,11 +103,6 @@ You must NEVER:
 - fill missing information with demo-agent examples
 When evidence is insufficient, return UNKNOWN.
 
-========================================================
-1. EVIDENCE CLASSIFICATION
-========================================================
-Classify conclusions as:
-- OBSERVED (directly visible in source code, requirements, configs, AST)
 - DECLARED (stated in README, comments, metadata, docs)
 - INFERRED (derived from code evidence)
 - UNKNOWN (insufficient evidence)
@@ -281,47 +276,43 @@ class GeminiProvider(LLMProvider):
         )
 
         res_text = None
-        models_to_try = [self.model_name]
-        if self.model_name not in ("gemini-2.5-flash", "gemini-2.0-flash"):
-            models_to_try.extend(["gemini-2.5-flash", "gemini-2.0-flash"])
-
+        # Strict Model Adherence: Only use the exact configured model, never fallback to other versions on own
+        current_model = self.model_name
         last_error = None
-        for current_model in models_to_try:
-            try:
-                from google.genai import types
-                res = client.models.generate_content(
-                    model=current_model,
-                    contents=user,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system,
-                        temperature=temperature,
-                        response_mime_type="application/json",
-                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                        http_options=types.HttpOptions(timeout=30000),
-                    ),
+        try:
+            from google.genai import types
+            res = client.models.generate_content(
+                model=current_model,
+                contents=user,
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=temperature,
+                    response_mime_type="application/json",
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                    http_options=types.HttpOptions(timeout=20000),
+                ),
+            )
+            if res and res.text:
+                res_text = res.text
+                input_tokens, output_tokens = _response_token_counts(res)
+                self.last_input_tokens = input_tokens
+                self.last_output_tokens = output_tokens
+
+                duration = (time.time() - start_time) * 1000.0
+                activity_log.emit(
+                    category="LLM",
+                    action="RESPONSE",
+                    detail=f"[{key_id}] {current_model} response received",
+                    response_summary=res.text[:200],
+                    duration_ms=duration,
+                    status="success"
                 )
-                if res and res.text:
-                    res_text = res.text
-                    input_tokens, output_tokens = _response_token_counts(res)
-                    self.last_input_tokens = input_tokens
-                    self.last_output_tokens = output_tokens
+            else:
+                raise Exception("API returned an empty text response")
 
-                    duration = (time.time() - start_time) * 1000.0
-                    activity_log.emit(
-                        category="LLM",
-                        action="RESPONSE",
-                        detail=f"[{key_id}] {current_model} response received",
-                        response_summary=res.text[:200],
-                        duration_ms=duration,
-                        status="success"
-                    )
-                    break
-                else:
-                    raise Exception("API returned an empty text response")
-
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Gemini model '{current_model}' failed ({e}). Trying next fallback model if available...")
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Gemini model '{current_model}' failed ({e}).")
 
         if not res_text and last_error:
             raise last_error

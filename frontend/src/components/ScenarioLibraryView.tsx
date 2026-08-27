@@ -164,7 +164,23 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
                   <h4 className="text-xs font-bold text-slate-100 line-clamp-1">{sc.title}</h4>
                   <p className="text-[11px] text-slate-300 line-clamp-2 leading-relaxed">{sc.purpose}</p>
 
-                  {/* 1. Test Input / User Prompt Preview */}
+                  {/* 1. Target Subsystem Badge */}
+                  {sc.target_subsystem && (
+                    <div className="flex items-center space-x-1.5">
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-mono uppercase font-bold border ${
+                        sc.target_subsystem === 'reasoning_planning' ? 'bg-indigo-950 text-indigo-300 border-indigo-500/30' :
+                        sc.target_subsystem === 'memory_context' ? 'bg-emerald-950 text-emerald-300 border-emerald-500/30' :
+                        sc.target_subsystem === 'tool_execution' ? 'bg-amber-950 text-amber-300 border-amber-500/30' :
+                        sc.target_subsystem === 'learning_adaptation' ? 'bg-cyan-950 text-cyan-300 border-cyan-500/30' :
+                        sc.target_subsystem === 'governance_security' ? 'bg-rose-950 text-rose-300 border-rose-500/30' :
+                        'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}>
+                        Subsystem: {sc.target_subsystem.replace('_', ' ')}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 2. Test Input / User Prompt Preview */}
                   {(() => {
                     const promptText = sc.user_messages && sc.user_messages.length > 0
                       ? sc.user_messages[0]
@@ -180,7 +196,22 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
                     );
                   })()}
 
-                  {/* 2. Key Assertions & Fault Injections */}
+                  {/* 3. Subsystem Evaluation Criteria */}
+                  {sc.subsystem_evaluation_criteria && sc.subsystem_evaluation_criteria.length > 0 && (
+                    <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[10px] space-y-1">
+                      <span className="text-[9px] uppercase font-bold text-slate-400 block font-mono">Evaluation Criteria:</span>
+                      <ul className="space-y-0.5 text-slate-300">
+                        {sc.subsystem_evaluation_criteria.slice(0, 2).map((crit, cIdx) => (
+                          <li key={cIdx} className="flex items-start space-x-1">
+                            <span className="text-cyan-400 shrink-0">›</span>
+                            <span className="line-clamp-1">{crit}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 4. Key Assertions & Fault Injections */}
                   <div className="space-y-1 pt-1">
                     {sc.fault_injections && sc.fault_injections.length > 0 && (
                       <div className="flex items-center space-x-1.5 text-[9.5px] font-mono text-amber-300 bg-amber-950/30 px-2 py-1 rounded border border-amber-500/20">
@@ -206,6 +237,7 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
                       </div>
                     )}
                   </div>
+
                 </div>
 
                 <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">

@@ -107,6 +107,29 @@ def get_agent_repair_status(agent_id: str):
         iteration=1
     )
 
+    # Automatically dispatch parallel Stage Agent Tester for Repair in the background
+    try:
+        from app.agent_testers.stage_tester import stage_tester_orchestrator
+        from app.agent_testers.models import StageAuditRequest
+        import asyncio
+        asyncio.create_task(stage_tester_orchestrator.audit_stage(StageAuditRequest(
+            agent_id=agent.id,
+            stage_name="repair",
+            input_data={
+                "failed_scenarios_count": failed_count,
+                "findings_count": len(findings),
+                "proposed_plan_items": [p.get("title") for p in proposed_plan]
+            },
+            result_data={
+                "changes_made": repair_preview.get("changes_made", []),
+                "diff_length": len(repair_preview.get("proposed_diff", "")),
+                "fixing_agent_reasoning": repair_preview.get("fixing_agent_reasoning", "")
+            }
+        )))
+    except Exception as e:
+        logger.warning(f"Could not trigger background stage tester audit for repair: {e}")
+
+
     return {
         "agent_id": agent.id,
         "agent_name": agent.name,

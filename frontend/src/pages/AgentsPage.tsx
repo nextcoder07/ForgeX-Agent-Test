@@ -35,7 +35,7 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'files' | 'tools' | 'constitution' | 'map'>('files');
+  const [activeTab, setActiveTab] = useState<'files' | 'tools' | 'subsystems' | 'constitution' | 'map'>('files');
 
   const handleAgentRegisteredInternal = (agent: AgentRecord) => {
     onAgentRegistered?.(agent);
@@ -100,19 +100,34 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
     setLoadingFiles(false);
   };
 
-  // Build graph nodes and edges from agent data for display
+  // Build rich canonical graph nodes and edges from agent data
+  const canonical = selectedAgent?.runtime_manifest?.canonical_subsystems;
   const graphNodes = selectedAgent
     ? [
         { id: selectedAgent.id, label: selectedAgent.name, type: 'agent', risk: 'low', details: selectedAgent.description },
-        ...selectedAgent.tools.map((t) => ({
-          id: t.name,
+        ...(selectedAgent.tools || []).map((t) => ({
+          id: `node-tool-${t.name}`,
           label: t.name,
           type: 'tool',
           risk: t.risk,
           details: t.description,
         })),
-        ...selectedAgent.dependencies.map((d) => ({
-          id: d.id,
+        ...(canonical?.planning?.planning_present ? [{
+          id: 'node-subsystem-planning',
+          label: `Planning (${canonical.planning.planning_type})`,
+          type: 'agent',
+          risk: 'low',
+          details: `Strategy: ${canonical.planning.planning_type} | Loops: ${canonical.planning.loop_present}`,
+        }] : []),
+        ...(canonical?.memory?.memory_present ? [{
+          id: 'node-subsystem-memory',
+          label: `Memory (${canonical.memory.storage_backend || 'Session Buffer'})`,
+          type: 'memory',
+          risk: 'low',
+          details: `Scope: ${canonical.memory.persistence_scope}`,
+        }] : []),
+        ...(selectedAgent.dependencies || []).map((d) => ({
+          id: `node-dep-${d.id}`,
           label: d.name,
           type: d.type as 'database' | 'api',
           risk: 'low',
@@ -123,10 +138,13 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
 
   const graphEdges = selectedAgent
     ? [
-        ...selectedAgent.tools.map((t) => ({ source: selectedAgent.id, target: t.name, label: 'calls' })),
-        ...selectedAgent.dependencies.map((d) => ({ source: selectedAgent.id, target: d.id, label: 'depends on' })),
+        ...(selectedAgent.tools || []).map((t) => ({ source: selectedAgent.id, target: `node-tool-${t.name}`, label: 'invokes' })),
+        ...(selectedAgent.dependencies || []).map((d) => ({ source: selectedAgent.id, target: `node-dep-${d.id}`, label: 'connects' })),
+        ...(canonical?.planning?.planning_present ? [{ source: selectedAgent.id, target: 'node-subsystem-planning', label: 'orchestrates' }] : []),
+        ...(canonical?.memory?.memory_present ? [{ source: selectedAgent.id, target: 'node-subsystem-memory', label: 'reads/writes' }] : []),
       ]
     : [];
+
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-5">
@@ -296,7 +314,7 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
 
               {/* Tabs */}
               <div className="flex space-x-1 border-b border-slate-800 overflow-x-auto">
-                {(['files', 'tools', 'constitution', 'map'] as const).map((tab) => (
+                {(['files', 'subsystems', 'tools', 'constitution', 'map'] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -307,6 +325,7 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
                     }`}
                   >
                     {tab === 'files' && <FileCode className="w-3.5 h-3.5" />}
+                    {tab === 'subsystems' && <Layers className="w-3.5 h-3.5" />}
                     {tab === 'tools' && <Wrench className="w-3.5 h-3.5" />}
                     {tab === 'constitution' && <ShieldAlert className="w-3.5 h-3.5" />}
                     {tab === 'map' && <Network className="w-3.5 h-3.5" />}
@@ -334,6 +353,85 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
                     )}
                   </div>
                 )}
+
+                {activeTab === 'subsystems' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Planning Subsystem */}
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-indigo-300 font-mono uppercase">Planning & Reasoning</span>
+                          <span className="px-2 py-0.5 text-[9px] font-bold rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30">
+                            {canonical?.planning?.planning_type || 'DIRECT / REACT'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300">
+                          Dynamic Replanning: <b className="text-white">{canonical?.planning?.dynamic_replanning ? 'Enabled' : 'Disabled'}</b> ·
+                          Loops: <b className="text-white">{canonical?.planning?.loop_present ? 'Present' : 'None'}</b>
+                        </p>
+                        {canonical?.planning?.plan_steps && canonical.planning.plan_steps.length > 0 && (
+                          <div className="text-[11px] text-slate-400">
+                            Steps: {canonical.planning.plan_steps.join(' → ')}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Memory Subsystem */}
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-emerald-300 font-mono uppercase">Memory & Persistence</span>
+                          <span className="px-2 py-0.5 text-[9px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">
+                            {canonical?.memory?.storage_backend || 'In-Memory State'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300">
+                          Scope: <b className="text-white">{canonical?.memory?.persistence_scope || 'Session Scope'}</b> ·
+                          Backend: <b className="text-white">{canonical?.memory?.storage_backend || 'Buffer / Dict'}</b>
+                        </p>
+                      </div>
+
+                      {/* Model Slots Subsystem */}
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-cyan-300 font-mono uppercase">AI Model Slots</span>
+                          <span className="px-2 py-0.5 text-[9px] font-bold rounded bg-cyan-950 text-cyan-300 border border-cyan-500/30">
+                            {canonical?.model_slots?.length || 1} Role Slot(s)
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          {(canonical?.model_slots || []).map(slot => (
+                            <div key={slot.slot_id} className="text-xs text-slate-300 flex items-center justify-between">
+                              <span>{slot.name} ({slot.role})</span>
+                              <span className="font-mono text-[10px] text-emerald-400">{slot.detected_model}</span>
+                            </div>
+                          ))}
+                          {(!canonical?.model_slots || canonical.model_slots.length === 0) && (
+                            <p className="text-xs text-slate-400">Primary Model Slot (System default inference)</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* External Services */}
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-amber-300 font-mono uppercase">External Services</span>
+                          <span className="px-2 py-0.5 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-500/30">
+                            {selectedAgent.dependencies.length} Integration(s)
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          {selectedAgent.dependencies.map(dep => (
+                            <div key={dep.id} className="text-xs text-slate-300 flex items-center justify-between">
+                              <span>{dep.name}</span>
+                              <span className="font-mono text-[10px] text-slate-400">{dep.type}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
 
                 {activeTab === 'tools' && (
                   <div className="space-y-3">

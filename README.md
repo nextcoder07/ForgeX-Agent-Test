@@ -289,16 +289,24 @@ cp .env.example .env
 
 Configure `backend/.env`:
 ```env
-# Primary AI Engine
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+# Common AI API Key (Platform Intake, Stage Testers, Scenarios & Repair)
+AI_API_KEY_1=your_ai_api_key_here
+AI_API_NAME_1=gemini
+AI_MODEL_1=gemini-3.6-flash
 
-# Isolated test agent keys (for sandboxed agent execution)
-TEST_AGENT_GEMINI_API_KEY=your_test_key_here
+# Optional: second rotated key
+AI_API_KEY_2=your_second_ai_api_key_here
+AI_API_NAME_2=gemini
+AI_MODEL_2=gemini-3.6-flash
 
-# Optional: local Ollama fallback
+# Optional: local Ollama fallback (used automatically if none of above work)
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5-coder:7b
+
+# Test Agent sandbox pool key
+TEST_AI_API_KEY_1=your_test_key_here
+TEST_AI_API_NAME_1=gemini
+TEST_AI_MODEL_1=gemini-3.6-flash
 
 PORT=8000
 ENVIRONMENT=development

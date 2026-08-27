@@ -7,6 +7,7 @@ and platform endpoints.
 from __future__ import annotations
 
 import logging
+import datetime as dt
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
@@ -18,6 +19,11 @@ from app.services.activity_log import activity_log
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/models", tags=["Model Connections"])
 manager = ModelConnectionManager()
+
+
+def _now() -> str:
+    return dt.datetime.utcnow().isoformat()
+
 
 
 @router.get("/connections", response_model=List[ModelConnection])
@@ -193,7 +199,7 @@ async def get_agent_model_bindings(agent_id: str):
 
 @router.post("/agent-bindings/{agent_id}")
 async def update_agent_model_bindings(agent_id: str, bindings: dict):
-    """Save multi-model slot assignments for an agent."""
+    """Save multi-model slot assignments and persist into sandbox system info for an agent."""
     agent = store.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -202,15 +208,34 @@ async def update_agent_model_bindings(agent_id: str, bindings: dict):
         agent.runtime_manifest = {}
     
     agent.runtime_manifest["model_bindings"] = bindings
+    
+    # Persist in sandbox system info
+    sandbox_sys_info = agent.runtime_manifest.get("sandbox_system_info", {})
+    sandbox_sys_info["selected_models"] = bindings
+    sandbox_sys_info["updated_at"] = _now() if "_now" in globals() else ""
+    agent.runtime_manifest["sandbox_system_info"] = sandbox_sys_info
     store.save_agent(agent)
+
+    # Also update existing SandboxSpecification if present
+    try:
+        sandbox_spec = store.get_sandbox_spec(agent_id)
+        if sandbox_spec:
+            if not sandbox_spec.runtime:
+                sandbox_spec.runtime = {}
+            sandbox_spec.runtime["model_bindings"] = bindings
+            sandbox_spec.runtime["sandbox_system_info"] = sandbox_sys_info
+            store.save_sandbox_spec(sandbox_spec)
+    except Exception as e:
+        logger.debug(f"Could not update SandboxSpecification: {e}")
 
     activity_log.emit(
         category="RUNTIME",
         action="MODEL_BINDINGS_UPDATED",
-        detail=f"Updated multi-model slot bindings for agent '{agent.name}'.",
+        detail=f"Updated multi-model slot bindings & sandbox system info for agent '{agent.name}'.",
         status="success"
     )
-    return {"status": "success", "agent_id": agent.id, "bindings": bindings}
+    return {"status": "success", "agent_id": agent.id, "bindings": bindings, "sandbox_system_info": sandbox_sys_info}
+
 
 
 @router.delete("/connections/{conn_id}")

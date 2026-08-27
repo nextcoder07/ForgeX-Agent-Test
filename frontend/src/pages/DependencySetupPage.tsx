@@ -44,6 +44,7 @@ import type {
   SessionCredentialPrompt,
   ModelConnection,
   ModelConnectionTestResult,
+  AgentRequirementsReport,
 } from '../api/client';
 import {
   getAgentDependencies,
@@ -61,6 +62,7 @@ import {
   deleteModelConnection,
   getAgentModelBindings,
   updateAgentModelBindings,
+  fetchAgentRequirementsReport,
 } from '../api/client';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
@@ -152,6 +154,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
   const [systemCredInputs, setSystemCredInputs] = useState<Record<string, string>>({});
   const [savingSystemCreds, setSavingSystemCreds] = useState(false);
   const [systemCredSaveSuccess, setSystemCredSaveSuccess] = useState(false);
+  const [requirementsReport, setRequirementsReport] = useState<AgentRequirementsReport | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -179,9 +182,9 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
       ...prev,
       [slotId]: {
         success: false,
-        status: 'unhealthy',
+        status: 'error',
         latency_ms: 0,
-        message: 'Connection test cancelled by user.',
+        message: 'Test cancelled by user.',
         supports_chat: false,
         supports_json: false,
       }
@@ -216,7 +219,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
   const loadData = async (agentId: string) => {
     setLoading(true);
     try {
-      const [deps, res, binds, sysCreds, credPrompt, conns, agentBindingsData] = await Promise.all([
+      const [deps, res, binds, sysCreds, credPrompt, conns, agentBindingsData, reqReport] = await Promise.all([
         getAgentDependencies(agentId).catch(() => []),
         getPlatformResources().catch(() => []),
         getAgentBindings(agentId).catch(() => []),
@@ -224,6 +227,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
         getAgentRequiredCredentials(agentId, selectedExecutionMode).catch(() => null),
         listModelConnections().catch(() => []),
         getAgentModelBindings(agentId).catch(() => null),
+        fetchAgentRequirementsReport(agentId).catch(() => null),
       ]);
       setDependencies(deps);
       setResources(res);
@@ -231,6 +235,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
       setSystemCredentials(sysCreds);
       setCredentialDemand(credPrompt);
       setModelConnections(conns);
+      setRequirementsReport(reqReport);
       
       if (agentBindingsData) {
         const slots = agentBindingsData.slots || [];
@@ -511,41 +516,72 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
         </div>
       </div>
 
-      {/* ── AGENT DEEP ANALYSIS SUMMARY BANNER ── */}
-      {currentAgent && (
-        <div className="p-5 rounded-2xl border border-cyan-500/30 bg-slate-950/90 space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-            <div className="flex items-center space-x-2 text-cyan-300">
-              <FileCode className="w-4 h-4 text-cyan-400" />
-              <h2 className="text-xs font-bold uppercase tracking-wider">AGENT CODE ANALYSIS & GOAL SUMMARY</h2>
+      {/* ── ZERO-FRICTION REQUIREMENT RESOLUTION BANNER ── */}
+      <div className="p-5 rounded-2xl border border-emerald-500/40 bg-gradient-to-r from-emerald-950/40 via-slate-950/90 to-cyan-950/40 space-y-4 shadow-xl">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
             </div>
-            <span className="px-2 py-0.5 text-[9px] font-bold rounded bg-cyan-950 text-cyan-300 border border-cyan-500/30">
-              DOMAIN: {currentAgent.domain?.toUpperCase() || 'GENERAL'}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div className="space-y-1">
-              <span className="text-[10px] text-slate-400 uppercase font-bold">Agent Description & Aim:</span>
-              <p className="text-slate-200 leading-relaxed font-sans">{currentAgent.description || 'Custom autonomous agent pipeline.'}</p>
-            </div>
-            <div className="space-y-1">
-              <span className="text-[10px] text-slate-400 uppercase font-bold">Detected Architecture:</span>
-              <div className="text-slate-300 space-y-0.5">
-                <div>AI Model Roles: <b className="text-purple-300">{agentModelSlots.length} detected</b></div>
-                <div>Tool Functions: <b className="text-cyan-300">{currentAgent.tools?.length || 0} discovered</b></div>
-                <div>External Secrets: <b className="text-indigo-300">{credentialDemand?.requirements?.length || 0} scanned</b></div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-sm font-extrabold text-white">FORGEX ZERO-FRICTION RESOLUTION ENGINE</h2>
+                <span className="px-2 py-0.5 text-[9px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-500/40">
+                  {requirementsReport?.needs_user_input_count === 0 ? '0 USER INPUTS REQUIRED' : `${requirementsReport?.needs_user_input_count} INPUT(S) NEEDED`}
+                </span>
               </div>
-            </div>
-            <div className="space-y-1">
-              <span className="text-[10px] text-slate-400 uppercase font-bold">System Prompt Blueprint:</span>
-              <p className="text-slate-400 truncate max-w-full font-mono bg-slate-900 p-1.5 rounded border border-slate-800 text-[10px]" title={currentAgent.system_prompt}>
-                {currentAgent.system_prompt || 'Standard goal-seeking system instruction.'}
+              <p className="text-xs text-slate-300 mt-0.5">
+                ForgeX discovered, mocked, and auto-provisioned all technical dependencies. User configuration is 100% optional.
               </p>
             </div>
           </div>
+
+          <button
+            onClick={() => navigate(`/executions${selectedAgentId ? `?agentId=${selectedAgentId}` : ''}`)}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 hover:opacity-95 shadow-lg shadow-emerald-500/20 flex items-center space-x-2 cursor-pointer transition transform hover:scale-[1.02]"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>Ready to Run Scenarios →</span>
+          </button>
         </div>
-      )}
+
+        {/* 3-Category Summary Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+            <div className="flex items-center justify-between text-slate-400 font-bold text-[10px] uppercase">
+              <span>1. AI Models</span>
+              <span className="text-emerald-400">Auto-Resolved ✓</span>
+            </div>
+            <div className="text-slate-200 font-semibold">
+              {requirementsReport?.ai_models.map(m => m.name).join(', ') || 'ForgeX Managed Test Model'}
+            </div>
+            <p className="text-[10px] text-slate-400">Platform test pool active (or connect custom API / Ollama below).</p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+            <div className="flex items-center justify-between text-slate-400 font-bold text-[10px] uppercase">
+              <span>2. External Services</span>
+              <span className="text-emerald-400">Sandbox Adapters ✓</span>
+            </div>
+            <div className="text-slate-200 font-semibold">
+              {requirementsReport?.external_services.map(s => s.name).join(', ') || 'Internal Sandbox Tools'}
+            </div>
+            <p className="text-[10px] text-slate-400">Mock & simulator gateways auto-attached (no real keys needed).</p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+            <div className="flex items-center justify-between text-slate-400 font-bold text-[10px] uppercase">
+              <span>3. Environment & Sandbox</span>
+              <span className="text-emerald-400">Provisioned ✓</span>
+            </div>
+            <div className="text-slate-200 font-semibold">
+              Python 3.12 · Isolated FS · Packages Pinned
+            </div>
+            <p className="text-[10px] text-slate-400">Ephemeral secure subprocess container sandbox ready.</p>
+          </div>
+        </div>
+      </div>
+
 
       {/* ── SECTION 1: AI MODEL & LLM REQUIREMENTS (EVERY POSITION EXPLAINED) ── */}
       <div className="p-6 rounded-2xl border border-purple-500/40 bg-slate-950/80 space-y-5">

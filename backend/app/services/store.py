@@ -909,6 +909,24 @@ def _serialize_model_version(key: str, mv: ModelVersionRecord) -> Dict[str, Any]
 
 def _deserialize_model_version(row: Dict[str, Any]) -> ModelVersionRecord:
     return ModelVersionRecord(**row)
+
+def _serialize_stage_judge_audit(key: str, a: Any) -> Dict[str, Any]:
+    return a.model_dump() if hasattr(a, "model_dump") else (a if isinstance(a, dict) else a.dict())
+
+def _deserialize_stage_judge_audit(row: Dict[str, Any]) -> Any:
+    from app.agent_testers.models import StageAuditVerdict
+    return StageAuditVerdict(**row)
+
+def _serialize_multi_agent_audit(key: str, a: Any) -> Dict[str, Any]:
+    return a.model_dump() if hasattr(a, "model_dump") else (a if isinstance(a, dict) else a.__dict__)
+
+def _deserialize_multi_agent_audit(row: Dict[str, Any]) -> Any:
+    from app.agent_testers.models import MultiAgentAuditVerdict
+    try:
+        return MultiAgentAuditVerdict(**row)
+    except Exception:
+        return row
+
 # ---------------------------------------------------------------------------
 # Global Store Implementation
 # ---------------------------------------------------------------------------
@@ -946,7 +964,10 @@ class Store:
         self.diagnosis_reports = SyncedDict("diagnosis_reports", _serialize_diagnosis_report, _deserialize_diagnosis_report, "evaluation_run_id")
         self.training_jobs = SyncedDict("training_jobs", _serialize_training_job, _deserialize_training_job)
         self.model_versions = SyncedDict("model_versions", _serialize_model_version, _deserialize_model_version)
+        self.stage_judge_audits = SyncedDict("stage_judge_audits", _serialize_stage_judge_audit, _deserialize_stage_judge_audit)
+        self.multi_agent_stage_audits = SyncedDict("multi_agent_stage_audits", _serialize_multi_agent_audit, _deserialize_multi_agent_audit)
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
+
 
 
         # Seed platform-provided resources (free sandbox / mock capabilities)
@@ -1511,11 +1532,34 @@ class Store:
     def get_model_version(self, version_id: str) -> Optional[ModelVersionRecord]:
         return self.model_versions.get(version_id)
 
-    def list_model_versions(self, agent_id: Optional[str] = None) -> List[ModelVersionRecord]:
-        versions = list(self.model_versions.values())
+    # --- Stage Judge Audits ---
+    def save_stage_judge_audit(self, audit: Any) -> None:
+        self.stage_judge_audits[audit.id] = audit
+
+    def get_stage_judge_audit(self, audit_id: str) -> Optional[Any]:
+        return self.stage_judge_audits.get(audit_id)
+
+    def list_stage_judge_audits(self, agent_id: Optional[str] = None, stage: Optional[str] = None) -> List[Any]:
+        audits = list(self.stage_judge_audits.values())
         if agent_id:
-            return [v for v in versions if v.agent_id == agent_id]
-        return sorted(versions, key=lambda x: x.created_at, reverse=True)
+            audits = [a for a in audits if getattr(a, "agent_id", None) == agent_id]
+        if stage:
+            audits = [a for a in audits if getattr(a, "stage_name", "").lower() == stage.lower()]
+        return sorted(audits, key=lambda x: getattr(x, "created_at", ""), reverse=True)
+
+    # --- Multi-Agent Stage Audits ---
+    def save_multi_agent_audit(self, audit: Any) -> None:
+        self.multi_agent_stage_audits[audit.id] = audit
+
+    def get_multi_agent_audit(self, audit_id: str) -> Optional[Any]:
+        return self.multi_agent_stage_audits.get(audit_id)
+
+    def list_multi_agent_audits(self, stage: Optional[str] = None) -> List[Any]:
+        audits = list(self.multi_agent_stage_audits.values())
+        if stage:
+            audits = [a for a in audits if getattr(a, "stage_name", "").lower() == stage.lower()]
+        return sorted(audits, key=lambda x: getattr(x, "created_at", ""), reverse=True)
 
 store = Store()
+
 
