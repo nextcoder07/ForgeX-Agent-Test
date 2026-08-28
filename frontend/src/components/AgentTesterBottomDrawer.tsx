@@ -31,7 +31,9 @@ import {
   runMultiAgentAudit,
   fetchAgents,
   AgentRecord,
+  submitTelemetryToAdmin,
 } from '../api/client';
+import { Send, Share2, MessageSquare } from 'lucide-react';
 
 interface AgentTesterBottomDrawerProps {
   currentAgent?: AgentRecord | null;
@@ -57,6 +59,12 @@ export const AgentTesterBottomDrawer: React.FC<AgentTesterBottomDrawerProps> = (
   // Multi-agent selection state
   const [allAgents, setAllAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+
+  // Share with Admin state
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareNote, setShareNote] = useState('');
+  const [shareSubmitting, setShareSubmitting] = useState(false);
+  const [shareSuccess, setShareSuccess] = useState(false);
 
   // Load health, agents, and audits
   const loadData = async () => {
@@ -315,37 +323,136 @@ export const AgentTesterBottomDrawer: React.FC<AgentTesterBottomDrawerProps> = (
                 </div>
               </div>
 
-              {/* Navigation Tabs (Verdict / Training Dataset / Prompt Remediation) */}
-              <div className="flex items-center gap-2 bg-slate-900/80 p-1 rounded-lg border border-slate-800">
+              {/* Navigation Tabs & Share with Admin Button */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 bg-slate-900/80 p-1 rounded-lg border border-slate-800">
+                  <button
+                    onClick={() => setActiveTab('verdict')}
+                    className={`px-3 py-1 text-xs font-semibold rounded-md transition cursor-pointer ${
+                      activeTab === 'verdict' ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 inline mr-1" />
+                    Audit Verdict
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('remediation')}
+                    className={`px-3 py-1 text-xs font-semibold rounded-md transition cursor-pointer ${
+                      activeTab === 'remediation' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Code2 className="w-3.5 h-3.5 inline mr-1" />
+                    Website Improvements
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('training_dataset')}
+                    className={`px-3 py-1 text-xs font-semibold rounded-md transition cursor-pointer ${
+                      activeTab === 'training_dataset' ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <BookOpen className="w-3.5 h-3.5 inline mr-1" />
+                    LLM Training Dataset ({multiAudit?.training_dataset?.length || 0})
+                  </button>
+                </div>
+
                 <button
-                  onClick={() => setActiveTab('verdict')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
-                    activeTab === 'verdict' ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
-                  }`}
+                  onClick={() => setShareModalOpen(true)}
+                  className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600/30 to-indigo-600/30 hover:from-cyan-600/40 hover:to-indigo-600/40 border border-cyan-500/40 text-cyan-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
                 >
-                  <Sparkles className="w-3.5 h-3.5 inline mr-1" />
-                  Audit Verdict
-                </button>
-                <button
-                  onClick={() => setActiveTab('remediation')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
-                    activeTab === 'remediation' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Code2 className="w-3.5 h-3.5 inline mr-1" />
-                  Website Improvements
-                </button>
-                <button
-                  onClick={() => setActiveTab('training_dataset')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
-                    activeTab === 'training_dataset' ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <BookOpen className="w-3.5 h-3.5 inline mr-1" />
-                  LLM Training Dataset ({multiAudit?.training_dataset?.length || 0})
+                  <Share2 className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Share Data with Admin</span>
                 </button>
               </div>
             </div>
+
+            {/* Share with Admin Feedback Modal */}
+            {shareModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                        <Send className="w-4 h-4" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-100">Send Telemetry to Platform Admin</h4>
+                    </div>
+                    <button
+                      onClick={() => { setShareModalOpen(false); setShareSuccess(false); }}
+                      className="text-slate-400 hover:text-white text-xs cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {shareSuccess ? (
+                    <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs space-y-2 text-center">
+                      <CheckCircle2 className="w-6 h-6 text-emerald-400 mx-auto" />
+                      <p className="font-bold">Telemetry Sent Successfully!</p>
+                      <p className="text-[11px] text-slate-300">
+                        The platform admin can now review and selectively incorporate your evaluation traces to improve platform models.
+                      </p>
+                      <button
+                        onClick={() => { setShareModalOpen(false); setShareSuccess(false); setShareNote(''); }}
+                        className="mt-2 px-4 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold text-xs cursor-pointer"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        Submitting this packet shares your agent's evaluation verdicts and trajectory traces with the platform team to fine-tune and improve platform LLMs.
+                      </p>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-slate-300">Optional Notes or Recommendations</label>
+                        <textarea
+                          rows={3}
+                          value={shareNote}
+                          onChange={(e) => setShareNote(e.target.value)}
+                          placeholder="e.g. In Stage 2, scenario critic missed edge cases around rate limiting..."
+                          className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:border-cyan-500 outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShareModalOpen(false)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={shareSubmitting || !currentAgent}
+                          onClick={async () => {
+                            if (!currentAgent) return;
+                            setShareSubmitting(true);
+                            try {
+                              await submitTelemetryToAdmin({
+                                agent_id: currentAgent.id,
+                                note: shareNote,
+                                include_traces: true,
+                                include_scorecard: true
+                              });
+                              setShareSuccess(true);
+                            } catch (err) {
+                              console.error('Failed to submit telemetry:', err);
+                            } finally {
+                              setShareSubmitting(false);
+                            }
+                          }}
+                          className="px-4 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                        >
+                          {shareSubmitting ? 'Sending...' : 'Confirm & Share'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Agent Multi-Selection Chips */}
             {allAgents.length > 0 && (

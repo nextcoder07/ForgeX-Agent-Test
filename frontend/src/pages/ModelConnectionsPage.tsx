@@ -33,8 +33,8 @@ export const ModelConnectionsPage: React.FC = () => {
   // Form State
   const [name, setName] = useState<string>('Google Gemini Flash');
   const [provider, setProvider] = useState<string>('gemini');
-  const [baseUrl, setBaseUrl] = useState<string>('https://generativelanguage.googleapis.com/v1beta/openai');
-  const [modelIdentifier, setModelIdentifier] = useState<string>('gemini-2.5-flash');
+  const [baseUrl, setBaseUrl] = useState<string>('https://generativelanguage.googleapis.com/v1beta');
+  const [modelIdentifier, setModelIdentifier] = useState<string>('gemini-3.7-flash');
   const [apiKey, setApiKey] = useState<string>('');
   const [role, setRole] = useState<string>('test_agent_ai');
   const [error, setError] = useState<string | null>(null);
@@ -60,8 +60,8 @@ export const ModelConnectionsPage: React.FC = () => {
     setProvider(selectedProvider);
     if (selectedProvider === 'gemini') {
       setName('Google Gemini Flash');
-      setBaseUrl('https://generativelanguage.googleapis.com/v1beta/openai');
-      setModelIdentifier('gemini-2.5-flash');
+      setBaseUrl('https://generativelanguage.googleapis.com/v1beta');
+      setModelIdentifier('gemini-3.7-flash');
     } else if (selectedProvider === 'openrouter') {
       setName('OpenRouter Unified Gateway');
       setBaseUrl('https://openrouter.ai/api/v1');
@@ -271,7 +271,7 @@ export const ModelConnectionsPage: React.FC = () => {
                   value={modelIdentifier}
                   onChange={(e) => setModelIdentifier(e.target.value)}
                   required
-                  placeholder="e.g. gemini-2.5-flash or gpt-4o"
+                  placeholder="e.g. gemini-3.7-flash or gpt-4o"
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 font-bold focus:outline-none focus:border-cyan-500"
                 />
               </div>

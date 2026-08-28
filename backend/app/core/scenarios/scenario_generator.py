@@ -121,7 +121,7 @@ async def generate_scenarios_for_agent(
 
     async def _generate_chunk(chunk):
         if not chunk or chunk == [None]:
-            sub_plan = plan_dict
+            sub_plan = scenario_plan.model_dump()
         else:
             sub_plan = {
                 "plan_id": f"{scenario_plan.plan_id}-sub",
@@ -275,7 +275,7 @@ async def generate_scenarios_for_agent(
             scenario = Scenario(
                 id=sc_id,
                 agent_id=agent.id,
-                agent_version_id=agent.version_label,
+                agent_version_id=agent.current_version_id if (agent.current_version_id and not str(agent.current_version_id).startswith("v1.")) else None,
                 version=1,
                 title=str(raw.get("title", f"{category.value.title()} Test")),
                 category=category,

@@ -27,6 +27,7 @@ from app.api.training import router as training_router
 from app.api.pipeline_status import router as pipeline_status_router
 from app.agent_testers.router import router as agent_testers_router
 from app.core.meta_eval.router import router as platform_ai_router
+from app.api.admin_telemetry import router as admin_telemetry_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(agents_router)
@@ -51,6 +52,7 @@ api_router.include_router(training_router)
 api_router.include_router(pipeline_status_router)
 api_router.include_router(agent_testers_router)
 api_router.include_router(platform_ai_router)
+api_router.include_router(admin_telemetry_router)
 
 
 

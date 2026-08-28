@@ -49,11 +49,14 @@ class ModelConnectionManager:
         latency_ms = 0.0
 
         try:
-            async with httpx.AsyncClient(trust_env=False, timeout=4.0) as client:
+            async with httpx.AsyncClient(trust_env=True, timeout=25.0) as client:
                 content = ""
+
+
                 
                 # 1. GOOGLE GEMINI NATIVE & OPENAI-COMPATIBLE
                 if provider_lower == "gemini" or "generativelanguage.googleapis.com" in clean_base:
+                    model_name = (model_identifier or "gemini-3.6-flash").strip()
                     # Check if base_url is openai-compatible or native
                     if "openai" in clean_base or clean_base.endswith("/v1"):
                         chat_url = f"{clean_base}/chat/completions" if not clean_base.endswith("/chat/completions") else clean_base
@@ -62,17 +65,15 @@ class ModelConnectionManager:
                             "Authorization": f"Bearer {api_key}" if api_key else ""
                         }
                         payload = {
-                            "model": model_identifier or "gemini-2.5-flash",
+                            "model": model_name,
                             "messages": [{"role": "user", "content": "Respond strictly with JSON: {\"status\": \"ok\", \"ping\": \"pong\"}"}],
                             "temperature": 0.0,
                             "max_tokens": 50
                         }
                         chat_resp = await client.post(chat_url, json=payload, headers=headers)
                     else:
-                        model_name = model_identifier or "gemini-2.5-flash"
-                        if not model_name.startswith("models/"):
-                            model_name = f"models/{model_name}"
-                        chat_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent"
+                        model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
+                        chat_url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent"
                         params = {"key": api_key} if api_key else {}
                         headers = {"Content-Type": "application/json"}
                         payload = {
@@ -80,17 +81,6 @@ class ModelConnectionManager:
                             "generationConfig": {"temperature": 0.0, "maxOutputTokens": 50}
                         }
                         chat_resp = await client.post(chat_url, params=params, json=payload, headers=headers)
-
-                    if chat_resp.status_code not in (200, 201):
-                        # Retry with active fallback model if gemini-3.6-flash or custom model name was provided
-                        fallback_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-                        params = {"key": api_key} if api_key else {}
-                        headers = {"Content-Type": "application/json"}
-                        payload = {
-                            "contents": [{"parts": [{"text": "Respond strictly with JSON: {\"status\": \"ok\", \"ping\": \"pong\"}"}]}],
-                            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 50}
-                        }
-                        chat_resp = await client.post(fallback_url, params=params, json=payload, headers=headers)
 
                     latency_ms = (time.time() - start_time) * 1000.0
 
@@ -106,22 +96,27 @@ class ModelConnectionManager:
                         return ModelConnectionTestResult(
                             success=True,
                             status="HEALTHY",
-                            message=f"Connected to Google Gemini ({model_identifier or 'gemini-3.6-flash'}) in {latency_ms:.1f}ms",
+                            message=f"Connected to Google Gemini ({model_name}) in {latency_ms:.1f}ms",
                             latency_ms=round(latency_ms, 2),
                             supports_chat=True,
                             supports_json=supports_json,
-                            details={"sample_response": content[:150], "provider": "Google Gemini", "requested_model": model_identifier}
+                            details={"sample_response": content[:150], "provider": "Google Gemini", "requested_model": model_name}
                         )
                     else:
-                        err_text = chat_resp.text[:200]
+                        try:
+                            err_json = chat_resp.json()
+                            err_text = err_json.get("error", {}).get("message") or chat_resp.text[:200]
+                        except Exception:
+                            err_text = chat_resp.text[:200]
+
                         return ModelConnectionTestResult(
                             success=False,
                             status="ERROR",
-                            message=f"Gemini API returned HTTP {chat_resp.status_code}: {err_text}. Ensure API key is valid.",
+                            message=f"Gemini API ({model_name}) returned HTTP {chat_resp.status_code}: {err_text}. Ensure API key is valid.",
                             latency_ms=round(latency_ms, 2),
                             supports_chat=False,
                             supports_json=False,
-                            details={"http_status": chat_resp.status_code}
+                            details={"http_status": chat_resp.status_code, "model_tested": model_name}
                         )
 
                 # 2. ANTHROPIC CLAUDE NATIVE
@@ -294,11 +289,12 @@ class ModelConnectionManager:
             return ModelConnectionTestResult(
                 success=False,
                 status="TIMEOUT",
-                message=f"Connection to {clean_base} timed out after 15 seconds. Local model server may be slow or loading weights into VRAM.",
+                message=f"Connection to {clean_base} timed out after 25 seconds. Local model server or cloud API may be slow or loading weights.",
                 supports_chat=False,
                 supports_json=False,
                 details={"error_type": "Timeout"}
             )
+
         except Exception as ex:
             return ModelConnectionTestResult(
                 success=False,

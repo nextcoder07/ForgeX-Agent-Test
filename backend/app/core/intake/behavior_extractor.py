@@ -20,8 +20,10 @@ from app.models.agent_behavior import (
 
 class BehaviorExtractor:
     @staticmethod
-    def extract_behavioral_facts(ast_trees: Dict[str, ast.AST], raw_files: Dict[str, str]) -> Dict[str, Any]:
+    def extract_behavioral_facts(ast_trees: Dict[str, ast.AST] = None, raw_files: Dict[str, str] = None) -> Dict[str, Any]:
         """Extracts data transformations, code invariants, state models, inputs, outputs, failure surfaces, and security exposures."""
+        ast_trees = ast_trees or {}
+        raw_files = raw_files or {}
         transformations: List[DataTransformation] = []
         invariants: List[CodeInvariant] = []
         failure_surfaces: List[FailureSurface] = []

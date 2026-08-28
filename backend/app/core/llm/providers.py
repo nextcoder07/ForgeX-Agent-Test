@@ -175,8 +175,9 @@ class OllamaProvider(LLMProvider):
                     "num_ctx": 8192
                 }
             }
-            async with httpx.AsyncClient(trust_env=False, timeout=6.0) as client:
+            async with httpx.AsyncClient(trust_env=False, timeout=30.0) as client:
                 res = await client.post(
+
                     f"{self.endpoint}/api/generate",
                     json=payload
                 )
@@ -304,7 +305,8 @@ class UniversalProvider(LLMProvider):
     async def _execute_with_rotation(self, method_name: str, *args, **kwargs) -> Any:
         last_error = None
         attempt = 0
-        while attempt < 10:
+        max_attempts = max(len(self.manager.keys) + 2, 15)
+        while attempt < max_attempts:
             attempt += 1
             key = self.manager.select_key()
             if not key:

@@ -171,6 +171,19 @@ class SandboxManager:
                         f.write(content)
             
             instance.logs.append(f"[{_now()}] [FILES_MOUNTED] Source files mounted into sandbox workspace.")
+            
+            # Automatically check and install any missing dependencies on-the-fly
+            try:
+                from app.core.sandbox.dependency_installer import ensure_agent_dependencies
+                installed = ensure_agent_dependencies(agent, sandbox_dir=instance.temp_dir)
+                if installed:
+                    for pkg in installed:
+                        instance.logs.append(f"[{_now()}] [DEPENDENCY_AUTO_INSTALLED] Package '{pkg}' installed dynamically.")
+                else:
+                    instance.logs.append(f"[{_now()}] [DEPENDENCY_CHECK] All required packages verified and ready.")
+            except Exception as dep_err:
+                instance.logs.append(f"[{_now()}] [DEPENDENCY_WARNING] Auto-installer warning: {dep_err}")
+
             instance.logs.append(f"[{_now()}] [DEPENDENCIES_INSTALL_COMPLETED] Dependencies installed successfully.")
         except Exception as exc:
             instance.logs.append(
@@ -178,6 +191,7 @@ class SandboxManager:
                 f"Command: mount | ExitCode: 1 | Error: {str(exc)}"
             )
             raise exc
+
 
     def inject_allowed_environment(
         self,

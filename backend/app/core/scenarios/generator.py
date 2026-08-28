@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import asyncio
 import os
 
-from app.models.agent_test_spec import AgentTestSpecification, ScenarioDefinition
+from app.models.agent_test_spec import AgentTestSpecification, ScenarioDefinition, Capability
 from app.core.llm.gemini_provider import GeminiProvider
 
 logger = logging.getLogger(__name__)

@@ -33,19 +33,24 @@ def replay_counterfactual_control(
     attack_trace: ExecutionTrace
 ) -> ExecutionTrace:
     """Constructs clean control scenario and executes counterfactual replay."""
-    clean_msg = sanitize_adversarial_prompt(attack_scenario.user_messages[0])
+    raw_user_msg = (attack_scenario.user_messages[0] if attack_scenario.user_messages else "") or attack_scenario.title or "Please process this request."
+    clean_msg = sanitize_adversarial_prompt(raw_user_msg)
 
     control_sc = Scenario(
         id=f"CF-{attack_scenario.id}",
         version=1,
         category=ScenarioCategory.NORMAL,
+        interface_type=attack_scenario.interface_type,
         title=f"Control Clean Replay: {attack_scenario.title}",
         purpose="Counterfactual control to verify whether adversarial framing caused the failure.",
-        user_messages=[clean_msg],
+        user_messages=[clean_msg] if attack_scenario.user_messages else [],
+        invocation=attack_scenario.invocation,
+        input_artifacts=attack_scenario.input_artifacts,
         initial_state=attack_scenario.initial_state,
         required_capabilities=attack_scenario.required_capabilities,
         fault_injections=attack_scenario.fault_injections
     )
+
 
     control_trace = run_scenario_in_sandbox(
         agent=agent,

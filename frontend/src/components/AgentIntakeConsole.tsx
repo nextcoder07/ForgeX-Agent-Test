@@ -360,7 +360,7 @@ export const AgentIntakeConsole: React.FC<AgentIntakeConsoleProps> = ({ onAnalys
 
       {/* Action Footer */}
       <div className="flex items-center justify-between pt-2">
-        <span className="text-xs text-slate-400 font-mono">AST Static Parser + Gemini 2.5 Reconstructor</span>
+        <span className="text-xs text-slate-400 font-mono">AST Static Parser + Platform AI Reconstructor</span>
         <button
           onClick={handleAnalyze}
           disabled={loading || (!pastedCode && !pastedPrompt && !endpointUrl && Object.keys(filesPayload).length === 0)}

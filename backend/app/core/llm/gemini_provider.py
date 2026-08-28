@@ -146,9 +146,18 @@ Separate: CAPABILITY, SERVICE, PROVIDER, MODEL, CREDENTIAL.
 - Extract hard code constants (e.g. temperature=0, model="gpt-4o-mini", max_results=5).
 
 ========================================================
-7. FAILURE & SECURITY SURFACES
+7. FAILURE & SECURITY SURFACES (RISK RULES)
 ========================================================
-Identify realistic failure modes (timeouts, rate limits, empty inputs) and security exposure points (prompt injection, SSRF, SQL injection, PII leakage).
+Identify concrete algorithmic, invariant, adversarial, and tool safety risks:
+- Prompt injection & jailbreaks (e.g. untrusted CLI/payload inputs directly interpolated into LLM prompts without sanitization)
+- Unconstrained execution loops, recursion traps, or unhandled tool error states
+- Side-effect escape: unauthorized file writes, unbounded network requests, SQL/command injection, or state corruption
+- Hallucination risks, policy violations, or decision inconsistency under adversarial inputs
+
+CRITICAL RULES FOR RISKS:
+- NEVER list "missing API key in .env.example" or empty environment variable templates as a risk! A `.env.example` file is an expected developer documentation template, NOT an agent risk or vulnerability.
+- NEVER list standard third-party LLM rate limits or network latency as an agent risk unless the agent code contains flawed retry loops.
+- Focus strictly on code architecture, safety boundaries, and prompt/tool execution flaws.
 
 ========================================================
 8. ARCHETYPES
@@ -217,8 +226,9 @@ def safe_json_loads(text: str) -> Any:
 
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str = "", model_name: str = ""):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+        self.api_key = api_key or os.getenv("AI_API_KEY_1", "") or os.getenv("GEMINI_API_KEY", "")
+        self.model_name = model_name or os.getenv("AI_MODEL_1", "") or os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+
         self.last_input_tokens = 0
         self.last_output_tokens = 0
 
@@ -289,8 +299,9 @@ class GeminiProvider(LLMProvider):
                     temperature=temperature,
                     response_mime_type="application/json",
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                    http_options=types.HttpOptions(timeout=20000),
+                    http_options=types.HttpOptions(timeout=int(os.getenv("LLM_TIMEOUT_SECONDS", "60")) * 1000),
                 ),
+
             )
             if res and res.text:
                 res_text = res.text

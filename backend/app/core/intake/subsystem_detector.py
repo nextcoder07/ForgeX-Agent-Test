@@ -361,8 +361,9 @@ class SubsystemDetector:
 
         found_custom_slots = False
         for var_name, role, display_name, kw in roles_catalog:
-            if var_name in all_code or (kw in all_code.lower() and "chat" in all_code.lower()):
+            if var_name in all_code:
                 slots.append(AgentModelSlot(
+
                     slot_id=var_name,
                     agent_id=agent_id,
                     role=role,

@@ -12,7 +12,11 @@ import {
   ShieldCheck,
   Menu,
   X,
+  User as UserIcon,
+  LogOut,
+  ChevronDown
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export type PageId =
   | 'dashboard'
@@ -26,8 +30,10 @@ export type PageId =
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   // Determine active page from current pathname
   const currentPath = location.pathname.split('/')[1] || 'dashboard';
@@ -52,13 +58,19 @@ export const Navbar: React.FC = () => {
     setMobileMenuOpen(false);
   };
 
+  const handleSignOut = async () => {
+    setProfileDropdownOpen(false);
+    await logout();
+    navigate('/login');
+  };
+
   return (
     <header className="sticky top-0 z-50 border-b border-slate-800 bg-[#030712]/98 backdrop-blur-2xl">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
           {/* Logo */}
           <div
-            onClick={() => handleMobileNav('dashboard')}
+            onClick={() => navigate(user ? '/dashboard' : '/')}
             className="flex items-center space-x-2.5 cursor-pointer group select-none"
           >
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-tr from-cyan-500 via-indigo-500 to-rose-500 p-0.5 shadow-md shadow-cyan-500/20 group-hover:scale-105 transition-transform duration-300">
@@ -75,52 +87,99 @@ export const Navbar: React.FC = () => {
                   v2.0 CI
                 </span>
               </div>
-              <p className="text-[9px] sm:text-[10px] text-slate-300 -mt-0.5">Agent Reliability, Evaluation & Self-Healing</p>
+              <p className="text-[9px] sm:text-[10px] text-slate-300 -mt-0.5">Agent Reliability & Security Testing</p>
             </div>
           </div>
 
           {/* Desktop Navigation Items */}
-          <nav className="hidden xl:flex items-center space-x-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = currentPath === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNav(item.id)}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all duration-200 cursor-pointer ${
-                    isActive
-                      ? 'bg-cyan-950 text-cyan-200 border border-cyan-500/50 shadow-sm shadow-cyan-500/20'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-900/80'
-                  }`}
-                >
-                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+          {user && (
+            <nav className="hidden xl:flex items-center space-x-1">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = currentPath === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => handleNav(item.id)}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all duration-200 cursor-pointer ${
+                      isActive
+                        ? 'bg-cyan-950 text-cyan-200 border border-cyan-500/50 shadow-sm shadow-cyan-500/20'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-900/80'
+                    }`}
+                  >
+                    <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          )}
 
-          {/* Status Badge & Mobile Hamburger Button */}
+          {/* Right Side: User Profile / Auth State & Mobile Hamburger */}
           <div className="flex items-center space-x-2 sm:space-x-3">
-            <div className="hidden sm:flex items-center space-x-2 px-2.5 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>SANDBOX HEALTHY</span>
-            </div>
+            {user ? (
+              <div className="relative">
+                <button
+                  onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+                  className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 transition-all cursor-pointer"
+                >
+                  <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-500 flex items-center justify-center text-[10px] font-bold text-slate-950 font-mono">
+                    {user.displayName ? user.displayName.charAt(0).toUpperCase() : (user.email ? user.email.charAt(0).toUpperCase() : 'U')}
+                  </div>
+                  <span className="hidden sm:inline max-w-[120px] truncate text-[11px] font-medium text-slate-300">
+                    {user.displayName || user.email?.split('@')[0]}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+                </button>
+
+                {profileDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl p-2 z-50 animate-fadeIn">
+                    <div className="p-2.5 border-b border-slate-800/80 mb-1">
+                      <p className="text-xs font-bold text-slate-100 truncate">{user.displayName || 'ForgeX User'}</p>
+                      <p className="text-[10px] text-slate-400 font-mono truncate mt-0.5">{user.email}</p>
+                    </div>
+                    <button
+                      onClick={handleSignOut}
+                      className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200 flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate('/login')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-900 transition cursor-pointer"
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => navigate('/signup')}
+                  className="px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-sm transition cursor-pointer"
+                >
+                  Get Started
+                </button>
+              </div>
+            )}
 
             {/* Mobile Hamburger Toggle Button */}
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="xl:hidden p-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 hover:text-white opacity-100 cursor-pointer"
-            >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
+            {user && (
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="xl:hidden p-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 hover:text-white opacity-100 cursor-pointer"
+              >
+                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Mobile Menu Drawer */}
-      {mobileMenuOpen && (
+      {mobileMenuOpen && user && (
         <div className="xl:hidden border-t border-slate-800 bg-[#030712]/98 backdrop-blur-2xl p-4 space-y-2 animate-in slide-in-from-top-4 duration-200">
           {navItems.map((item) => {
             const Icon = item.icon;

@@ -218,8 +218,32 @@ def run_scenario_in_sandbox(
                     return result
                 return interceptor
 
+            # Auto-ensure dependencies for in-process execution
+            try:
+                from app.core.sandbox.dependency_installer import ensure_agent_dependencies, auto_install_missing_module_from_error
+                ensure_agent_dependencies(agent)
+            except Exception:
+                pass
+
             # Compile and execute agent module
-            exec(compile(code_content, f"agent_{agent.id}.py", "exec"), module_globals)
+            try:
+                exec(compile(code_content, f"agent_{agent.id}.py", "exec"), module_globals)
+            except (ModuleNotFoundError, ImportError) as mod_err:
+                try:
+                    from app.core.sandbox.dependency_installer import auto_install_missing_module_from_error
+                    installed_pkg = auto_install_missing_module_from_error(str(mod_err))
+                    if installed_pkg:
+                        events.append(TraceEvent(
+                            timestamp=_now(),
+                            role="sandbox",
+                            content=f"AUTO_INSTALLED: Missing dependency '{installed_pkg}' installed. Retrying compile..."
+                        ))
+                        exec(compile(code_content, f"agent_{agent.id}.py", "exec"), module_globals)
+                    else:
+                        raise mod_err
+                except Exception:
+                    raise mod_err
+
 
             # Discover agent class or callable functions
             agent_instance = None

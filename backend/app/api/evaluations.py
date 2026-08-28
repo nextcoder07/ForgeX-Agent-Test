@@ -234,7 +234,7 @@ def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List
                 stage_name="evaluation",
                 input_data={
                     "total_traces": len(traces),
-                    "scenarios_count": len(scenarios)
+                    "scenarios_count": len(traces)
                 },
                 result_data={
                     "composite_score": scorecard.composite,
@@ -387,6 +387,17 @@ async def start_evaluation_run(payload: EvaluationRequest, background_tasks: Bac
     )
 
     return job
+
+
+@router.get("/jobs", response_model=List[EvaluationJob])
+def list_evaluation_jobs(agent_id: Optional[str] = None):
+    """Retrieve all evaluation jobs, optionally filtered by agent_id."""
+    jobs = list(store.jobs.values())
+    if agent_id:
+        jobs = [j for j in jobs if getattr(j, "agent_id", None) == agent_id]
+    # Sort chronological (oldest first or newest first)
+    jobs.sort(key=lambda j: getattr(j, "created_at", "") or "", reverse=True)
+    return jobs
 
 
 @router.get("/jobs/{job_id}", response_model=EvaluationJob)
@@ -631,3 +642,14 @@ def get_regression_test(reg_id: str):
     if not reg:
         raise HTTPException(status_code=404, detail=f"Regression test '{reg_id}' not found")
     return reg
+
+
+@router.get("/regression/compare", response_model=RegressionComparison)
+def compare_evaluations(from_job_id: str, to_job_id: str):
+    """Compare regression and reliability metrics between two evaluation jobs."""
+    try:
+        return compare_agent_regressions(from_job_id, to_job_id)
+    except Exception as e:
+        logger.error(f"Error comparing regressions between {from_job_id} and {to_job_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+

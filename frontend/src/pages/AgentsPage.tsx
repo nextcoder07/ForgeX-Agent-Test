@@ -17,6 +17,10 @@ import {
   Wrench,
   ShieldAlert,
   ChevronRight,
+  Key,
+  Lock,
+  ShieldCheck,
+  Sliders,
 } from 'lucide-react';
 
 interface AgentsPageProps {
@@ -26,8 +30,9 @@ interface AgentsPageProps {
 export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  // Top-level tabs: Register (intake), Library (agent list + x-ray)
-  const topTab = (searchParams.get('tab') || 'library') as 'register' | 'library';
+  // Top-level tabs: Register (register new agent), Library (agent list + x-ray)
+  const tabParam = searchParams.get('tab');
+  const topTab = (tabParam === 'register' || tabParam === 'intake' || tabParam === 'add') ? 'register' : 'library';
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<AgentRecord | null>(null);
   const [agentFiles, setAgentFiles] = useState<Record<string, string>>({});
@@ -35,7 +40,7 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'files' | 'tools' | 'subsystems' | 'constitution' | 'map'>('files');
+  const [activeTab, setActiveTab] = useState<'files' | 'subsystems' | 'tools' | 'constitution' | 'map' | 'dependencies'>('files');
 
   const handleAgentRegisteredInternal = (agent: AgentRecord) => {
     onAgentRegistered?.(agent);
@@ -96,9 +101,42 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
       return;
     }
 
-    // source_files not present — silently skip
     setLoadingFiles(false);
   };
+
+  const getRequiredKeys = (agent: AgentRecord): string[] => {
+    const keys = new Set<string>();
+    (agent.dependencies || []).forEach(dep => {
+      if (
+        dep.type === 'credential' ||
+        dep.type === 'api_key' ||
+        /key|token|secret|auth|cred/i.test(dep.name) ||
+        ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'SERPAPI_API_KEY', 'NEWS_API_KEY'].includes(dep.name)
+      ) {
+        keys.add(dep.name);
+      }
+    });
+
+    const detectedSecs = (agent.runtime_manifest as any)?.detected_secrets || [];
+    detectedSecs.forEach((sec: any) => {
+      const sName = typeof sec === 'string' ? sec : sec?.name;
+      if (sName) keys.add(sName);
+    });
+
+    const modelSlots = (agent as any)?.canonical_representation?.model_slots || (agent.runtime_manifest as any)?.canonical_subsystems?.model_slots || [];
+    modelSlots.forEach((slot: any) => {
+      const provider = (slot.provider || 'openai').toUpperCase();
+      keys.add(`${provider}_API_KEY`);
+    });
+
+    if (keys.size === 0) {
+      keys.add('OPENAI_API_KEY');
+    }
+
+    return Array.from(keys);
+  };
+
+  const detectedKeys = selectedAgent ? getRequiredKeys(selectedAgent) : [];
 
   // Build rich canonical graph nodes and edges from agent data
   const canonical = selectedAgent?.runtime_manifest?.canonical_subsystems;
@@ -202,9 +240,9 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
         </button>
       </div>
 
-      {/* Register tab — full AgentIntakePage embedded */}
+      {/* Register tab — full AgentIntakePage embedded with clean styling */}
       {topTab === 'register' && (
-        <AgentIntakePage onAgentRegistered={handleAgentRegisteredInternal} />
+        <AgentIntakePage onAgentRegistered={handleAgentRegisteredInternal} hideHeader={true} />
       )}
 
       {/* Library tab — agent list + X-Ray panel */}
@@ -256,11 +294,11 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
           </div>
 
           <button
-            onClick={() => navigate("/intake")}
-            className="w-full py-2 rounded-xl border border-dashed border-slate-700 text-xs text-slate-300 hover:border-cyan-500/60 hover:text-cyan-300 flex items-center justify-center space-x-1.5 transition"
+            onClick={() => setSearchParams({ tab: 'register' })}
+            className="w-full py-2 rounded-xl border border-dashed border-cyan-500/40 text-xs text-cyan-300 hover:border-cyan-400 hover:bg-cyan-950/30 flex items-center justify-center space-x-1.5 transition cursor-pointer font-bold"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Add New Agent</span>
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ Add New Agent</span>
           </button>
         </div>
 
@@ -312,9 +350,40 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
                 </div>
               </div>
 
+              {/* Required API Keys & Credentials Banner */}
+              {detectedKeys.length > 0 && (
+                <div className="p-3.5 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-950/30 via-slate-950 to-amber-950/20 flex items-center justify-between flex-wrap gap-3 shadow-md">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                      <Key className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-amber-200">Required API Credentials & Model Slots:</span>
+                        {detectedKeys.map(k => (
+                          <span key={k} className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-950 text-amber-300 border border-amber-500/40 shadow-sm">
+                            {k}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        Configure these credentials in Gateway Setup so the agent can execute live LLM calls and tools during testing.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/setup?agentId=${selectedAgent.id}`)}
+                    className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center space-x-1.5 transition cursor-pointer"
+                  >
+                    <span>Configure Keys in Setup</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               {/* Tabs */}
               <div className="flex space-x-1 border-b border-slate-800 overflow-x-auto">
-                {(['files', 'subsystems', 'tools', 'constitution', 'map'] as const).map((tab) => (
+                {(['files', 'subsystems', 'tools', 'dependencies', 'constitution', 'map'] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -327,9 +396,10 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
                     {tab === 'files' && <FileCode className="w-3.5 h-3.5" />}
                     {tab === 'subsystems' && <Layers className="w-3.5 h-3.5" />}
                     {tab === 'tools' && <Wrench className="w-3.5 h-3.5" />}
+                    {tab === 'dependencies' && <Key className="w-3.5 h-3.5 text-amber-400" />}
                     {tab === 'constitution' && <ShieldAlert className="w-3.5 h-3.5" />}
                     {tab === 'map' && <Network className="w-3.5 h-3.5" />}
-                    <span className="capitalize">{tab === 'files' ? 'Source Files' : tab === 'map' ? 'Architecture Map' : tab}</span>
+                    <span className="capitalize">{tab === 'files' ? 'Source Files' : tab === 'map' ? 'Architecture Map' : tab === 'dependencies' ? 'Keys & Dependencies' : tab}</span>
                   </button>
                 ))}
               </div>
@@ -502,20 +572,105 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({ onAgentRegistered }) => 
                   </div>
                 )}
 
+                {activeTab === 'dependencies' && (
+                  <div className="space-y-4">
+                    {/* API Keys & Secrets Section */}
+                    <div className="p-4 sm:p-5 rounded-2xl glass-panel border border-amber-500/30 bg-slate-950/90 space-y-3">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center space-x-2">
+                          <Key className="w-4 h-4 text-amber-400" />
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-amber-200">
+                            Required AI Model Credentials & Secrets ({detectedKeys.length})
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() => navigate(`/setup?agentId=${selectedAgent.id}`)}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-bold flex items-center space-x-1 transition"
+                        >
+                          <Sliders className="w-3.5 h-3.5" />
+                          <span>Configure in Gateway Setup →</span>
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-300">
+                        These environment variables and API keys were detected in the agent's code, LLM client initializations, and tool endpoints.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+                        {detectedKeys.map(keyName => (
+                          <div key={keyName} className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/20 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-xs font-bold text-slate-100">{keyName}</span>
+                              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold rounded bg-amber-950 text-amber-300 border border-amber-500/30">
+                                Required
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400">
+                              Injects into sandbox environment for live model inference and tool execution.
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* General Dependencies & Packages */}
+                    <div className="p-4 sm:p-5 rounded-2xl glass-panel border border-slate-800 bg-slate-950/80 space-y-3">
+                      <div className="flex items-center space-x-2">
+                        <Layers className="w-4 h-4 text-cyan-400" />
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                          Package & Runtime Dependencies ({selectedAgent.dependencies.length})
+                        </h3>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
+                        {selectedAgent.dependencies.map(dep => (
+                          <div key={dep.id} className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-xs font-bold text-slate-200">{dep.name}</span>
+                              <span className="px-1.5 py-0.5 text-[9px] font-mono rounded bg-slate-800 text-slate-300 border border-slate-700">
+                                {dep.type}
+                              </span>
+                            </div>
+                            {dep.detected_from && (
+                              <p className="text-[10px] text-slate-500 font-mono truncate">
+                                Source: {dep.detected_from}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {activeTab === 'map' && graphNodes.length > 0 && (
                   <AgentMapGraph nodes={graphNodes} edges={graphEdges} />
                 )}
               </div>
             </>
           ) : (
-            <div className="py-24 text-center text-slate-400">
-              <Cpu className="w-12 h-12 mx-auto mb-4 text-slate-700" />
-              <p className="text-sm">Select an agent from the left panel to inspect it.</p>
+            <div className="py-24 text-center text-slate-400 space-y-3">
+              <Cpu className="w-12 h-12 mx-auto text-slate-700" />
+              {agents.length === 0 ? (
+                <div className="space-y-3 max-w-sm mx-auto">
+                  <p className="text-sm font-semibold text-slate-200">No agents registered in workspace</p>
+                  <p className="text-xs text-slate-400">Upload code files, paste Python scripts, or connect an agent to begin generating test scenarios and running evaluations.</p>
+                  <button
+                    onClick={() => setSearchParams({ tab: 'register' })}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-cyan-500/20 inline-flex items-center space-x-1.5 transition cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Register Your First Agent</span>
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm">Select an agent from the left panel to inspect its architecture.</p>
+              )}
             </div>
           )}
         </div>
       </div>
       )}
+
+      {/* Generous bottom margin clearance to prevent bottom fixed tester bar from obscuring content */}
+      <div className="h-32 sm:h-44 w-full shrink-0" aria-hidden="true" />
     </div>
   );
 };

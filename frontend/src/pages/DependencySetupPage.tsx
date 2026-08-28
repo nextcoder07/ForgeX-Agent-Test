@@ -34,6 +34,8 @@ import {
   FileCode,
   Info,
   Code,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import type {
   AgentRecord,
@@ -86,10 +88,10 @@ const CAPABILITY_ICONS: Record<string, React.ComponentType<{ className?: string 
 
 const CURATED_MODELS_PER_PROVIDER: Record<string, { id: string; label: string; badge?: string }[]> = {
   gemini: [
-    { id: 'gemini-2.5-flash', label: 'gemini-2.5-flash', badge: 'Fast / Rec' },
-    { id: 'gemini-2.0-flash', label: 'gemini-2.0-flash' },
-    { id: 'gemini-1.5-pro', label: 'gemini-1.5-pro', badge: 'Pro' },
-    { id: 'gemini-3.6-flash', label: 'gemini-3.6-flash' },
+    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', badge: 'New / Rec' },
+    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', badge: 'Fast' },
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', badge: 'Pro' },
   ],
   openai: [
     { id: 'gpt-4o-mini', label: 'gpt-4o-mini', badge: 'Fast / Rec' },
@@ -103,11 +105,12 @@ const CURATED_MODELS_PER_PROVIDER: Record<string, { id: string; label: string; b
     { id: 'claude-3-opus-20240229', label: 'claude-3-opus' },
   ],
   openrouter: [
-    { id: 'openai/gpt-4o-mini', label: 'openai/gpt-4o-mini', badge: 'Rec' },
+    { id: 'google/gemini-3.7-flash', label: 'google/gemini-3.7-flash', badge: 'Rec' },
+    { id: 'google/gemini-3.6-flash', label: 'google/gemini-3.6-flash' },
+    { id: 'openai/gpt-4o-mini', label: 'openai/gpt-4o-mini' },
     { id: 'anthropic/claude-3.5-sonnet', label: 'anthropic/claude-3.5-sonnet' },
     { id: 'meta-llama/llama-3.3-70b-instruct', label: 'meta-llama/llama-3.3-70b' },
     { id: 'deepseek/deepseek-r1', label: 'deepseek/deepseek-r1' },
-    { id: 'google/gemini-2.0-flash-001', label: 'google/gemini-2.0-flash' },
   ],
   groq: [
     { id: 'llama-3.3-70b-versatile', label: 'llama-3.3-70b-versatile', badge: 'Rec' },
@@ -171,6 +174,9 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
   
   // Per-slot editable inline form states
   const [slotConfigs, setSlotConfigs] = useState<Record<string, SlotConfigState>>({});
+  const [savingSlotId, setSavingSlotId] = useState<string | null>(null);
+  const [slotSavedMessages, setSlotSavedMessages] = useState<Record<string, string>>({});
+  const [showKeyMap, setShowKeyMap] = useState<Record<string, boolean>>({});
 
   const handleCancelTesting = (slotId: string) => {
     if (abortControllers.current[slotId]) {
@@ -247,8 +253,17 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
           const boundId = slot.bound_connection_id || 'system_default';
           currentBindings[slot.slot_id] = boundId;
 
+          const savedCfg = slot.saved_config;
           const boundConn = conns.find((c: ModelConnection) => c.id === boundId);
-          if (boundConn) {
+          if (savedCfg) {
+            initialSlotConfigs[slot.slot_id] = {
+              mode: savedCfg.mode || (savedCfg.provider === 'ollama' ? 'local_model' : 'cloud_api'),
+              provider: savedCfg.provider || 'gemini',
+              base_url: savedCfg.base_url || '',
+              model_identifier: savedCfg.model_identifier || slot.detected_from_source || 'gemini-3.6-flash',
+              api_key: savedCfg.api_key || '',
+            };
+          } else if (boundConn) {
             const isLocal = boundConn.is_local || boundConn.base_url?.includes('localhost') || boundConn.base_url?.includes('127.0.0.1');
             initialSlotConfigs[slot.slot_id] = {
               mode: isLocal ? 'local_model' : 'cloud_api',
@@ -261,8 +276,8 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
             initialSlotConfigs[slot.slot_id] = {
               mode: 'system_default',
               provider: 'gemini',
-              base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
-              model_identifier: slot.detected_from_source || 'gemini-2.5-flash',
+              base_url: 'https://generativelanguage.googleapis.com/v1beta',
+              model_identifier: slot.detected_from_source || 'gemini-3.6-flash',
               api_key: '',
             };
           }
@@ -274,18 +289,26 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
         const preloadedResults: Record<string, ModelConnectionTestResult> = {};
         for (const slot of slots) {
           const boundId = currentBindings[slot.slot_id];
-          if (boundId && boundId !== 'system_default') {
-            const boundConn = conns.find((c: ModelConnection) => c.id === boundId);
-            if (boundConn) {
-              preloadedResults[slot.slot_id] = {
-                success: true,
-                status: 'healthy',
-                latency_ms: boundConn.latency_ms ?? 0,
-                message: `Already saved: ${boundConn.model_identifier} @ ${boundConn.base_url}`,
-                supports_chat: true,
-                supports_json: false,
-              };
-            }
+          const savedCfg = slot.saved_config;
+          const boundConn = conns.find((c: ModelConnection) => c.id === boundId);
+          if (savedCfg && (savedCfg.api_key || savedCfg.mode === 'local_model')) {
+            preloadedResults[slot.slot_id] = {
+              success: true,
+              status: 'healthy',
+              latency_ms: 25,
+              message: `Active & Saved: ${savedCfg.model_identifier} via ${savedCfg.provider.toUpperCase()}`,
+              supports_chat: true,
+              supports_json: true,
+            };
+          } else if (boundConn) {
+            preloadedResults[slot.slot_id] = {
+              success: true,
+              status: 'healthy',
+              latency_ms: boundConn.latency_ms ?? 0,
+              message: `Already saved: ${boundConn.model_identifier} @ ${boundConn.base_url}`,
+              supports_chat: true,
+              supports_json: false,
+            };
           }
         }
         if (Object.keys(preloadedResults).length > 0) {
@@ -304,8 +327,8 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
     const prevConfig = slotConfigs[slotId] || {
       mode: 'system_default',
       provider: 'gemini',
-      base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
-      model_identifier: slot?.detected_from_source || 'gemini-2.5-flash',
+      base_url: 'https://generativelanguage.googleapis.com/v1beta',
+      model_identifier: slot?.detected_from_source || 'gemini-3.6-flash',
       api_key: '',
     };
 
@@ -313,19 +336,22 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
 
     if (newMode === 'system_default') {
       updatedConfig.provider = 'gemini';
-      updatedConfig.base_url = 'https://generativelanguage.googleapis.com/v1beta/openai';
-      updatedConfig.model_identifier = 'gemini-2.5-flash';
+      updatedConfig.base_url = 'https://generativelanguage.googleapis.com/v1beta';
+      updatedConfig.model_identifier = 'gemini-3.6-flash';
       updatedConfig.api_key = '';
       
       const updatedBindings = { ...activeSlotBindings, [slotId]: 'system_default' };
       setActiveSlotBindings(updatedBindings);
       if (selectedAgentId) {
-        await updateAgentModelBindings(selectedAgentId, updatedBindings).catch(console.error);
+        await updateAgentModelBindings(selectedAgentId, {
+          bindings: updatedBindings,
+          slot_configs: { [slotId]: updatedConfig }
+        }).catch(console.error);
       }
     } else if (newMode === 'cloud_api' && prevConfig.mode !== 'cloud_api') {
       updatedConfig.provider = 'gemini';
-      updatedConfig.base_url = 'https://generativelanguage.googleapis.com/v1beta/openai';
-      updatedConfig.model_identifier = 'gemini-2.5-flash';
+      updatedConfig.base_url = 'https://generativelanguage.googleapis.com/v1beta';
+      updatedConfig.model_identifier = 'gemini-3.6-flash';
     } else if (newMode === 'local_model' && prevConfig.mode !== 'local_model') {
       updatedConfig.provider = 'ollama';
       updatedConfig.base_url = 'http://localhost:11434/v1';
@@ -334,42 +360,92 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
     }
 
     setSlotConfigs(prev => ({ ...prev, [slotId]: updatedConfig }));
+    setTestResults(prev => {
+      const next = { ...prev };
+      delete next[slotId];
+      return next;
+    });
+    setSlotSavedMessages(prev => {
+      const next = { ...prev };
+      delete next[slotId];
+      return next;
+    });
   };
 
-  const handleSaveSlotInlineConfig = async (slotId: string) => {
-    const config = slotConfigs[slotId];
-    if (!config) return;
-
-    if (config.mode === 'system_default') {
-      const updatedBindings = { ...activeSlotBindings, [slotId]: 'system_default' };
-      setActiveSlotBindings(updatedBindings);
-      if (selectedAgentId) {
-        await updateAgentModelBindings(selectedAgentId, updatedBindings).catch(console.error);
-      }
-      return;
-    }
-
-    const DEFAULT_PRESET_URLS: Record<string, string> = {
+  const handleProviderPresetSelect = (slotId: string, providerKey: string) => {
+    const defaultModels: Record<string, string> = {
+      gemini: 'gemini-3.6-flash',
+      openai: 'gpt-4o-mini',
+      anthropic: 'claude-3-5-sonnet-20241022',
+      openrouter: 'google/gemini-3.7-flash',
+      groq: 'llama-3.3-70b-versatile',
+      deepseek: 'deepseek-chat',
+    };
+    const defaultUrls: Record<string, string> = {
       gemini: 'https://generativelanguage.googleapis.com/v1beta',
       openai: 'https://api.openai.com/v1',
       anthropic: 'https://api.anthropic.com/v1',
       openrouter: 'https://openrouter.ai/api/v1',
       groq: 'https://api.groq.com/openai/v1',
       deepseek: 'https://api.deepseek.com/v1',
-      ollama: 'http://localhost:11434/v1',
-      lm_studio: 'http://localhost:1234/v1',
-      vllm: 'http://localhost:8000/v1',
     };
 
-    const connName = `${slotId}_${config.mode === 'local_model' ? 'local' : 'cloud'}_${config.model_identifier}`;
-    const targetUrl = config.base_url || DEFAULT_PRESET_URLS[config.provider] || 'https://generativelanguage.googleapis.com/v1beta';
-    const isLocal = config.mode === 'local_model' || targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1');
+    setSlotConfigs(prev => ({
+      ...prev,
+      [slotId]: {
+        ...(prev[slotId] || { mode: 'cloud_api', api_key: '' }),
+        mode: 'cloud_api',
+        provider: providerKey,
+        base_url: defaultUrls[providerKey] || '',
+        model_identifier: defaultModels[providerKey] || 'gpt-4o-mini',
+      }
+    }));
+  };
 
-    const controller = new AbortController();
-    abortControllers.current[slotId] = controller;
+  const DEFAULT_PRESET_URLS: Record<string, string> = {
+    gemini: 'https://generativelanguage.googleapis.com/v1beta',
+    openai: 'https://api.openai.com/v1',
+    anthropic: 'https://api.anthropic.com/v1',
+    openrouter: 'https://openrouter.ai/api/v1',
+    groq: 'https://api.groq.com/openai/v1',
+    deepseek: 'https://api.deepseek.com/v1',
+    ollama: 'http://localhost:11434/v1',
+    lm_studio: 'http://localhost:1234/v1',
+    vllm: 'http://localhost:8000/v1',
+  };
 
+  const handleSaveSlotOnly = async (slotId: string) => {
+    const config = slotConfigs[slotId];
+    if (!config) return;
+
+    setSavingSlotId(slotId);
     try {
-      setTestingConnId(slotId);
+      if (config.mode === 'system_default') {
+        const updatedBindings = { ...activeSlotBindings, [slotId]: 'system_default' };
+        setActiveSlotBindings(updatedBindings);
+        if (selectedAgentId) {
+          await updateAgentModelBindings(selectedAgentId, {
+            bindings: updatedBindings,
+            slot_configs: {
+              [slotId]: {
+                mode: 'system_default',
+                provider: config.provider,
+                base_url: config.base_url,
+                model_identifier: config.model_identifier,
+                api_key: '',
+              }
+            }
+          }).catch(console.error);
+        }
+        setSlotSavedMessages(prev => ({ ...prev, [slotId]: 'Saved as Platform Default' }));
+        setTimeout(() => setSlotSavedMessages(prev => ({ ...prev, [slotId]: '' })), 3500);
+        return;
+      }
+
+      const connName = `${slotId}_${config.mode === 'local_model' ? 'local' : 'cloud'}_${config.model_identifier}`;
+      const targetUrl = config.base_url || DEFAULT_PRESET_URLS[config.provider] || 'https://generativelanguage.googleapis.com/v1beta';
+      const isLocal = config.mode === 'local_model' || targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1');
+
       const created = await createModelConnection({
         name: connName,
         provider: config.provider as any,
@@ -385,14 +461,51 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
       const updatedBindings = { ...activeSlotBindings, [slotId]: created.id };
       setActiveSlotBindings(updatedBindings);
       if (selectedAgentId) {
-        await updateAgentModelBindings(selectedAgentId, updatedBindings);
+        await updateAgentModelBindings(selectedAgentId, {
+          bindings: updatedBindings,
+          slot_configs: {
+            [slotId]: {
+              mode: config.mode,
+              provider: config.provider,
+              base_url: targetUrl,
+              model_identifier: config.model_identifier,
+              api_key: config.api_key || '',
+            }
+          }
+        });
       }
 
+      setSlotSavedMessages(prev => ({ ...prev, [slotId]: 'Configuration saved & active' }));
+      setTimeout(() => setSlotSavedMessages(prev => ({ ...prev, [slotId]: '' })), 3500);
+    } catch (err: any) {
+      alert(`Failed to save configuration for ${slotId}: ${err.message}`);
+    } finally {
+      setSavingSlotId(null);
+    }
+  };
+
+  const handleTestSlotOnly = async (slotId: string) => {
+    const config = slotConfigs[slotId];
+    if (!config) return;
+
+    setTestResults(prev => {
+      const next = { ...prev };
+      delete next[slotId];
+      return next;
+    });
+
+    const targetUrl = config.base_url || DEFAULT_PRESET_URLS[config.provider] || 'https://generativelanguage.googleapis.com/v1beta';
+
+    const controller = new AbortController();
+    abortControllers.current[slotId] = controller;
+
+    try {
+      setTestingConnId(slotId);
       const res = await testModelConnection({
-        provider: created.provider,
-        base_url: created.base_url,
-        model_identifier: created.model_identifier,
-        api_key: created.api_key || null,
+        provider: config.provider as any,
+        base_url: targetUrl,
+        model_identifier: config.model_identifier,
+        api_key: config.api_key || null,
       }, controller.signal).catch(err => ({
         success: false,
         status: 'unhealthy',
@@ -405,12 +518,48 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
       setTestResults(prev => ({ ...prev, [slotId]: res }));
     } catch (err: any) {
       if (err.name !== 'AbortError') {
-        alert(`Failed to save AI configuration for ${slotId}: ${err.message}`);
+        alert(`Test failed for ${slotId}: ${err.message}`);
       }
     } finally {
       delete abortControllers.current[slotId];
       setTestingConnId(null);
     }
+  };
+
+  const handleClearSlot = async (slotId: string) => {
+    const slot = agentModelSlots.find(s => s.slot_id === slotId);
+
+    if (abortControllers.current[slotId]) {
+      abortControllers.current[slotId].abort();
+      delete abortControllers.current[slotId];
+    }
+    setTestingConnId(null);
+
+    setTestResults(prev => {
+      const next = { ...prev };
+      delete next[slotId];
+      return next;
+    });
+
+    setSlotConfigs(prev => ({
+      ...prev,
+      [slotId]: {
+        mode: 'system_default',
+        provider: 'gemini',
+        base_url: 'https://generativelanguage.googleapis.com/v1beta',
+        model_identifier: slot?.detected_from_source || 'gemini-3.7-flash',
+        api_key: '',
+      }
+    }));
+
+    const updatedBindings = { ...activeSlotBindings, [slotId]: 'system_default' };
+    setActiveSlotBindings(updatedBindings);
+    if (selectedAgentId) {
+      await updateAgentModelBindings(selectedAgentId, updatedBindings).catch(console.error);
+    }
+
+    setSlotSavedMessages(prev => ({ ...prev, [slotId]: 'Cleared & reset to platform default' }));
+    setTimeout(() => setSlotSavedMessages(prev => ({ ...prev, [slotId]: '' })), 3500);
   };
 
   const handleSystemCredInput = (keyName: string, value: string) => {
@@ -603,8 +752,8 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
             const config = slotConfigs[slot.slot_id] || {
               mode: 'system_default',
               provider: 'gemini',
-              base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
-              model_identifier: slot.detected_from_source || 'gemini-2.5-flash',
+              base_url: 'https://generativelanguage.googleapis.com/v1beta',
+              model_identifier: slot.detected_from_source || 'gemini-3.6-flash',
               api_key: '',
             };
 
@@ -646,9 +795,9 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-[10px] text-slate-400">
-                    <span>Populates Env: <code className="text-indigo-300 font-bold bg-slate-950 px-1 rounded">{envVar}</code></span>
-                    <span>Default Model: <b className="text-emerald-400">{slot.detected_from_source || 'gemini-2.5-flash'}</b></span>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 flex-wrap gap-1">
+                    <span>Active Target: <code className="text-indigo-300 font-bold bg-slate-950 px-1 rounded">{envVar}</code></span>
+                    <span>Selected: <b className="text-purple-300 uppercase font-mono">{config.provider}</b> (<b className="text-emerald-400 font-mono">{config.model_identifier}</b>)</span>
                   </div>
 
                   {slot.explanation && (
@@ -703,7 +852,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                   <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/20 space-y-1.5 text-[11px]">
                     <div className="flex justify-between items-center text-slate-300">
                       <span className="text-slate-500">Platform Pre-filled Model:</span>
-                      <span className="text-amber-300 font-bold">Gemini 2.5 Flash</span>
+                      <span className="text-amber-300 font-bold">Gemini 3.6 Flash</span>
                     </div>
                     <div className="flex justify-between items-center text-slate-300">
                       <span className="text-slate-500">Endpoint & Auth:</span>
@@ -724,7 +873,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                       </label>
                       <div className="flex flex-wrap gap-1">
                         {[
-                          { id: 'gemini',      label: 'Gemini',      url: 'https://generativelanguage.googleapis.com/v1beta',        model: 'gemini-2.5-flash' },
+                          { id: 'gemini',      label: 'Gemini',      url: 'https://generativelanguage.googleapis.com/v1beta',        model: 'gemini-3.6-flash' },
                           { id: 'openai',      label: 'OpenAI',      url: 'https://api.openai.com/v1',                              model: 'gpt-4o-mini' },
                           { id: 'anthropic',   label: 'Anthropic',   url: 'https://api.anthropic.com/v1',                           model: 'claude-3-5-sonnet-20241022' },
                           { id: 'openrouter',  label: 'OpenRouter',  url: 'https://openrouter.ai/api/v1',                           model: 'openai/gpt-4o-mini' },
@@ -733,15 +882,22 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                         ].map(p => (
                           <button
                             key={p.id}
-                            onClick={() => setSlotConfigs(prev => ({
-                              ...prev,
-                              [slot.slot_id]: {
-                                ...config,
-                                provider: p.id,
-                                base_url: p.url,
-                                model_identifier: p.model,
-                              }
-                            }))}
+                            onClick={() => {
+                              setSlotConfigs(prev => ({
+                                ...prev,
+                                [slot.slot_id]: {
+                                  ...config,
+                                  provider: p.id,
+                                  base_url: p.url,
+                                  model_identifier: p.model,
+                                }
+                              }));
+                              setTestResults(prev => {
+                                const next = { ...prev };
+                                delete next[slot.slot_id];
+                                return next;
+                              });
+                            }}
                             className={`px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
                               config.provider === p.id
                                 ? 'bg-purple-900/60 border-purple-400 text-purple-200'
@@ -763,10 +919,17 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                           <button
                             key={m.id}
                             type="button"
-                            onClick={() => setSlotConfigs(prev => ({
-                              ...prev,
-                              [slot.slot_id]: { ...config, model_identifier: m.id }
-                            }))}
+                            onClick={() => {
+                              setSlotConfigs(prev => ({
+                                ...prev,
+                                [slot.slot_id]: { ...config, model_identifier: m.id }
+                              }));
+                              setTestResults(prev => {
+                                const next = { ...prev };
+                                delete next[slot.slot_id];
+                                return next;
+                              });
+                            }}
                             className={`px-2 py-1 rounded text-[10px] font-mono border transition flex items-center space-x-1 cursor-pointer ${
                               config.model_identifier === m.id
                                 ? 'bg-purple-950 border-purple-400 text-purple-200 font-bold shadow'
@@ -786,60 +949,155 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                         type="text"
                         placeholder="Or enter custom model name..."
                         value={config.model_identifier}
-                        onChange={e => setSlotConfigs(prev => ({
-                          ...prev,
-                          [slot.slot_id]: { ...config, model_identifier: e.target.value }
-                        }))}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setSlotConfigs(prev => ({
+                            ...prev,
+                            [slot.slot_id]: { ...config, model_identifier: val }
+                          }));
+                          setTestResults(prev => {
+                            const next = { ...prev };
+                            delete next[slot.slot_id];
+                            return next;
+                          });
+                        }}
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-emerald-300 font-mono text-xs focus:border-purple-500 focus:outline-none"
                       />
                     </div>
 
                     <div>
-                      <label className="text-[10px] text-slate-300 font-bold block mb-1">API Key <span className="text-rose-400">*</span></label>
-                      <input
-                        type="password"
-                        placeholder="Paste your API key here..."
-                        value={config.api_key}
-                        onChange={e => setSlotConfigs(prev => ({
-                          ...prev,
-                          [slot.slot_id]: { ...config, api_key: e.target.value }
-                        }))}
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono text-xs focus:border-purple-500 focus:outline-none"
-                      />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] text-slate-300 font-bold">API Key <span className="text-rose-400">*</span></label>
+                        {activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default' && (
+                          <span className="text-[9px] font-mono text-emerald-400 flex items-center space-x-1">
+                            <CheckCircle2 className="w-2.5 h-2.5" />
+                            <span>Vault Key Saved</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative flex items-center">
+                        <input
+                          type={showKeyMap[slot.slot_id] ? "text" : "password"}
+                          placeholder={activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default' && !config.api_key ? "•••••••••••••••• (Saved in Vault)" : "Paste your API key here..."}
+                          value={config.api_key}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setSlotConfigs(prev => ({
+                              ...prev,
+                              [slot.slot_id]: { ...config, api_key: val }
+                            }));
+                            setTestResults(prev => {
+                              const next = { ...prev };
+                              delete next[slot.slot_id];
+                              return next;
+                            });
+                          }}
+                          className="w-full pl-2.5 pr-8 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono text-xs focus:border-purple-500 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowKeyMap(prev => ({ ...prev, [slot.slot_id]: !prev[slot.slot_id] }))}
+                          className="absolute right-2 text-slate-400 hover:text-slate-200 transition"
+                          title={showKeyMap[slot.slot_id] ? "Hide key" : "Show key"}
+                        >
+                          {showKeyMap[slot.slot_id] ? <EyeOff className="w-3.5 h-3.5 text-cyan-400" /> : <Eye className="w-3.5 h-3.5 text-slate-400" />}
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
-                      {testResult && (
-                        <span className={`text-[10px] font-medium ${testResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {testResult.success ? `✓ Ping: ${testResult.latency_ms}ms (Saved to Vault & Bound to ${codeVar})` : `⚠️ ${testResult.message}`}
+                    {/* Active Configuration Summary Pill */}
+                    {activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default' && (
+                      <div className="p-2.5 rounded-xl bg-slate-950/90 border border-emerald-500/40 text-[11px] flex items-center justify-between flex-wrap gap-2 shadow-inner">
+                        <div className="flex items-center space-x-2">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span className="text-slate-200 font-semibold">
+                            Saved: <b className="text-purple-300 uppercase font-mono">{config.provider}</b> (<code className="text-cyan-300">{config.model_identifier}</code>)
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
+                          {config.api_key ? (showKeyMap[slot.slot_id] ? config.api_key : `••••${config.api_key.slice(-4)}`) : '•••••••• (Active in Vault)'}
                         </span>
-                      )}
-                      <div className="ml-auto flex items-center space-x-2">
-                        {isSavingOrTesting && (
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 flex-wrap gap-2">
+                      <div className="flex-1 min-w-[180px]">
+                        {isSavingOrTesting ? (
+                          <span className="text-[10px] font-medium text-cyan-400 animate-pulse flex items-center space-x-1.5">
+                            <RefreshCw className="w-3 h-3 animate-spin text-cyan-400" />
+                            <span>Testing ({config.model_identifier})...</span>
+                          </span>
+                        ) : savingSlotId === slot.slot_id ? (
+                          <span className="text-[10px] font-medium text-purple-400 animate-pulse flex items-center space-x-1.5">
+                            <RefreshCw className="w-3 h-3 animate-spin text-purple-400" />
+                            <span>Saving to vault...</span>
+                          </span>
+                        ) : testResult ? (
+                          <span className={`text-[10px] font-medium ${testResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {testResult.success ? `✓ Ping: ${testResult.latency_ms}ms (Endpoint Healthy)` : `⚠️ ${testResult.message}`}
+                          </span>
+                        ) : slotSavedMessages[slot.slot_id] ? (
+                          <span className="text-[10px] font-medium text-emerald-400 flex items-center space-x-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>{slotSavedMessages[slot.slot_id]}</span>
+                          </span>
+                        ) : activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default' ? (
+                          <span className="text-[10px] font-medium text-emerald-400/80 flex items-center space-x-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>Saved & Active</span>
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="flex items-center space-x-1.5">
+                        {/* 1. Clear Button */}
+                        <button
+                          type="button"
+                          disabled={isSavingOrTesting}
+                          onClick={() => handleClearSlot(slot.slot_id)}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer disabled:opacity-40"
+                          title="Clear inputs and reset to platform default"
+                        >
+                          <Trash2 className="w-3 h-3 text-slate-400" />
+                          <span>Clear</span>
+                        </button>
+
+                        {/* 2. Test / Cancel Button */}
+                        {isSavingOrTesting ? (
                           <button
                             type="button"
                             onClick={() => handleCancelTesting(slot.slot_id)}
-                            className="px-2.5 py-1.5 rounded-lg bg-rose-950 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-950 hover:bg-rose-900 border border-rose-500/50 text-rose-300 text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer animate-pulse"
+                            title="Cancel in-progress test"
                           >
                             <XCircle className="w-3 h-3 text-rose-400" />
-                            <span>Cancel Test</span>
+                            <span>Cancel</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!config.model_identifier.trim() || !config.api_key.trim()}
+                            onClick={() => handleTestSlotOnly(slot.slot_id)}
+                            className="px-2.5 py-1.5 rounded-lg bg-indigo-950 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer disabled:opacity-40"
+                            title="Test endpoint reachability"
+                          >
+                            <Zap className="w-3 h-3 text-indigo-400" />
+                            <span>Test</span>
                           </button>
                         )}
+
+                        {/* 3. Save Button */}
                         <button
-                          disabled={isSavingOrTesting || !config.model_identifier.trim() || !config.api_key.trim()}
-                          onClick={() => handleSaveSlotInlineConfig(slot.slot_id)}
-                          className={`px-3 py-1.5 rounded-lg disabled:opacity-40 text-white text-[11px] font-bold shadow transition flex items-center space-x-1 cursor-pointer ${
-                            testResult?.success && activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default'
-                              ? 'bg-emerald-700/60 hover:bg-emerald-600/80 border border-emerald-500/50'
-                              : 'bg-purple-600 hover:bg-purple-500'
-                          }`}
+                          type="button"
+                          disabled={isSavingOrTesting || savingSlotId === slot.slot_id || !config.model_identifier.trim() || !config.api_key.trim()}
+                          onClick={() => handleSaveSlotOnly(slot.slot_id)}
+                          className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold shadow transition flex items-center space-x-1 cursor-pointer disabled:opacity-40"
+                          title="Save and bind this configuration directly"
                         >
-                          {isSavingOrTesting ? (
-                            <><RefreshCw className="w-3 h-3 animate-spin" /><span>Testing...</span></>
-                          ) : testResult?.success && activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default' ? (
-                            <><CheckCircle className="w-3 h-3 text-emerald-300" /><span>Saved ✓ &nbsp;Re-test</span></>
+                          {savingSlotId === slot.slot_id ? (
+                            <><RefreshCw className="w-3 h-3 animate-spin" /><span>Saving...</span></>
                           ) : (
-                            <><Check className="w-3 h-3" /><span>Save & Test AI Key</span></>
+                            <><Check className="w-3 h-3" /><span>Save</span></>
                           )}
                         </button>
                       </div>
@@ -862,15 +1120,22 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                         ].map(s => (
                           <button
                             key={s.id}
-                            onClick={() => setSlotConfigs(prev => ({
-                              ...prev,
-                              [slot.slot_id]: {
-                                ...config,
-                                provider: s.id,
-                                base_url: `http://localhost:${s.port}/v1`,
-                                model_identifier: s.model,
-                              }
-                            }))}
+                            onClick={() => {
+                              setSlotConfigs(prev => ({
+                                ...prev,
+                                [slot.slot_id]: {
+                                  ...config,
+                                  provider: s.id,
+                                  base_url: `http://localhost:${s.port}/v1`,
+                                  model_identifier: s.model,
+                                }
+                              }));
+                              setTestResults(prev => {
+                                const next = { ...prev };
+                                delete next[slot.slot_id];
+                                return next;
+                              });
+                            }}
                             className={`py-1 px-1 rounded text-[10px] font-bold border transition cursor-pointer text-center ${
                               config.provider === s.id
                                 ? 'bg-emerald-900/60 border-emerald-400 text-emerald-200'
@@ -889,10 +1154,18 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                         type="text"
                         placeholder="http://localhost:11434/v1"
                         value={config.base_url}
-                        onChange={e => setSlotConfigs(prev => ({
-                          ...prev,
-                          [slot.slot_id]: { ...config, base_url: e.target.value }
-                        }))}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setSlotConfigs(prev => ({
+                            ...prev,
+                            [slot.slot_id]: { ...config, base_url: val }
+                          }));
+                          setTestResults(prev => {
+                            const next = { ...prev };
+                            delete next[slot.slot_id];
+                            return next;
+                          });
+                        }}
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-xs focus:border-emerald-500 focus:outline-none"
                       />
                     </div>
@@ -903,46 +1176,100 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                         type="text"
                         placeholder="e.g. llama3.2, qwen2.5:7b, mistral"
                         value={config.model_identifier}
-                        onChange={e => setSlotConfigs(prev => ({
-                          ...prev,
-                          [slot.slot_id]: { ...config, model_identifier: e.target.value }
-                        }))}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setSlotConfigs(prev => ({
+                            ...prev,
+                            [slot.slot_id]: { ...config, model_identifier: val }
+                          }));
+                          setTestResults(prev => {
+                            const next = { ...prev };
+                            delete next[slot.slot_id];
+                            return next;
+                          });
+                        }}
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-emerald-300 font-mono text-xs focus:border-emerald-500 focus:outline-none"
                       />
                     </div>
 
-                    <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
-                      {testResult && (
-                        <span className={`text-[10px] font-medium ${testResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {testResult.success ? `✓ Ping: ${testResult.latency_ms}ms (Saved to Vault & Bound to ${codeVar})` : `⚠️ ${testResult.message}`}
-                        </span>
-                      )}
-                      <div className="ml-auto flex items-center space-x-2">
-                        {isSavingOrTesting && (
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 flex-wrap gap-2">
+                      <div className="flex-1 min-w-[180px]">
+                        {isSavingOrTesting ? (
+                          <span className="text-[10px] font-medium text-emerald-400 animate-pulse flex items-center space-x-1.5">
+                            <RefreshCw className="w-3 h-3 animate-spin text-emerald-400" />
+                            <span>Testing local model ({config.model_identifier})...</span>
+                          </span>
+                        ) : savingSlotId === slot.slot_id ? (
+                          <span className="text-[10px] font-medium text-emerald-400 animate-pulse flex items-center space-x-1.5">
+                            <RefreshCw className="w-3 h-3 animate-spin text-emerald-400" />
+                            <span>Saving local configuration...</span>
+                          </span>
+                        ) : testResult ? (
+                          <span className={`text-[10px] font-medium ${testResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {testResult.success ? `✓ Ping: ${testResult.latency_ms}ms (Endpoint Healthy)` : `⚠️ ${testResult.message}`}
+                          </span>
+                        ) : slotSavedMessages[slot.slot_id] ? (
+                          <span className="text-[10px] font-medium text-emerald-400 flex items-center space-x-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>{slotSavedMessages[slot.slot_id]}</span>
+                          </span>
+                        ) : activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default' ? (
+                          <span className="text-[10px] font-medium text-emerald-400/80 flex items-center space-x-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>Saved & Active</span>
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="flex items-center space-x-1.5">
+                        {/* 1. Clear Button */}
+                        <button
+                          type="button"
+                          disabled={isSavingOrTesting}
+                          onClick={() => handleClearSlot(slot.slot_id)}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer disabled:opacity-40"
+                          title="Clear inputs and reset to platform default"
+                        >
+                          <Trash2 className="w-3 h-3 text-slate-400" />
+                          <span>Clear</span>
+                        </button>
+
+                        {/* 2. Test / Cancel Button */}
+                        {isSavingOrTesting ? (
                           <button
                             type="button"
                             onClick={() => handleCancelTesting(slot.slot_id)}
-                            className="px-2.5 py-1.5 rounded-lg bg-rose-950 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer"
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-950 hover:bg-rose-900 border border-rose-500/50 text-rose-300 text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer animate-pulse"
+                            title="Cancel in-progress local test"
                           >
                             <XCircle className="w-3 h-3 text-rose-400" />
-                            <span>Cancel Test</span>
+                            <span>Cancel</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!config.base_url.trim() || !config.model_identifier.trim()}
+                            onClick={() => handleTestSlotOnly(slot.slot_id)}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-200 text-[10px] font-bold transition flex items-center space-x-1 cursor-pointer disabled:opacity-40"
+                            title="Test local server reachability"
+                          >
+                            <Zap className="w-3 h-3 text-emerald-400" />
+                            <span>Test</span>
                           </button>
                         )}
+
+                        {/* 3. Save Button */}
                         <button
-                          disabled={isSavingOrTesting || !config.base_url.trim() || !config.model_identifier.trim()}
-                          onClick={() => handleSaveSlotInlineConfig(slot.slot_id)}
-                          className={`px-3 py-1.5 rounded-lg disabled:opacity-40 text-white text-[11px] font-bold shadow transition flex items-center space-x-1 cursor-pointer ${
-                            testResult?.success && activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default'
-                              ? 'bg-emerald-700/60 hover:bg-emerald-600/80 border border-emerald-500/50'
-                              : 'bg-emerald-600 hover:bg-emerald-500'
-                          }`}
+                          type="button"
+                          disabled={isSavingOrTesting || savingSlotId === slot.slot_id || !config.base_url.trim() || !config.model_identifier.trim()}
+                          onClick={() => handleSaveSlotOnly(slot.slot_id)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold shadow transition flex items-center space-x-1 cursor-pointer disabled:opacity-40"
+                          title="Save and bind this configuration directly"
                         >
-                          {isSavingOrTesting ? (
-                            <><RefreshCw className="w-3 h-3 animate-spin" /><span>Testing...</span></>
-                          ) : testResult?.success && activeSlotBindings[slot.slot_id] && activeSlotBindings[slot.slot_id] !== 'system_default' ? (
-                            <><CheckCircle className="w-3 h-3 text-emerald-300" /><span>Saved ✓ &nbsp;Re-test</span></>
+                          {savingSlotId === slot.slot_id ? (
+                            <><RefreshCw className="w-3 h-3 animate-spin" /><span>Saving...</span></>
                           ) : (
-                            <><Check className="w-3 h-3" /><span>Save & Test Local Model</span></>
+                            <><Check className="w-3 h-3" /><span>Save</span></>
                           )}
                         </button>
                       </div>

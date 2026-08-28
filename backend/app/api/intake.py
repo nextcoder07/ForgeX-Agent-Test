@@ -431,6 +431,45 @@ async def register_normalized_spec(payload: RegisterSpecRequest):
         logger.warning(f"Error auto-building sandbox specification: {e}")
         sandbox_spec_status = "FAILED"
 
+    # --- Auto-build and persist AgentTestSpecification ---
+    try:
+        wf_nodes = []
+        if spec.behavior_profile and hasattr(spec.behavior_profile, "workflow_graph") and hasattr(spec.behavior_profile.workflow_graph, "nodes"):
+            wf_nodes = [getattr(n, "label", str(n)) for n in spec.behavior_profile.workflow_graph.nodes]
+        test_spec = AgentTestSpecification(
+            id=f"testspec-{rec.id}",
+            agent_id=rec.id,
+            goal=spec.goals[0] if spec.goals else "Execute agent workflows",
+            inputs=[{"type": "user_message", "name": "prompt"}],
+            tools=[t.model_dump() if hasattr(t, "model_dump") else (t.dict() if hasattr(t, "dict") else dict(t)) for t in spec.tools],
+            workflow=wf_nodes,
+            risks=[r if isinstance(r, str) else str(r) for r in (getattr(spec, "risks", []) or [])],
+            created_at=_now()
+        )
+        store.save_agent_test_spec(test_spec)
+    except Exception as e:
+        logger.warning(f"Error auto-saving AgentTestSpecification for {rec.id}: {e}")
+
+    # --- Auto-create and persist initial baseline AgentVersionRecord (v1.0) ---
+    try:
+        from app.models.canonical_data_models import AgentVersionRecord
+        v1_record = AgentVersionRecord(
+            id=f"ver-{rec.id}-v1.0",
+            agent_id=rec.id,
+            version_label="v1.0",
+            parent_version_id=None,
+            is_latest=True,
+            change_summary="Initial baseline ingestion",
+            source_files=rec.source_files or {},
+            created_at=_now()
+        )
+        store.save_agent_version(v1_record)
+        rec.current_version_id = v1_record.id
+    except Exception as e:
+        logger.warning(f"Error auto-saving baseline AgentVersionRecord for {rec.id}: {e}")
+
+
+
     # Overall registration status
     if (
         agent_status == "SUCCESS"

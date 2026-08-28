@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import json
+import uuid
 import hashlib
 import logging
 import datetime as dt
@@ -19,8 +20,10 @@ from app.models.evaluation import EvaluationJob, ReliabilityScorecard, Regressio
 from app.models.failure import RunVerdict, FailureCluster, FailureFinding
 from app.models.execution import (
     ExecutionTrace, ExecutionJob, ExecutionSession, ExecutionStep, ExecutionMetrics, 
-    BenchmarkRecord, ExecutionPreflight, ExecutionRun, ExecutionAction, ExecutionArtifact
+    BenchmarkRecord, ExecutionPreflight, ExecutionRun, ExecutionAction, ExecutionArtifact,
+    PreExecutionSnapshot, PostExecutionSnapshot, EvidencePackage
 )
+from app.models.repair import RepairSession
 from app.models.pipeline import PipelineRun, PipelineStage, AIGenerationRun
 from app.models.intake import AgentTestSpecification, SandboxSpecification, AgentDependency, PlatformResource, DependencyBinding
 from app.models.agent_behavior import AgentBehaviorProfile
@@ -28,6 +31,11 @@ from app.models.model_connection import ModelConnection
 from app.models.training import TrainingDataset, SFTExample, PreferencePair, FailureRecoveryExample
 from app.models.diagnosis import FailureDiagnosis, AgentDiagnosisReport
 from app.models.model_training_job import TrainingJob, ModelVersionRecord
+from app.models.evaluation_ontology import Finding, CanonicalReliabilityReport
+from app.models.canonical_data_models import (
+    TestCaseSpecification, EvidenceGraph, PatchArtifact, AgentVersionRecord
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +53,15 @@ class SyncedDict:
         self.key_col = key_col
         self._local_data: Dict[str, Any] = {}
         self._sb = get_client()
-        self._load_local_snapshot()
+        if not self._sb:
+            self._load_local_snapshot()
 
     def _snapshot_file(self) -> str:
         return os.path.join(os.path.dirname(__file__), f"__snapshot_{self.table_name}.json")
 
     def _save_local_snapshot(self):
+        if self._sb:
+            return  # When Supabase is active, never write local JSON snapshot files
         try:
             snapshot = {}
             for k, val in self._local_data.items():
@@ -64,6 +75,8 @@ class SyncedDict:
             logger.debug(f"Could not save disk snapshot for {self.table_name}: {e}")
 
     def _load_local_snapshot(self):
+        if self._sb:
+            return  # When Supabase is active, do not load local JSON files
         sf = self._snapshot_file()
         if os.path.exists(sf):
             try:
@@ -78,10 +91,20 @@ class SyncedDict:
         if self._sb:
             try:
                 res = self._sb.table(self.table_name).select("*").eq(self.key_col, key).execute()
-                if res.data:
+                if not res.data and self.key_col != "id":
+                    res = self._sb.table(self.table_name).select("*").eq("id", key).execute()
+                if res.data and len(res.data) > 0:
                     return self.deserialize_fn(res.data[0])
+                if key in self._local_data:
+                    return self._local_data[key]
+                raise KeyError(key)
+            except KeyError:
+                raise
             except Exception as e:
-                logger.error(f"Supabase error fetching from {self.table_name} for key {key}: {e}")
+                logger.debug(f"Supabase error fetching from {self.table_name} for key {key}: {e}")
+                if key in self._local_data:
+                    return self._local_data[key]
+                raise KeyError(key)
         
         if key in self._local_data:
             return self._local_data[key]
@@ -93,7 +116,8 @@ class SyncedDict:
         if self._sb:
             try:
                 row = self.serialize_fn(key, value)
-                self._sb.table(self.table_name).upsert(row).execute()
+                conflict_col = "id" if "id" in row else self.key_col
+                self._sb.table(self.table_name).upsert(row, on_conflict=conflict_col).execute()
             except Exception as e:
                 err_msg = str(e)
                 if self.table_name == "sandbox_specifications" and ("PGRST204" in err_msg or "schema cache" in err_msg):
@@ -102,28 +126,27 @@ class SyncedDict:
                         row = self.serialize_fn(key, value)
                         for field in ["status", "blockers", "runtime_version"]:
                             row.pop(field, None)
-                        self._sb.table(self.table_name).upsert(row).execute()
+                        self._sb.table(self.table_name).upsert(row, on_conflict="id").execute()
                         logger.info(f"Successfully saved sandbox spec {key} using schema cache fallback.")
                         return
                     except Exception as retry_err:
                         logger.error(f"Fallback save failed for {self.table_name}: {retry_err}")
                 if "PGRST204" in err_msg or "PGRST205" in err_msg or "schema cache" in err_msg:
-                    logger.debug(f"Supabase table or column schema mismatch for '{self.table_name}' ({e}). Preserved in local JSON snapshot.")
+                    logger.debug(f"Supabase table or column schema mismatch for '{self.table_name}' ({e}).")
                 else:
-                    logger.debug(f"Supabase error saving to {self.table_name} for key {key}: {e}. Preserved in local snapshot.")
+                    logger.warning(f"Supabase error saving to {self.table_name} for key {key}: {e}.")
 
     def __delitem__(self, key: str) -> None:
         if key in self._local_data:
             del self._local_data[key]
-            self._save_local_snapshot()
+        self._save_local_snapshot()
         if self._sb:
             try:
                 self._sb.table(self.table_name).delete().eq(self.key_col, key).execute()
             except Exception as e:
                 logger.error(f"Supabase error deleting from {self.table_name} for key {key}: {e}")
 
-
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
         try:
             return self[key]
         except KeyError:
@@ -133,20 +156,26 @@ class SyncedDict:
         if self._sb:
             try:
                 res = self._sb.table(self.table_name).select(self.key_col).eq(self.key_col, key).execute()
-                if res.data:
-                    return True
+                return bool(res.data and len(res.data) > 0)
             except Exception:
-                pass
+                return False
         return key in self._local_data
 
     def values(self) -> List[Any]:
         if self._sb:
             try:
                 res = self._sb.table(self.table_name).select("*").execute()
-                if res.data:
-                    return [self.deserialize_fn(row) for row in res.data]
+                if res.data is not None:
+                    items = []
+                    for r in res.data:
+                        try:
+                            items.append(self.deserialize_fn(r))
+                        except Exception as row_err:
+                            logger.error(f"Error deserializing row in {self.table_name}: {row_err}")
+                    return items
             except Exception as e:
                 logger.error(f"Supabase error listing values from {self.table_name}: {e}")
+                return []
         return list(self._local_data.values())
 
     def keys(self) -> List[str]:
@@ -154,9 +183,11 @@ class SyncedDict:
             try:
                 res = self._sb.table(self.table_name).select(self.key_col).execute()
                 if res.data:
-                    return [row[self.key_col] for row in res.data if self.key_col in row]
+                    return [str(row[self.key_col]) for row in res.data if self.key_col in row]
+                return []
             except Exception as e:
                 logger.error(f"Supabase error listing keys from {self.table_name}: {e}")
+                return []
         return list(self._local_data.keys())
 
     def items(self) -> List[tuple[str, Any]]:
@@ -164,13 +195,15 @@ class SyncedDict:
             try:
                 res = self._sb.table(self.table_name).select("*").execute()
                 if res.data:
-                    return [(row[self.key_col], self.deserialize_fn(row)) for row in res.data]
+                    return [(str(row.get(self.key_col) or row.get("id")), self.deserialize_fn(row)) for row in res.data]
+                return []
             except Exception as e:
                 logger.error(f"Supabase error listing items from {self.table_name}: {e}")
+                return []
         return list(self._local_data.items())
 
     def __iter__(self):
-        return iter(self._local_data)
+        return iter(self.keys())
 
     def __len__(self) -> int:
         if self._sb:
@@ -180,6 +213,7 @@ class SyncedDict:
                     return res.count
             except Exception:
                 pass
+        return len(self._local_data)
         return len(self._local_data)
 
 
@@ -202,14 +236,20 @@ def _serialize_agent(key: str, agent: AgentRecord) -> Dict[str, Any]:
         "tools": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in agent.tools],
         "dependencies": [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in agent.dependencies],
         "constitution": agent.constitution.model_dump() if hasattr(agent.constitution, "model_dump") else agent.constitution.dict(),
-        "version_label": agent.version_label
+        "version_label": agent.version_label,
+        "runtime_manifest": agent.runtime_manifest,
+        "execution_status": agent.execution_status,
+        "input_type": agent.input_type,
+        "user_id": getattr(agent, "user_id", "default_user"),
+        "created_at": agent.created_at,
+        "current_version_id": agent.current_version_id
     }
     return {
         "id": agent.id,
         "name": agent.name,
         "description": agent.description,
         "status": "active",
-        "current_version_id": agent.id,
+        "current_version_id": agent.current_version_id or agent.id,
         "agent_spec": spec
     }
 
@@ -231,17 +271,23 @@ def _deserialize_agent(row: Dict[str, Any]) -> AgentRecord:
         constitution=constitution,
         endpoint=spec.get("endpoint") or row.get("endpoint"),
         version_label=spec.get("version_label", "v1.0"),
+        current_version_id=row.get("current_version_id") or spec.get("current_version_id"),
         artifact_id=spec.get("artifact_id"),
         artifact_hash=spec.get("artifact_hash"),
         source_files=spec.get("source_files", {}),
         runtime_manifest=spec.get("runtime_manifest", {}),
         execution_status=spec.get("execution_status", "EXECUTION_BLOCKED"),
         input_type=spec.get("input_type", "package"),
+        user_id=row.get("user_id") or spec.get("user_id", "default_user"),
         created_at=str(row.get("created_at", _now())),
     )
 
+
 def _serialize_scenario(key: str, sc: Scenario) -> Dict[str, Any]:
     scenario_data = sc.model_dump() if hasattr(sc, "model_dump") else sc.dict()
+    av_id = sc.agent_version_id
+    if av_id and not str(av_id).startswith("ver-"):
+        av_id = None
     return {
         "id": sc.id,
         "agent_id": sc.agent_id,
@@ -259,12 +305,30 @@ def _serialize_scenario(key: str, sc: Scenario) -> Dict[str, Any]:
         "target_invariant": sc.target_invariant,
         "validation_status": sc.validation_status,
         "critic_status": sc.critic_status,
-        "agent_version_id": sc.agent_version_id,
+        "agent_version_id": av_id,
         "scenario_spec": scenario_data
     }
 
 def _deserialize_scenario(row: Dict[str, Any]) -> Scenario:
     spec = row.get("scenario_spec") or {}
+    if not isinstance(spec, dict):
+        spec = {}
+    spec = dict(spec)
+
+    # Ensure required scenario fields exist
+    if not spec.get("id"):
+        spec["id"] = row.get("id") or f"sc-{uuid.uuid4().hex[:8]}"
+    if not spec.get("agent_id"):
+        spec["agent_id"] = row.get("agent_id") or ""
+    if not spec.get("title"):
+        spec["title"] = row.get("title") or "Test Scenario"
+    if not spec.get("purpose"):
+        spec["purpose"] = row.get("purpose") or "Evaluate agent behavior."
+    if not spec.get("category"):
+        spec["category"] = row.get("category") or "normal"
+    if not spec.get("status"):
+        spec["status"] = row.get("status") or "READY"
+
     projected_fields = (
         "agent_id", "interface_type", "invocation", "input_artifacts", "assertions",
         "provenance", "fingerprint", "target_failure_surface", "target_invariant",
@@ -306,13 +370,21 @@ def _serialize_job(key: str, job: EvaluationJob) -> Dict[str, Any]:
     return {
         "id": job.id,
         "agent_id": job.agent_id,
-        "agent_version_id": job.agent_version_id or job.agent_id,
-        "name": job.agent_name,
-        "mode": job.execution_mode,
+        "agent_version_id": job.agent_version_id if (job.agent_version_id and "-v" in str(job.agent_version_id)) else None,
+        "run_type": "evaluation",
+        "execution_mode": job.execution_mode,
         "status": job.status,
         "total_scenarios": job.total_scenarios,
-        "completed_scenarios": job.completed_scenarios,
-        "started_at": job.created_at,
+        "passed_scenarios": job.completed_scenarios,
+        "total_verdicts": job.total_verdicts,
+        "original_model": job.original_model,
+        "executed_model": job.executed_model,
+        "model_substitution": job.model_substitution,
+        "confidence": job.confidence,
+        "fidelity": job.fidelity,
+        "evaluator_version": job.evaluator_version,
+        "rule_set_version": job.rule_set_version,
+        "started_at": job.started_at or job.created_at,
         "completed_at": job.finished_at,
         "job_spec": spec
     }
@@ -330,31 +402,35 @@ def _deserialize_job(row: Dict[str, Any]) -> EvaluationJob:
     else:
         error_msg = spec.get("error_message") or row.get("error_message")
 
+    total_sc = int(spec.get("total_scenarios") or row.get("total_scenarios") or 0)
+    passed_sc = int(spec.get("completed_scenarios") or row.get("passed_scenarios") or row.get("completed_scenarios") or total_sc)
+    total_vd = int(spec.get("total_verdicts") or row.get("total_verdicts") or passed_sc)
+
     return EvaluationJob(
         id=row["id"],
-        agent_id=spec.get("agent_id") or row.get("agent_version_id") or row.get("agent_id", ""),
+        agent_id=spec.get("agent_id") or row.get("agent_id", ""),
         agent_version_id=spec.get("agent_version_id") or row.get("agent_version_id"),
-        agent_name=spec.get("agent_name") or row.get("name", ""),
+        agent_name=spec.get("agent_name") or row.get("name") or row.get("agent_name", ""),
         agent_version=spec.get("agent_version") or row.get("agent_version", "v1.0"),
-        execution_run_id=spec.get("execution_run_id"),
+        execution_run_id=spec.get("execution_run_id") or row.get("execution_run_id"),
         sandbox_specification_id=spec.get("sandbox_specification_id"),
         behavior_profile_id=spec.get("behavior_profile_id"),
         scenario_set_id=spec.get("scenario_set_id"),
         status=status,
         current_step=current_step,
         error_message=error_msg,
-        total_scenarios=int(spec.get("total_scenarios") or row.get("total_scenarios", 0)),
-        completed_scenarios=int(spec.get("completed_scenarios") or row.get("completed_scenarios", 0)),
-        total_verdicts=int(spec.get("total_verdicts") or row.get("total_verdicts", 0)),
-        execution_mode=spec.get("execution_mode") or row.get("mode") or "faithful",
-        original_model=spec.get("original_model") or row.get("original_model", "openai/gpt-5"),
-        executed_model=spec.get("executed_model") or row.get("executed_model", "openai/gpt-5"),
+        total_scenarios=total_sc,
+        completed_scenarios=passed_sc,
+        total_verdicts=total_vd,
+        execution_mode=spec.get("execution_mode") or row.get("execution_mode") or row.get("mode") or "faithful",
+        original_model=spec.get("original_model") or row.get("original_model", "openai/gpt-4o"),
+        executed_model=spec.get("executed_model") or row.get("executed_model", "openai/gpt-4o"),
         model_substitution=bool(spec.get("model_substitution") if "model_substitution" in spec else row.get("model_substitution", False)),
         confidence=spec.get("confidence") or row.get("confidence", "HIGH"),
-        fidelity=float(spec.get("fidelity") or 1.0),
-        evaluator_version=spec.get("evaluator_version") or "v2.0",
-        rule_set_version=spec.get("rule_set_version") or "reliability-rules-v2",
-        created_at=str(spec.get("created_at") or row.get("started_at") or _now()),
+        fidelity=float(spec.get("fidelity") or row.get("fidelity") or 1.0),
+        evaluator_version=spec.get("evaluator_version") or row.get("evaluator_version") or "v2.0",
+        rule_set_version=spec.get("rule_set_version") or row.get("rule_set_version") or "reliability-rules-v2",
+        created_at=str(spec.get("created_at") or row.get("created_at") or row.get("started_at") or _now()),
         started_at=spec.get("started_at") or row.get("started_at"),
         finished_at=spec.get("finished_at") or row.get("completed_at")
     )
@@ -468,12 +544,13 @@ def _serialize_pipeline_run(key: str, run: PipelineRun) -> Dict[str, Any]:
 def _deserialize_pipeline_run(row: Dict[str, Any]) -> PipelineRun:
     return PipelineRun(
         id=row["id"],
-        agent_id=row.get("agent_id", ""),
-        agent_name=row.get("agent_name", ""),
-        status=row.get("status", "queued"),
-        started_at=row.get("started_at", _now()),
+        agent_id=row.get("agent_id") or "",
+        agent_name=row.get("agent_name") or "",
+        status=row.get("status") or "queued",
+        started_at=row.get("started_at") or _now(),
         completed_at=row.get("completed_at")
     )
+
 
 
 def _serialize_agent_test_spec(key: str, spec: AgentTestSpecification) -> Dict[str, Any]:
@@ -676,30 +753,68 @@ def _deserialize_ai_generation_run(row: Dict[str, Any]) -> AIGenerationRun:
 
 def _serialize_execution_session(key: str, s: Any) -> Dict[str, Any]:
     if isinstance(s, dict):
-        return s
+        return {
+            "id": s.get("id", key),
+            "evaluation_run_id": s.get("execution_run_id") or s.get("evaluation_run_id"),
+            "agent_version_id": s.get("agent_version_id"),
+            "scenario_id": s.get("scenario_id"),
+            "sandbox_session_id": s.get("sandbox_session_id"),
+            "status": s.get("status", "active"),
+            "started_at": s.get("started_at", _now()),
+            "completed_at": s.get("finished_at") or s.get("completed_at"),
+        }
+
     return {
         "id": getattr(s, "id", key),
-        "execution_run_id": getattr(s, "execution_run_id", getattr(s, "evaluation_run_id", None)),
+        "evaluation_run_id": getattr(s, "execution_run_id", getattr(s, "evaluation_run_id", None)),
         "agent_version_id": getattr(s, "agent_version_id", None),
         "scenario_id": getattr(s, "scenario_id", None),
         "sandbox_session_id": getattr(s, "sandbox_session_id", None),
         "status": getattr(s, "status", "active"),
-        "started_at": getattr(s, "started_at", None),
-        "completed_at": getattr(s, "completed_at", None),
+        "started_at": getattr(s, "started_at", _now()),
+        "completed_at": getattr(s, "finished_at", getattr(s, "completed_at", None)),
     }
 
 
 def _deserialize_execution_session(row: Dict[str, Any]) -> ExecutionSession:
+    pre_snap = None
+    if row.get("pre_snapshot"):
+        try:
+            pre_snap = PreExecutionSnapshot(**row["pre_snapshot"])
+        except Exception:
+            pre_snap = row["pre_snapshot"]
+
+    post_snap = None
+    if row.get("post_snapshot"):
+        try:
+            post_snap = PostExecutionSnapshot(**row["post_snapshot"])
+        except Exception:
+            post_snap = row["post_snapshot"]
+
+    ev_pkg = None
+    if row.get("evidence_package"):
+        try:
+            ev_pkg = EvidencePackage(**row["evidence_package"])
+        except Exception:
+            ev_pkg = row["evidence_package"]
+
     return ExecutionSession(
         id=row["id"],
-        evaluation_run_id=row.get("evaluation_run_id"),
-        agent_version_id=row.get("agent_version_id"),
-        scenario_id=row.get("scenario_id"),
+        execution_run_id=row.get("evaluation_run_id") or row.get("execution_run_id", ""),
+        agent_version_id=row.get("agent_version_id") or "",
+        scenario_id=row.get("scenario_id") or "",
         sandbox_session_id=row.get("sandbox_session_id"),
-        status=row.get("status", "active"),
+        status=row.get("status", "SCENARIO_SELECTED"),
         started_at=row.get("started_at", _now()),
-        completed_at=row.get("completed_at"),
+        finished_at=row.get("completed_at") or row.get("finished_at"),
+        trajectory_hash=row.get("trajectory_hash"),
+        pre_snapshot=pre_snap,
+        post_snapshot=post_snap,
+        evidence_package=ev_pkg,
+        evidence_graph=row.get("evidence_graph"),
     )
+
+
 
 
 def _serialize_execution_step(key: str, stp: ExecutionStep) -> Dict[str, Any]:
@@ -863,28 +978,90 @@ def _deserialize_execution_preflight(row: Dict[str, Any]) -> Any:
     return ExecutionPreflight(**row)
 
 def _serialize_execution_run(key: str, p: Any) -> Dict[str, Any]:
-    return p.model_dump() if hasattr(p, "model_dump") else p.dict()
+    if isinstance(p, dict):
+        return p
+    return {
+        "id": getattr(p, "id", key),
+        "agent_id": getattr(p, "agent_id", ""),
+        "status": getattr(p, "status", "RUNNING"),
+        "raw_logs": getattr(p, "failure_reason", None),
+        "structured_events": getattr(p, "scenario_ids", []),
+        "created_at": getattr(p, "started_at", _now()),
+    }
 
 def _deserialize_execution_run(row: Dict[str, Any]) -> Any:
-    return ExecutionRun(**row)
+    return ExecutionRun(
+        id=row["id"],
+        agent_id=row.get("agent_id", ""),
+        status=row.get("status", "SCENARIO_SELECTED"),
+        failure_reason=row.get("raw_logs"),
+        scenario_ids=row.get("structured_events") or [],
+        started_at=row.get("created_at", _now())
+    )
+
 
 def _serialize_execution_action(key: str, p: Any) -> Dict[str, Any]:
-    return p.model_dump() if hasattr(p, "model_dump") else p.dict()
+    full_data = p.model_dump() if hasattr(p, "model_dump") else p.dict()
+    return {
+        "id": full_data.get("id", key),
+        "execution_session_id": full_data.get("execution_session_id", ""),
+        "action_type": full_data.get("action_type", "TOOL_CALL"),
+        "payload": full_data,
+        "created_at": full_data.get("timestamp") or _now()
+    }
 
 def _deserialize_execution_action(row: Dict[str, Any]) -> Any:
+    payload = row.get("payload") or {}
+    if payload and isinstance(payload, dict):
+        return ExecutionAction(**payload)
     return ExecutionAction(**row)
 
 def _serialize_execution_artifact(key: str, p: Any) -> Dict[str, Any]:
-    return p.model_dump() if hasattr(p, "model_dump") else p.dict()
+    full_data = p.model_dump() if hasattr(p, "model_dump") else p.dict()
+    return {
+        "id": full_data.get("id", key),
+        "execution_run_id": full_data.get("execution_run_id") or full_data.get("session_id", ""),
+        "artifact_name": full_data.get("artifact_name") or full_data.get("name", "artifact"),
+        "artifact_path": full_data.get("artifact_path") or full_data.get("path", ""),
+        "mime_type": full_data.get("mime_type", "text/plain"),
+        "size_bytes": full_data.get("size_bytes", 0),
+        "created_at": full_data.get("created_at") or _now()
+    }
 
 def _deserialize_execution_artifact(row: Dict[str, Any]) -> Any:
     return ExecutionArtifact(**row)
 
 def _serialize_model_connection(key: str, mc: ModelConnection) -> Dict[str, Any]:
-    return mc.model_dump() if hasattr(mc, "model_dump") else mc.dict()
+    data = mc.model_dump() if hasattr(mc, "model_dump") else mc.dict()
+    meta = data.get("metadata") or {}
+    for k in ["owner_type", "connection_type", "context_window", "supports_tools", "training_capability", "model_weight_access", "is_active", "last_ping_at"]:
+        if k in data:
+            meta[k] = data[k]
+    return {
+        "id": data.get("id", key),
+        "name": data.get("name", "Model Connection"),
+        "provider": data.get("provider", "gemini"),
+        "base_url": data.get("base_url", ""),
+        "model_identifier": data.get("model_identifier", "gemini-3.6-flash"),
+        "api_key": data.get("api_key"),
+        "role": data.get("role", "test_agent_ai"),
+        "is_local": bool(data.get("is_local", False)),
+        "health_status": data.get("health_status", "healthy"),
+        "latency_ms": float(data.get("latency_ms") or 0.0),
+        "supports_structured_json": bool(data.get("supports_structured_json", True)),
+        "metadata": meta,
+        "created_at": data.get("created_at") or _now(),
+        "updated_at": data.get("updated_at") or _now(),
+    }
 
 def _deserialize_model_connection(row: Dict[str, Any]) -> ModelConnection:
-    return ModelConnection(**row)
+    meta = row.get("metadata") or {}
+    clean_row = dict(row)
+    if isinstance(meta, dict):
+        for k, v in meta.items():
+            if k not in clean_row:
+                clean_row[k] = v
+    return ModelConnection(**clean_row)
 
 def _serialize_training_dataset(key: str, td: TrainingDataset) -> Dict[str, Any]:
     return td.model_dump() if hasattr(td, "model_dump") else td.dict()
@@ -927,8 +1104,66 @@ def _deserialize_multi_agent_audit(row: Dict[str, Any]) -> Any:
     except Exception:
         return row
 
+
+def _serialize_agent_version_record(key: str, v: AgentVersionRecord) -> Dict[str, Any]:
+    return {
+        "id": v.id,
+        "agent_id": v.agent_id,
+        "version": v.version_label,
+        "version_label": v.version_label,
+        "parent_version_id": v.parent_version_id,
+        "is_latest": v.is_latest,
+        "change_summary": v.change_summary,
+        "source_files": v.source_files,
+        "patch_artifact_id": v.patch_artifact_id,
+        "reliability_score": v.reliability_score,
+        "release_decision": v.release_decision,
+        "created_at": v.created_at
+    }
+
+def _deserialize_agent_version_record(row: Dict[str, Any]) -> AgentVersionRecord:
+    is_latest_val = row.get("is_latest")
+    if is_latest_val is None:
+        is_latest_val = True
+    else:
+        is_latest_val = bool(is_latest_val)
+    return AgentVersionRecord(
+        id=row["id"],
+        agent_id=row.get("agent_id") or "",
+        version_label=row.get("version_label") or row.get("version") or "v1.0",
+        parent_version_id=row.get("parent_version_id"),
+        is_latest=is_latest_val,
+        change_summary=row.get("change_summary") or "Baseline version",
+        source_files=row.get("source_files") or {},
+        patch_artifact_id=row.get("patch_artifact_id"),
+        reliability_score=row.get("reliability_score"),
+        release_decision=row.get("release_decision"),
+        created_at=str(row.get("created_at") or _now())
+    )
+
+
+
+def _serialize_patch_artifact(key: str, p: PatchArtifact) -> Dict[str, Any]:
+    return p.model_dump() if hasattr(p, "model_dump") else p.dict()
+
+def _deserialize_patch_artifact(row: Dict[str, Any]) -> PatchArtifact:
+    return PatchArtifact(**row)
+
+def _serialize_finding(key: str, f: Finding) -> Dict[str, Any]:
+    return f.model_dump() if hasattr(f, "model_dump") else f.dict()
+
+def _deserialize_finding(row: Dict[str, Any]) -> Finding:
+    return Finding(**row)
+
+def _serialize_test_case_spec(key: str, tc: TestCaseSpecification) -> Dict[str, Any]:
+    return tc.model_dump() if hasattr(tc, "model_dump") else tc.dict()
+
+def _deserialize_test_case_spec(row: Dict[str, Any]) -> TestCaseSpecification:
+    return TestCaseSpecification(**row)
+
 # ---------------------------------------------------------------------------
 # Global Store Implementation
+
 # ---------------------------------------------------------------------------
 class Store:
     def __init__(self):
@@ -939,7 +1174,9 @@ class Store:
         # Use separate logical table names so verdicts and traces don't share the same snapshot file
         self.verdicts = SyncedDict("evaluation_verdicts", _serialize_verdicts, _deserialize_verdicts, "evaluation_run_id")
         self.traces = SyncedDict("evaluation_traces", _serialize_traces, _deserialize_traces, "evaluation_run_id")
-        self.clusters = SyncedDict("failure_clusters", _serialize_clusters, _deserialize_clusters, "evaluation_id")
+        self.clusters = SyncedDict("failure_clusters", _serialize_clusters, _deserialize_clusters, "evaluation_run_id")
+
+
         self.pipeline_runs = SyncedDict("pipeline_runs", _serialize_pipeline_run, _deserialize_pipeline_run)
         self.agent_test_specs = SyncedDict("agent_test_specifications", _serialize_agent_test_spec, _deserialize_agent_test_spec)
         self.sandbox_specs = SyncedDict("sandbox_specifications", _serialize_sandbox_spec, _deserialize_sandbox_spec)
@@ -966,7 +1203,12 @@ class Store:
         self.model_versions = SyncedDict("model_versions", _serialize_model_version, _deserialize_model_version)
         self.stage_judge_audits = SyncedDict("stage_judge_audits", _serialize_stage_judge_audit, _deserialize_stage_judge_audit)
         self.multi_agent_stage_audits = SyncedDict("multi_agent_stage_audits", _serialize_multi_agent_audit, _deserialize_multi_agent_audit)
+        self.agent_versions = SyncedDict("agent_versions", _serialize_agent_version_record, _deserialize_agent_version_record)
+        self.patch_artifacts = SyncedDict("patch_artifacts", _serialize_patch_artifact, _deserialize_patch_artifact)
+        self.findings = SyncedDict("findings", _serialize_finding, _deserialize_finding)
+        self.canonical_test_cases = SyncedDict("canonical_test_cases", _serialize_test_case_spec, _deserialize_test_case_spec)
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
+
 
 
 
@@ -1317,10 +1559,24 @@ class Store:
         return self.scenarios.get(scenario_id)
 
     def list_scenarios(self, agent_id: Optional[str] = None) -> List[Scenario]:
+        if agent_id:
+            if self.scenarios._sb:
+                try:
+                    res = self.scenarios._sb.table("scenarios").select("*").eq("agent_id", agent_id).execute()
+                    if res.data is not None:
+                        items = []
+                        for r in res.data:
+                            try:
+                                items.append(self.scenarios.deserialize_fn(r))
+                            except Exception as row_err:
+                                logger.error(f"Error deserializing scenario row: {row_err}")
+                        return items
+                except Exception as e:
+                    logger.error(f"Supabase error fetching scenarios for agent {agent_id}: {e}")
+            return [s for s in self.scenarios.values() if getattr(s, 'agent_id', None) == agent_id]
+
         valid_agent_ids = set(self.agents.keys())
         valid_scs = [s for s in self.scenarios.values() if getattr(s, 'agent_id', None) in valid_agent_ids]
-        if agent_id:
-            return [s for s in valid_scs if getattr(s, 'agent_id', None) == agent_id]
         return valid_scs
 
     def save_verdicts(self, job_id: str, verdicts: List[RunVerdict]):
@@ -1383,6 +1639,11 @@ class Store:
     def get_agent_dependencies(self, agent_id: str) -> List[AgentDependency]:
         return [d for d in self.agent_dependencies.values() if d.agent_id == agent_id]
 
+    def list_agent_dependencies(self, agent_id: Optional[str] = None) -> List[AgentDependency]:
+        if agent_id:
+            return self.get_agent_dependencies(agent_id)
+        return list(self.agent_dependencies.values())
+
     def list_platform_resources(self) -> List[PlatformResource]:
         return list(self.platform_resources.values())
 
@@ -1392,23 +1653,15 @@ class Store:
     def get_dependency_bindings(self, agent_id: str) -> List[DependencyBinding]:
         return [b for b in self.dependency_bindings.values() if b.agent_id == agent_id]
 
+    def list_dependency_bindings(self, agent_id: Optional[str] = None) -> List[DependencyBinding]:
+        if agent_id:
+            return self.get_dependency_bindings(agent_id)
+        return list(self.dependency_bindings.values())
+
+
     # --- Execution Jobs ---
     def save_execution_job(self, job: ExecutionJob):
         self.execution_jobs[job.id] = job
-        if self.execution_jobs._sb:
-            try:
-                eval_run_row = {
-                    "id": job.id,
-                    "agent_id": job.agent_id,
-                    "status": job.status,
-                    "total_scenarios": job.total_scenarios,
-                    "passed_scenarios": job.completed_scenarios,
-                    "started_at": job.created_at,
-                    "completed_at": job.finished_at
-                }
-                self.execution_jobs._sb.table("evaluation_runs").upsert(eval_run_row).execute()
-            except Exception as e:
-                logger.error(f"Supabase error saving evaluation_run stub for {job.id}: {e}")
 
     def get_execution_job(self, job_id: str) -> Optional[ExecutionJob]:
         return self.execution_jobs.get(job_id)
@@ -1428,6 +1681,29 @@ class Store:
 
     def get_execution_session(self, session_id: str) -> Optional[ExecutionSession]:
         return self.execution_sessions.get(session_id)
+
+    def list_execution_sessions(self, execution_run_id: Optional[str] = None) -> List[ExecutionSession]:
+        sessions = list(self.execution_sessions.values())
+        if execution_run_id:
+            sessions = [
+                s for s in sessions
+                if getattr(s, "execution_run_id", "") == execution_run_id
+                or getattr(s, "evaluation_run_id", "") == execution_run_id
+            ]
+        return sorted(sessions, key=lambda x: getattr(x, "started_at", ""), reverse=True)
+
+    def save_execution_run(self, run: ExecutionRun) -> None:
+        self.execution_runs[run.id] = run
+
+    def get_execution_run(self, run_id: str) -> Optional[ExecutionRun]:
+        return self.execution_runs.get(run_id)
+
+    def list_execution_runs(self, agent_id: Optional[str] = None) -> List[ExecutionRun]:
+        runs = list(self.execution_runs.values())
+        if agent_id:
+            runs = [r for r in runs if getattr(r, "agent_id", None) == agent_id]
+        return sorted(runs, key=lambda x: getattr(x, "started_at", ""), reverse=True)
+
 
     def save_execution_step(self, step: ExecutionStep):
         self.execution_steps[step.id] = step
@@ -1532,6 +1808,13 @@ class Store:
     def get_model_version(self, version_id: str) -> Optional[ModelVersionRecord]:
         return self.model_versions.get(version_id)
 
+    def list_model_versions(self, agent_id: Optional[str] = None) -> List[ModelVersionRecord]:
+        versions = list(self.model_versions.values())
+        if agent_id:
+            return [v for v in versions if getattr(v, "agent_id", None) == agent_id]
+        return sorted(versions, key=lambda x: getattr(x, "created_at", ""), reverse=True)
+
+
     # --- Stage Judge Audits ---
     def save_stage_judge_audit(self, audit: Any) -> None:
         self.stage_judge_audits[audit.id] = audit
@@ -1560,6 +1843,99 @@ class Store:
             audits = [a for a in audits if getattr(a, "stage_name", "").lower() == stage.lower()]
         return sorted(audits, key=lambda x: getattr(x, "created_at", ""), reverse=True)
 
+    # --- Canonical Agent Versions ---
+    def save_agent_version(self, version: AgentVersionRecord) -> None:
+        self.agent_versions[version.id] = version
+
+    def get_agent_version(self, version_id: str) -> Optional[AgentVersionRecord]:
+        v = self.agent_versions.get(version_id)
+        if v:
+            agent = self.get_agent(v.agent_id)
+            if agent:
+                v.is_latest = (agent.current_version_id == v.id or agent.version_label == v.version_label)
+        return v
+
+    def list_agent_versions(self, agent_id: Optional[str] = None) -> List[AgentVersionRecord]:
+        versions = list(self.agent_versions.values())
+        if agent_id:
+            versions = [v for v in versions if getattr(v, "agent_id", None) == agent_id]
+            agent = self.get_agent(agent_id)
+            if agent:
+                for v in versions:
+                    v.is_latest = (agent.current_version_id == v.id or agent.version_label == v.version_label)
+        return sorted(versions, key=lambda x: getattr(x, "created_at", ""), reverse=True)
+
+
+    def promote_agent_version(self, agent_id: str, version_id: str) -> Optional[AgentVersionRecord]:
+        """Promotes a target agent version to 'latest' and updates the primary AgentRecord."""
+        target_version = self.get_agent_version(version_id)
+        if not target_version or target_version.agent_id != agent_id:
+            return None
+
+        # 1. Update all other versions of this agent to is_latest = False
+        for v in self.list_agent_versions(agent_id):
+            if v.id == version_id:
+                v.is_latest = True
+                target_version = v
+            else:
+                v.is_latest = False
+            self.save_agent_version(v)
+
+        # 2. Update primary AgentRecord with new source files and version label
+        agent = self.get_agent(agent_id)
+        if agent:
+            agent.version_label = target_version.version_label
+            agent.current_version_id = target_version.id
+            if target_version.source_files:
+                agent.source_files = target_version.source_files
+            self.save_agent(agent)
+
+        target_version.is_latest = True
+        return target_version
+
+
+    # --- Canonical Patches & Remediation ---
+    def save_patch(self, patch: PatchArtifact) -> None:
+        self.patch_artifacts[patch.id] = patch
+
+    def get_patch(self, patch_id: str) -> Optional[PatchArtifact]:
+        return self.patch_artifacts.get(patch_id)
+
+    def list_patches(self, agent_id: Optional[str] = None) -> List[PatchArtifact]:
+        patches = list(self.patch_artifacts.values())
+        if agent_id:
+            patches = [p for p in patches if getattr(p, "agent_id", None) == agent_id]
+        return sorted(patches, key=lambda x: getattr(x, "created_at", ""), reverse=True)
+
+    # --- Canonical Findings ---
+    def save_finding(self, finding: Finding) -> None:
+        self.findings[finding.id] = finding
+
+    def get_finding(self, finding_id: str) -> Optional[Finding]:
+        return self.findings.get(finding_id)
+
+    def list_findings(self, eval_run_id: Optional[str] = None, agent_id: Optional[str] = None) -> List[Finding]:
+        findings = list(self.findings.values())
+        if eval_run_id:
+            findings = [f for f in findings if getattr(f, "evaluation_run_id", None) == eval_run_id]
+        if agent_id:
+            findings = [f for f in findings if getattr(f, "agent_id", None) == agent_id]
+        return sorted(findings, key=lambda x: getattr(x, "created_at", ""), reverse=True)
+
+    # --- Canonical Test Cases ---
+    def save_test_case(self, test_case: TestCaseSpecification) -> None:
+        self.canonical_test_cases[test_case.id] = test_case
+
+    def get_test_case(self, test_case_id: str) -> Optional[TestCaseSpecification]:
+        return self.canonical_test_cases.get(test_case_id)
+
+    def list_test_cases(self, agent_id: Optional[str] = None) -> List[TestCaseSpecification]:
+        test_cases = list(self.canonical_test_cases.values())
+        if agent_id:
+            test_cases = [tc for tc in test_cases if getattr(tc, "agent_id", None) == agent_id]
+        return sorted(test_cases, key=lambda x: getattr(x, "created_at", ""), reverse=True)
+
 store = Store()
+
 
 

@@ -30,6 +30,7 @@ import {
   runEvaluationJob,
   fetchScorecard,
   fetchFailureClusters,
+  fetchEvaluationJobs,
   fetchEvaluationJobDetails,
   fetchEvaluationVerdicts,
   fetchEvaluationTracesDetails,
@@ -52,6 +53,8 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
 
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
+  const [evaluationJobs, setEvaluationJobs] = useState<any[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string>(jobId || '');
   const [batchSize, setBatchSize] = useState(34);
   const [evalJob, setEvalJob] = useState<any | null>(null);
   const [scorecard, setScorecard] = useState<ReliabilityScorecard | null>(null);
@@ -78,6 +81,63 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
     });
   }, [agentIdFromUrl]);
 
+  const loadAgentEvaluationJobs = async (agentId: string, preferredJobId?: string) => {
+    try {
+      const jobs = await fetchEvaluationJobs(agentId);
+      // Filter to evaluation jobs (ignore accidental execution job stubs)
+      const validJobs = jobs.filter(j => !j.id.startsWith('exec-') || j.completed_scenarios > 0);
+      // Sort chronologically (oldest to newest) for stable index numbering (#1, #2, etc.)
+      const sorted = [...validJobs].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+      setEvaluationJobs(sorted);
+
+      if (sorted.length > 0) {
+        const targetJob = (preferredJobId && sorted.find(j => j.id === preferredJobId)) 
+          || (jobId && sorted.find(j => j.id === jobId)) 
+          || sorted[sorted.length - 1];
+
+        setSelectedJobId(targetJob.id);
+        setEvalJob(targetJob);
+
+        if (targetJob.status === 'completed' || targetJob.status === 'partial') {
+          loadResults(targetJob.id);
+        } else if (['pending', 'running', 'evaluating', 'aggregating'].includes(targetJob.status)) {
+          setRunning(true);
+          startPolling(targetJob.id);
+        }
+      } else {
+        setSelectedJobId('');
+        setEvalJob(null);
+        setScorecard(null);
+        setReport(null);
+        setVerdicts([]);
+        setTraces([]);
+        setClusters([]);
+      }
+    } catch (e) {
+      console.error('Failed to load evaluation jobs for agent:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedAgentId) {
+      loadAgentEvaluationJobs(selectedAgentId, jobId);
+    }
+  }, [selectedAgentId]);
+
+  const handleSelectJob = (id: string) => {
+    setSelectedJobId(id);
+    const target = evaluationJobs.find(j => j.id === id);
+    if (target) {
+      setEvalJob(target);
+      if (target.status === 'completed' || target.status === 'partial') {
+        loadResults(target.id);
+      } else if (['pending', 'running', 'evaluating', 'aggregating'].includes(target.status)) {
+        setRunning(true);
+        startPolling(target.id);
+      }
+    }
+  };
+
   const startPolling = (jobId: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
 
@@ -92,6 +152,13 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
 
           if (details.status === 'completed' || details.status === 'partial') {
             loadResults(jobId);
+            // Refresh list so latest results reflect
+            if (selectedAgentId) {
+              fetchEvaluationJobs(selectedAgentId).then(jList => {
+                const s = [...jList].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+                setEvaluationJobs(s);
+              });
+            }
           }
         }
       } catch (err) {
@@ -135,7 +202,6 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
   const handleLaunchEvaluation = async () => {
     if (!selectedAgentId) return;
     setRunning(true);
-    setEvalJob(null);
     setScorecard(null);
     setReport(null);
     setVerdicts([]);
@@ -147,12 +213,15 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
     try {
       const job = await runEvaluationJob(selectedAgentId, batchSize);
       setEvalJob(job);
+      setSelectedJobId(job.id || job.job_id);
       startPolling(job.id || job.job_id);
     } catch (e) {
       console.error('Failed to launch evaluation run:', e);
       setRunning(false);
     }
   };
+
+  const selectedAgent = agents.find(a => a.id === selectedAgentId);
 
   const progressPct = evalJob && evalJob.total_scenarios > 0
     ? Math.round((evalJob.completed_scenarios / evalJob.total_scenarios) * 100)
@@ -242,11 +311,11 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center space-x-2.5">
-            <Zap className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-400 fill-current" />
-            <span>Evaluation & Reliability Engine Report</span>
+            <Zap className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400 fill-current" />
+            <span>Evaluation & Failure Analysis Scorecard</span>
           </h1>
           <p className="text-xs text-slate-300 mt-1">
-            Evidence-backed, 10-dimension evaluation engine analyzing execution traces, tool discipline, safety bounds, and model fidelity.
+            Evidence-backed, 10-dimension evaluation engine analyzing execution traces, tool discipline, safety bounds, and failure clusters.
           </p>
         </div>
 
@@ -255,7 +324,7 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
           <select
             value={selectedAgentId}
             onChange={(e) => setSelectedAgentId(e.target.value)}
-            className="flex-1 sm:flex-none px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs focus:outline-none focus:border-indigo-500 transition"
+            className="flex-1 sm:flex-none px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500 transition cursor-pointer"
           >
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
@@ -267,16 +336,99 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
           <button
             onClick={handleLaunchEvaluation}
             disabled={running || !selectedAgentId}
-            className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-500 via-purple-600 to-indigo-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-xs shadow-md shadow-indigo-500/20 flex items-center space-x-1.5 transition disabled:opacity-50 whitespace-nowrap"
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-cyan-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-cyan-500/20 flex items-center space-x-1.5 transition disabled:opacity-50 whitespace-nowrap cursor-pointer"
           >
             {running ? (
               <><RefreshCw className="w-3.5 h-3.5 animate-spin" /><span>Evaluating...</span></>
             ) : (
-              <><Zap className="w-3.5 h-3.5" /><span>Launch Evaluation</span></>
+              <><Zap className="w-3.5 h-3.5 fill-current" /><span>Launch Evaluation</span></>
             )}
           </button>
         </div>
       </div>
+
+      {/* ── Evaluation Run History Selector Bar (e.g., test-agent eval1, eval2, eval3) ── */}
+      {evaluationJobs.length > 0 && (
+        <div className="p-3.5 rounded-2xl glass-panel border border-slate-800 bg-slate-950/80 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center space-x-2 overflow-x-auto max-w-full py-0.5">
+            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono shrink-0 flex items-center gap-1.5 mr-1">
+              <Clock className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Evaluation Runs ({evaluationJobs.length}):</span>
+            </span>
+            {evaluationJobs.map((j, idx) => {
+              const isSelected = selectedJobId === j.id;
+              const isLatest = idx === evaluationJobs.length - 1;
+              const evalNum = idx + 1;
+              return (
+                <button
+                  key={j.id}
+                  onClick={() => handleSelectJob(j.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold font-mono transition flex items-center space-x-2 cursor-pointer shrink-0 ${
+                    isSelected
+                      ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white border border-cyan-400 shadow-md shadow-cyan-500/20 scale-[1.02]'
+                      : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
+                  }`}
+                >
+                  <span>{selectedAgent?.name || 'agent'} eval{evalNum}</span>
+                  {isLatest && (
+                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
+                    }`}>
+                      Latest
+                    </span>
+                  )}
+                  <span className={`text-[10px] ${isSelected ? 'text-cyan-100' : 'text-slate-500'}`}>
+                    ({j.total_scenarios || 0} Scenarios)
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={handleLaunchEvaluation}
+            disabled={running || !selectedAgentId}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 font-bold text-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer shrink-0"
+          >
+            <Zap className="w-3.5 h-3.5 text-cyan-400" />
+            <span>+ Re-Evaluate (eval{evaluationJobs.length + 1})</span>
+          </button>
+        </div>
+      )}
+
+      {/* ── Empty State when zero evaluations exist ── */}
+      {evaluationJobs.length === 0 && !running && (
+        <div className="p-8 sm:p-12 rounded-2xl glass-panel border border-cyan-500/30 bg-slate-950/80 text-center space-y-4 shadow-2xl animate-fadeIn">
+          <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mx-auto">
+            <Zap className="w-7 h-7 text-cyan-400 fill-current" />
+          </div>
+          <div className="max-w-md mx-auto space-y-1.5">
+            <h3 className="text-base font-extrabold text-slate-100">
+              No Evaluation Runs Yet for {selectedAgent?.display_name || selectedAgent?.name || 'this agent'}
+            </h3>
+            <p className="text-xs text-slate-400">
+              Run dual-tier hybrid evaluation to grade execution traces against safety invariants, tool discipline, reasoning fidelity, and 10-dimension reliability scores.
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <button
+              onClick={handleLaunchEvaluation}
+              disabled={running || !selectedAgentId}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-cyan-500/20 flex items-center space-x-2 transition cursor-pointer"
+            >
+              <Zap className="w-4 h-4 fill-current" />
+              <span>Launch Evaluation (eval1)</span>
+            </button>
+            <button
+              onClick={() => navigate(`/execution?agentId=${selectedAgentId}`)}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs flex items-center space-x-2 transition cursor-pointer"
+            >
+              <Cpu className="w-4 h-4 text-slate-400" />
+              <span>Go to Execute Scenarios →</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Real-time Status Management & Progress Card */}
       {evalJob && (

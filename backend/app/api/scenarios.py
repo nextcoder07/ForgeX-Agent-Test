@@ -153,7 +153,7 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
                 "generated_count": len(generated),
                 "ready_count": ready_count,
                 "scenarios_sample": [
-                    {"title": s.title, "category": s.category, "expected_risk": s.expected_risk}
+                    {"title": s.title, "category": s.category, "expected_risk": getattr(s, "risk_level", "medium")}
                     for s in validated[:5]
                 ]
             }

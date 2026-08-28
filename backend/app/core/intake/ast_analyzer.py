@@ -7,6 +7,7 @@ without making semantic capability or domain-specific risk decisions.
 from __future__ import annotations
 
 import ast
+import re
 import logging
 from typing import Any, Dict, List, Optional
 from app.models.agent import ToolDefinition, ToolRisk, DependencyDefinition

@@ -35,8 +35,10 @@ class ServiceDetector:
     ]
 
     @staticmethod
-    def detect_services_and_capabilities(ast_trees: Dict[str, ast.AST], raw_files: Dict[str, str]) -> Dict[str, Any]:
+    def detect_services_and_capabilities(ast_trees: Dict[str, ast.AST] = None, raw_files: Dict[str, str] = None) -> Dict[str, Any]:
         """Detects external service calls, capabilities, and credential references strictly from code evidence."""
+        ast_trees = ast_trees or {}
+        raw_files = raw_files or {}
         external_calls: List[Dict[str, Any]] = []
         capabilities: List[str] = []
         credential_refs: List[DetectedSecret] = []

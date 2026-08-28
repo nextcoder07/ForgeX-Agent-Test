@@ -305,12 +305,27 @@ class SupabaseStore:
             "summary": summary,
             "report_data": data,
         }
-        rows = _exec(self._sb.table("reports").insert(row).select("*"))
-        return rows[0] if rows else None
+        try:
+            rows = _exec(self._sb.table("scorecards").insert(row).select("*"))
+            if rows:
+                return rows[0]
+        except Exception:
+            pass
+        try:
+            rows = _exec(self._sb.table("reports").insert(row).select("*"))
+            return rows[0] if rows else None
+        except Exception:
+            return None
 
     def list_reports(self, evaluation_run_id: str) -> List[Dict]:
         if not self._sb:
             return []
+        try:
+            res = _exec(self._sb.table("scorecards").select("*").eq("evaluation_run_id", evaluation_run_id))
+            if res:
+                return res
+        except Exception:
+            pass
         return _exec(self._sb.table("reports").select("*").eq("evaluation_run_id", evaluation_run_id))
 
     # -------------------------------------------------------------------------

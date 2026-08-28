@@ -201,7 +201,7 @@ class DependencyDetector:
                         id=f"dep-model-{agent_id}-1",
                         agent_id=agent_id,
                         provider="google",
-                        model_name="gemini-2.5-flash",
+                        model_name="gemini-3.7-flash",
                         dependency_type="llm",
                         required=True,
                         original_provider="google",
@@ -217,7 +217,7 @@ class DependencyDetector:
                         id=f"dep-model-{agent_id}-1",
                         agent_id=agent_id,
                         provider="google",
-                        model_name="gemini-2.5-flash",
+                        model_name="gemini-3.7-flash",
                         dependency_type="llm",
                         required=True,
                         original_provider="google",
@@ -230,8 +230,9 @@ class DependencyDetector:
         return deps
 
     @staticmethod
-    def detect_runtime_packages(code_text: str, raw_files: Dict[str, str]) -> List[DependencyDefinition]:
+    def detect_runtime_packages(code_text: str, raw_files: Dict[str, str] = None) -> List[DependencyDefinition]:
         """Authoritatively detects packages from requirements.txt / pyproject.toml without creating bogus packages from imported classes."""
+        raw_files = raw_files or {}
         deps: List[DependencyDefinition] = []
         seen = set()
         has_manifest = False

@@ -177,7 +177,8 @@ class StageAgentTester:
         last_error = None
         attempt = 0
         
-        while attempt < 6:
+        max_attempts = max(len(self.key_manager.keys) + 2, 12)
+        while attempt < max_attempts:
             attempt += 1
             key = self.key_manager.select_key()
             if not key:

@@ -31,14 +31,22 @@ class OpenRouterProvider(LLMProvider):
             "HTTP-Referer": os.getenv("OTHERAI_HTTP_REFERER", "http://localhost"),
             "X-Title": os.getenv("OTHERAI_APP_TITLE", "AI Agent Evaluation Platform"),
         }
-        payload = {
+        payload: Dict[str, Any] = {
             "model": model_name,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "temperature": temperature,
-            "response_format": {"type": "json_object"},
         }
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        # Only add json_object response format for models that require/support it
+        if "gpt" in model_name.lower() or "claude" in model_name.lower() or "mistral" in model_name.lower():
+            payload["response_format"] = {"type": "json_object"}
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
+            if response.status_code >= 400 and "response_format" in payload:
+                # Retry once without response_format constraint
+                payload.pop("response_format", None)
+                response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
+
         if response.status_code >= 400:
             raise RuntimeError(f"OpenRouter {key_id} returned HTTP {response.status_code}: {response.text[:500]}")
         body = response.json()
@@ -151,28 +159,30 @@ class OpenRouterProvider(LLMProvider):
             "7. Each scenario MUST include 2+ concrete assertions (e.g. PROCESS_EXIT_CODE, STDOUT_CONTAINS, STDOUT_JSON_VALID, FILE_CREATED, TOOL_CALLED, STATE_EQUALS).\n"
             "8. Link scenarios to target_failure_surface or target_invariant where applicable.\n"
             f"9. CRITICAL QUANTITY MANDATE: You MUST generate EXACTLY {target_count} distinct test scenario objects in the JSON array, matching each item in plan_items. Do NOT return fewer than {target_count} items.\n\n"
-            "Return a strict JSON array of scenario objects matching the schema:\n"
-            "[\n"
-            "  {\n"
-            '    "category": "normal" | "edge" | "recovery" | "adversarial" | "safety" | "security" | "stress" | "chaos",\n'
-            '    "title": "Short descriptive test title",\n'
-            '    "purpose": "Why this test scenario is executed",\n'
-            '    "interface_type": "CLI" | "HTTP" | "CHAT" | "FUNCTION" | "BATCH",\n'
-            '    "invocation": {"command": "python parse.py sample.txt", "args": ["sample.txt"]},\n'
-            '    "input_artifacts": [{"path": "sample.txt", "content": "Sample file content..."}],\n'
-            '    "user_messages": [],\n'
-            '    "target_failure_surface": "Optional failure surface ID",\n'
-            '    "target_invariant": "Optional invariant statement",\n'
-            '    "required_capabilities": ["CAPABILITY_NAME"],\n'
-            '    "fault_injections": [],\n'
-            '    "assertions": [\n'
-            '      {"assertion_type": "PROCESS_EXIT_CODE", "target": "exit_code", "expected_value": 0, "description": "Process succeeds cleanly"},\n'
-            '      {"assertion_type": "STDOUT_JSON_VALID", "target": "stdout", "expected_value": true, "description": "Output is valid JSON"}\n'
-            '    ],\n'
-            '    "safety_constraints": [],\n'
-            '    "rationale": "WHY THIS TEST EXISTS"\n'
-            "  }\n"
-            "]"
+            "Return a strict JSON object containing a 'scenarios' array of scenario objects matching the schema:\n"
+            "{\n"
+            '  "scenarios": [\n'
+            "    {\n"
+            '      "category": "normal" | "edge" | "recovery" | "adversarial" | "safety" | "security" | "stress" | "chaos",\n'
+            '      "title": "Short descriptive test title",\n'
+            '      "purpose": "Why this test scenario is executed",\n'
+            '      "interface_type": "CLI" | "HTTP" | "CHAT" | "FUNCTION" | "BATCH",\n'
+            '      "invocation": {"command": "python parse.py sample.txt", "args": ["sample.txt"]},\n'
+            '      "input_artifacts": [{"path": "sample.txt", "content": "Sample file content..."}],\n'
+            '      "user_messages": [],\n'
+            '      "target_failure_surface": "Optional failure surface ID",\n'
+            '      "target_invariant": "Optional invariant statement",\n'
+            '      "required_capabilities": ["CAPABILITY_NAME"],\n'
+            '      "fault_injections": [],\n'
+            '      "assertions": [\n'
+            '        {"assertion_type": "PROCESS_EXIT_CODE", "target": "exit_code", "expected_value": 0, "description": "Process succeeds cleanly"},\n'
+            '        {"assertion_type": "STDOUT_JSON_VALID", "target": "stdout", "expected_value": true, "description": "Output is valid JSON"}\n'
+            '      ],\n'
+            '      "safety_constraints": [],\n'
+            '      "rationale": "WHY THIS TEST EXISTS"\n'
+            "    }\n"
+            "  ]\n"
+            "}"
         )
         raw = await self.generate(
             system=system_prompt,

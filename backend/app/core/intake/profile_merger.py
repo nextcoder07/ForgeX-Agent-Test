@@ -241,6 +241,18 @@ class ProfileMerger:
         # 11. Assemble NormalizedAgentSpec
         derived_exec_status = "EXECUTION_READY" if behavior_profile.readiness.execution_ready else "EXECUTION_BLOCKED"
 
+        # Filter out false-positive env example or credential placeholder risks
+        raw_risks = semantic_response.risks or []
+        cleaned_risks = []
+        for r in raw_risks:
+            r_str = str(r).strip()
+            if not r_str:
+                continue
+            r_lower = r_str.lower()
+            if ".env" in r_lower or "missing" in r_lower and ("api_key" in r_lower or "key" in r_lower or "credential" in r_lower):
+                continue
+            cleaned_risks.append(r_str)
+
         norm_spec = NormalizedAgentSpec(
             identity={
                 "name": declared_name,
@@ -248,7 +260,8 @@ class ProfileMerger:
                 "framework": observed_fw,
                 "language": runtime_manifest.get("runtime") or "python",
                 "entrypoint": runtime_manifest.get("entrypoint") or "unknown",
-                "category": runtime_manifest.get("agent_category") or "general"
+                "category": runtime_manifest.get("agent_category") or "general",
+                "version": agent_version_id,
             },
             agent_description=f"Agent '{declared_name}' ({domain}) with {len(wf_graph.nodes)} workflow nodes, {len(merged_caps)} capabilities, and {len(invariants)} invariants.",
             behavior_profile=behavior_profile,
@@ -259,7 +272,7 @@ class ProfileMerger:
             constitution=constitution,
             capabilities=merged_caps,
             archetypes=semantic_response.archetypes or ["UTILITY"],
-            risks=semantic_response.risks,
+            risks=cleaned_risks if cleaned_risks else ["Unbounded input boundary risk", "Tool execution error handling risk"],
             state_management=semantic_response.state_management or "In-memory session",
             architecture_components=semantic_response.architecture_components,
             runtime_manifest=runtime_manifest,

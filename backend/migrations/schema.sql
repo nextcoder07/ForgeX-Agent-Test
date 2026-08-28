@@ -755,32 +755,67 @@ CREATE TABLE IF NOT EXISTS benchmark_records (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- =============================================================================
--- SEED DATA: STAGE FALLBACKS & MODEL BINDINGS
--- =============================================================================
+-- 38. findings — discrete evaluation findings & invariant failure records
+CREATE TABLE IF NOT EXISTS findings (
+    id TEXT PRIMARY KEY,
+    evaluation_run_id TEXT,
+    scenario_id TEXT,
+    dimension TEXT,
+    severity TEXT NOT NULL DEFAULT 'medium',
+    category TEXT,
+    title TEXT NOT NULL,
+    description TEXT,
+    evidence JSONB DEFAULT '{}'::jsonb,
+    root_cause JSONB DEFAULT '{}'::jsonb,
+    remediation TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-INSERT INTO stage_fallback_models (stage_name, model_slot, local_model_name, is_trainable) VALUES
-    ('analysis',   'OLLAMA_INTAKE_MODEL',    'qwen2.5-coder:7b', true),
-    ('scenarios',  'OLLAMA_SCENARIO_MODEL',  'qwen2.5-coder:7b', true),
-    ('execution',  'OLLAMA_OBSERVER_MODEL',  'qwen2.5-coder:7b', true),
-    ('evaluation', 'OLLAMA_EVALUATION_MODEL','qwen2.5-coder:7b', true),
-    ('repair',     'OLLAMA_REPAIR_MODEL',    'qwen2.5-coder:7b', true),
-    ('meta_eval',  'META_EVALUATOR_OLLAMA_MODEL', 'qwen2.5-coder:7b', true)
-ON CONFLICT (stage_name) DO UPDATE SET
-    local_model_name = EXCLUDED.local_model_name,
-    updated_at = now();
+-- 39. patch_artifacts — autonomous code AST patches & prompt repair artifacts
+CREATE TABLE IF NOT EXISTS patch_artifacts (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+    evaluation_run_id TEXT,
+    status TEXT NOT NULL DEFAULT 'PROPOSED',
+    file_patches JSONB DEFAULT '[]'::jsonb,
+    system_prompt_patch TEXT,
+    target_findings JSONB DEFAULT '[]'::jsonb,
+    risk_assessment JSONB DEFAULT '{}'::jsonb,
+    verification_status TEXT NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-INSERT INTO stage_model_bindings (id, stage, stage_name, primary_connection_id, fallback_connection_id, active_connection_id, fallback_enabled, primary_model, fallback_model, adapter_reference, health_status) VALUES
-    ('bind-intake',         'INTAKE_ANALYST',       'Intake Analyst',              'cloud_rotation_pool', 'ollama_intake_connection',   'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-intake-v2',       'HEALTHY'),
-    ('bind-scenario',       'SCENARIO_PLANNER',     'Scenario Planner',            'cloud_rotation_pool', 'ollama_scenario_connection', 'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-scenario-v2',     'HEALTHY'),
-    ('bind-observer',       'EXECUTION_OBSERVER',   'Execution Observer',          'cloud_rotation_pool', 'ollama_observer_connection', 'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-observer-v2',     'HEALTHY'),
-    ('bind-improvement',    'IMPROVEMENT_ANALYST',  'Improvement Analyst',         'cloud_rotation_pool', 'ollama_repair_connection',   'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-repair-v2',       'HEALTHY'),
-    ('bind-meta-evaluator', 'META_EVALUATOR',       'Independent Meta-Evaluator',  'meta_evaluator_pool', 'ollama_meta_connection',     'primary', true, 'gemini-3.6-flash', 'qwen2.5-coder:7b', 'forgeX-meta-evaluator-v1','HEALTHY')
-ON CONFLICT (id) DO UPDATE SET
-    primary_model = EXCLUDED.primary_model,
-    fallback_model = EXCLUDED.fallback_model,
-    adapter_reference = EXCLUDED.adapter_reference,
-    updated_at = now();
+-- 40. canonical_test_cases — normalized executable test specifications
+CREATE TABLE IF NOT EXISTS canonical_test_cases (
+    id TEXT PRIMARY KEY,
+    scenario_id TEXT,
+    agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+    agent_version TEXT NOT NULL DEFAULT 'v1.0',
+    dimension TEXT,
+    metric_id TEXT,
+    title TEXT NOT NULL,
+    intent TEXT,
+    preconditions JSONB DEFAULT '{}'::jsonb,
+    input_payload JSONB DEFAULT '{}'::jsonb,
+    expected_behavior JSONB DEFAULT '[]'::jsonb,
+    forbidden_behavior JSONB DEFAULT '[]'::jsonb,
+    expected_tools JSONB DEFAULT '[]'::jsonb,
+    assertions JSONB DEFAULT '[]'::jsonb,
+    severity TEXT NOT NULL DEFAULT 'HIGH',
+    timeout_seconds INTEGER NOT NULL DEFAULT 30,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 41. evidence_graphs — execution trajectory dependency and violation graphs
+CREATE TABLE IF NOT EXISTS evidence_graphs (
+    id TEXT PRIMARY KEY,
+    scenario_id TEXT,
+    execution_session_id TEXT,
+    nodes JSONB DEFAULT '[]'::jsonb,
+    edges JSONB DEFAULT '[]'::jsonb,
+    sealed_hash TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- =============================================================================
 -- 6. PERFORMANCE INDEXES
@@ -805,7 +840,92 @@ CREATE INDEX IF NOT EXISTS idx_multi_audits_stage ON multi_agent_stage_audits(st
 CREATE INDEX IF NOT EXISTS idx_behavior_profiles_agent ON agent_behavior_profiles(agent_id);
 CREATE INDEX IF NOT EXISTS idx_scorecards_agent ON scorecards(agent_id);
 CREATE INDEX IF NOT EXISTS idx_stage_perf_stage ON stage_performance_reports(stage);
+CREATE INDEX IF NOT EXISTS idx_findings_eval_run ON findings(evaluation_run_id);
+CREATE INDEX IF NOT EXISTS idx_patch_artifacts_agent ON patch_artifacts(agent_id);
+CREATE INDEX IF NOT EXISTS idx_canonical_tests_agent ON canonical_test_cases(agent_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_graphs_scenario ON evidence_graphs(scenario_id);
 
+-- =============================================================================
+-- 6. MULTI-TENANCY & ADMIN TELEMETRY TABLES
+-- =============================================================================
+
+-- 38. user_profiles — tenant identity and roles
+CREATE TABLE IF NOT EXISTS user_profiles (
+    id           TEXT PRIMARY KEY, -- Firebase UID
+    email        TEXT NOT NULL,
+    display_name TEXT,
+    role         TEXT NOT NULL DEFAULT 'member', -- member, admin
+    metadata     JSONB DEFAULT '{}'::jsonb,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 39. admin_telemetry_submissions — user-shared evaluation & training telemetry
+CREATE TABLE IF NOT EXISTS admin_telemetry_submissions (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    user_email   TEXT,
+    agent_id     TEXT,
+    eval_job_id  TEXT,
+    status       TEXT NOT NULL DEFAULT 'submitted', -- submitted, approved_for_training, archived
+    payload      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Multi-Tenant user_id columns on all tenant-scoped tables
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE agent_versions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE agent_components ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE agent_artifacts ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE agent_files ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE agent_test_specifications ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE tools ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE agent_dependencies ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE dependency_bindings ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE sandbox_specifications ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE agent_behavior_profiles ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE ai_generation_runs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE execution_sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE execution_jobs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE execution_runs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE execution_steps ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE execution_actions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE execution_artifacts ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE execution_metrics ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE execution_preflights ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE evaluation_runs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE evaluation_verdicts ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE evaluation_traces ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE failure_clusters ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE scorecards ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE diagnosis_reports ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE repair_sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE patch_artifacts ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE regression_tests ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE canonical_test_cases ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE model_connections ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE model_versions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE training_datasets ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE stage_judge_audits ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+ALTER TABLE multi_agent_stage_audits ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
+
+-- User indexes for ultra-fast multi-tenant querying
+CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id);
+CREATE INDEX IF NOT EXISTS idx_scenarios_user_id ON scenarios(user_id);
+CREATE INDEX IF NOT EXISTS idx_evaluation_runs_user_id ON evaluation_runs(user_id);
+CREATE INDEX IF NOT EXISTS idx_execution_jobs_user_id ON execution_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_scorecards_user_id ON scorecards(user_id);
+CREATE INDEX IF NOT EXISTS idx_diagnosis_user_id ON diagnosis_reports(user_id);
+CREATE INDEX IF NOT EXISTS idx_repairs_user_id ON repair_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_model_conn_user_id ON model_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_datasets_user_id ON training_datasets(user_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_user_id ON pipeline_runs(user_id);
+CREATE INDEX IF NOT EXISTS idx_admin_telemetry_user ON admin_telemetry_submissions(user_id);
+CREATE INDEX IF NOT EXISTS idx_admin_telemetry_status ON admin_telemetry_submissions(status);
 
 -- =============================================================================
 -- 7. AUTOMATED TIMESTAMP UPDATER TRIGGER
@@ -834,5 +954,5 @@ CREATE OR REPLACE TRIGGER update_stage_fallback_models_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Done! Complete, non-abbreviated master schema.sql.
+-- Done! Complete master schema.sql with multi-tenancy & admin telemetry.
 

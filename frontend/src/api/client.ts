@@ -7,6 +7,34 @@ export const API_BASE_URL = configuredApiUrl
   ? (configuredApiUrl.endsWith('/api') ? configuredApiUrl : `${configuredApiUrl}/api`)
   : '/api';
 
+// Intercept native fetch in browser to automatically inject active Firebase user token and X-User-ID headers
+if (typeof window !== 'undefined' && window.fetch) {
+  const originalFetch = window.fetch;
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const token = localStorage.getItem('forgex_active_user_token');
+    const userJson = localStorage.getItem('forgex_active_user_session');
+    let uid = 'anonymous';
+    if (userJson) {
+      try {
+        uid = JSON.parse(userJson).uid || 'anonymous';
+      } catch (e) {}
+    }
+
+    const headers = new Headers(init?.headers || {});
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    if (uid && !headers.has('X-User-ID')) {
+      headers.set('X-User-ID', uid);
+    }
+
+    return originalFetch(input, {
+      ...init,
+      headers
+    });
+  };
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -245,6 +273,10 @@ export interface NormalizedAgentSpec {
   risks: string[];
   state_management: string;
   architecture_components: string[];
+  runtime_manifest?: Record<string, any>;
+  execution_status?: string;
+  semantic_status?: string;
+  analysis_status?: string;
   canonical_subsystems?: CanonicalAgentRepresentation;
 }
 
@@ -333,26 +365,33 @@ export interface CoverageGapReport {
 }
 
 export interface ToolCallRecord {
-  id: string;
-  sequence: number;
+  id?: string;
+  sequence?: number;
   tool_name: string;
   canonical_capability?: string;
   arguments: Record<string, any>;
-  result: Record<string, any>;
-  latency_ms: number;
+  result?: Record<string, any> | any;
+  latency_ms?: number;
   status: string;
-  routing_decision: string;
+  routing_decision?: string;
+  policy_reason?: string;
   injected_fault?: string;
 }
 
 export interface StateChange {
-  resource_type: string;
-  resource_id: string;
-  field: string;
-  before_value: any;
-  after_value: any;
+  resource_type?: string;
+  resource_id?: string;
+  field?: string;
+  before_value?: any;
+  after_value?: any;
   actor?: string;
   event_id?: string;
+  target?: string;
+  path?: string;
+  previous_value?: any;
+  new_value?: any;
+  change_type?: string;
+  timestamp?: string;
 }
 
 export interface DecisionEvent {
@@ -410,25 +449,32 @@ export interface ExecutionAction {
 }
 
 export interface ObservationSummary {
-  action_count: number;
-  tool_calls: number;
-  llm_calls: number;
-  network_requests: number;
-  file_reads: number;
-  file_writes: number;
-  database_operations: number;
-  retries: number;
-  timeouts: number;
-  errors: number;
-  blocked_actions: number;
-  policy_blocks: number;
-  network_blocks: number;
-  unexpected_tool_calls: number;
-  state_changes: number;
-  external_side_effects: number;
-  max_retry_streak: number;
-  execution_duration_ms: number;
-  exit_code: number;
+  action_count?: number;
+  tool_calls?: number;
+  llm_calls?: number;
+  network_requests?: number;
+  file_reads?: number;
+  file_writes?: number;
+  database_operations?: number;
+  retries?: number;
+  timeouts?: number;
+  errors?: number;
+  blocked_actions?: number;
+  policy_blocks?: number;
+  network_blocks?: number;
+  unexpected_tool_calls?: number;
+  state_changes?: number;
+  external_side_effects?: number;
+  max_retry_streak?: number;
+  execution_duration_ms?: number;
+  exit_code?: number;
+  files_created?: string[];
+  files_modified?: string[];
+  emails_sent?: any[];
+  database_queries_executed?: string[];
+  external_http_calls?: string[];
+  policy_violations?: string[];
+  total_actions?: number;
 }
 
 export interface EvidencePackage {
@@ -470,10 +516,12 @@ export interface ExecutionTrace {
   state_transitions?: StateTransitionEvent[];
   actions?: ExecutionAction[];
   observation_summary?: ObservationSummary;
+  status?: string;
   total_latency_ms: number;
   total_tokens: number;
   is_counterfactual: boolean;
   counterfactual_of?: string;
+  trajectory_hash?: string;
 }
 
 export interface FailureFinding {
@@ -1070,7 +1118,8 @@ export interface ExecutionJob {
 export async function runExecutionJob(
   agentId: string,
   scenarioIds: string[],
-  includeCounterfactuals: boolean = true
+  includeCounterfactuals: boolean = true,
+  requestedMode: string = 'faithful'
 ): Promise<ExecutionJob> {
   const res = await fetch(`${API_BASE_URL}/executions/run`, {
     method: 'POST',
@@ -1079,9 +1128,17 @@ export async function runExecutionJob(
       agent_id: agentId,
       scenario_ids: scenarioIds,
       include_counterfactuals: includeCounterfactuals,
+      requested_mode: requestedMode,
     }),
   });
-  if (!res.ok) throw new Error(`Failed to start execution job: ${res.statusText}`);
+  if (!res.ok) {
+    let msg = `Failed to start execution job (${res.status})`;
+    try {
+      const errData = await res.json();
+      msg = errData.detail?.message || (typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail)) || msg;
+    } catch {}
+    throw new Error(msg);
+  }
   return res.json();
 }
 
@@ -1097,9 +1154,17 @@ export async function fetchExecutionJobDetails(jobId: string): Promise<Execution
   return res.json();
 }
 
+
 export async function fetchExecutionTraces(jobId: string): Promise<ExecutionTrace[]> {
   const res = await fetch(`${API_BASE_URL}/executions/jobs/${jobId}/traces`);
   if (!res.ok) throw new Error(`Failed to fetch execution traces: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchEvaluationJobs(agentId?: string): Promise<any[]> {
+  const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : '';
+  const res = await fetch(`${API_BASE_URL}/evaluations/jobs${query}`);
+  if (!res.ok) throw new Error(`Failed to fetch evaluation jobs: ${res.statusText}`);
   return res.json();
 }
 
@@ -1442,11 +1507,11 @@ export async function getAgentModelBindings(agentId: string): Promise<any> {
   return res.json();
 }
 
-export async function updateAgentModelBindings(agentId: string, bindings: Record<string, string>): Promise<any> {
+export async function updateAgentModelBindings(agentId: string, payload: any): Promise<any> {
   const res = await fetch(`${API_BASE_URL}/models/agent-bindings/${encodeURIComponent(agentId)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(bindings),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`Failed to save agent model bindings: ${res.statusText}`);
   return res.json();
@@ -2073,6 +2138,38 @@ export async function compareModelBenchmarks(
     body: JSON.stringify({ stage, model_v1: modelV1, model_v2: modelV2 })
   });
   if (!res.ok) throw new Error(`Failed to benchmark models: ${res.statusText}`);
+  return res.json();
+}
+
+export interface TelemetrySubmissionPayload {
+  agent_id: string;
+  evaluation_job_id?: string;
+  note?: string;
+  include_traces?: boolean;
+  include_scorecard?: boolean;
+}
+
+export async function submitTelemetryToAdmin(payload: TelemetrySubmissionPayload): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/telemetry/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error(`Failed to submit telemetry: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchAdminTelemetrySubmissions(): Promise<any[]> {
+  const res = await fetch(`${API_BASE_URL}/telemetry/admin/submissions`);
+  if (!res.ok) throw new Error(`Failed to fetch admin telemetry: ${res.statusText}`);
+  return res.json();
+}
+
+export async function approveTelemetryForTraining(submissionId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/telemetry/admin/submissions/${submissionId}/approve`, {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error(`Failed to approve telemetry: ${res.statusText}`);
   return res.json();
 }
 

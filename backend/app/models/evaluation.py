@@ -109,7 +109,7 @@ class EvaluationReport(BaseModel):
     scenario_id: Optional[str] = None
     execution_run_id: Optional[str] = None
     original_model: Optional[str] = "openai/gpt-5"
-    executed_model: Optional[str] = "google/gemini-2.5-flash"
+    executed_model: Optional[str] = "google/gemini-3.7-flash"
     execution_mode: str = "compatible"
     model_substitution: bool = False
     confidence: str = "MEDIUM"

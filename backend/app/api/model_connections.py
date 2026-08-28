@@ -138,46 +138,69 @@ async def get_agent_model_bindings(agent_id: str):
     from app.core.intake.dependency_detector import DependencyDetector
     detected_deps = DependencyDetector.detect_model_dependencies(agent_id, code_text, [])
 
-    # Get stored bindings if any in runtime_manifest
+    # Get stored bindings and slot configs if any in runtime_manifest
     stored_bindings = agent.runtime_manifest.get("model_bindings", {})
+    stored_slot_configs = agent.runtime_manifest.get("slot_configs", {})
 
+    # Pre-calculate counts of variable names to assign clear names and unique slot IDs
+    raw_var_names = []
+    for dep in detected_deps:
+        v = "llm_client"
+        if "assignment to" in dep.detected_from:
+            v = dep.detected_from.split("assignment to")[-1].strip()
+        elif "import" in dep.detected_from:
+            v = f"imported_{dep.provider}_llm"
+        raw_var_names.append(v)
+
+    total_counts = {}
+    for v in raw_var_names:
+        total_counts[v] = total_counts.get(v, 0) + 1
+
+    seen_counts = {}
     slots = []
     for idx, dep in enumerate(detected_deps):
-        # Extract variable name from detected_from, e.g. "Line assignment to router_llm" -> "router_llm"
-        var_name = "llm_client"
-        if "assignment to" in dep.detected_from:
-            var_name = dep.detected_from.split("assignment to")[-1].strip()
-        elif "import" in dep.detected_from:
-            var_name = f"imported_{dep.provider}_llm"
+        var_name = raw_var_names[idx]
+        seen_counts[var_name] = seen_counts.get(var_name, 0) + 1
 
-        slot_id = var_name
+        if total_counts[var_name] > 1:
+            curr_idx = seen_counts[var_name]
+            slot_id = f"{var_name}_{curr_idx}"
+            display_name = f"AI Position: {var_name} (Agent/LLM #{curr_idx})"
+            display_var = f"{var_name} (Agent #{curr_idx})"
+        else:
+            slot_id = var_name
+            display_name = f"AI Position: {var_name}"
+            display_var = var_name
+
+        bound_id = stored_bindings.get(slot_id, stored_bindings.get(var_name, "system_default"))
+        saved_cfg = stored_slot_configs.get(slot_id, stored_slot_configs.get(var_name))
+        if not saved_cfg and bound_id != "system_default":
+            conn = store.get_model_connection(bound_id)
+            if conn:
+                saved_cfg = {
+                    "mode": "local_model" if conn.is_local else "cloud_api",
+                    "provider": conn.provider,
+                    "base_url": conn.base_url,
+                    "model_identifier": conn.model_identifier,
+                    "api_key": conn.api_key or "",
+                }
+
         env_var_name = f"{dep.provider.upper()}_API_KEY" if dep.provider else "OPENAI_API_KEY"
         slots.append({
             "slot_id": slot_id,
-            "name": f"AI Position: {var_name}",
-            "code_variable": var_name,
+            "name": display_name,
+            "code_variable": display_var,
             "env_var": env_var_name,
-            "description": f"Code Variable: '{var_name}' | Injects Env: {env_var_name} | Provider: {dep.provider.upper()} (default: {dep.model_name}).",
-            "explanation": f"In code, variable '{var_name}' is initialized using {dep.provider.upper()} SDK. Connecting an API key populates {env_var_name} for this instance.",
+            "description": f"Code Variable: '{display_var}' | Injects Env: {env_var_name} | Provider: {dep.provider.upper()} (default: {dep.model_name}).",
+            "explanation": f"In code, variable '{display_var}' is initialized using {dep.provider.upper()} SDK. Connecting an API key populates {env_var_name} for this instance.",
             "detected_from_source": dep.model_name,
-            "bound_connection_id": stored_bindings.get(slot_id, "system_default"),
+            "bound_connection_id": bound_id,
+            "saved_config": saved_cfg,
             "category": "INFERENCE"
         })
 
-    # Add the platform safety critic/evaluator slot
-    slots.append({
-        "slot_id": "critic_llm",
-        "name": "AI Position: critic_llm (Safety Judge)",
-        "code_variable": "critic_llm",
-        "env_var": "PLATFORM_SAFETY_LLM",
-        "description": "Platform safety evaluator LLM auditing multi-turn sandbox traces against constitutional rules.",
-        "explanation": "Platform-level safety judge that evaluates multi-turn trace outputs against agent constitution guardrails.",
-        "detected_from_source": "gemini-2.5-flash",
-        "bound_connection_id": stored_bindings.get("critic_llm", "system_default"),
-        "category": "EVALUATION"
-    })
-
     # Check for available trained model adapters for this agent
+
     available_adapters = [mv.model_dump() for mv in store.list_model_versions(agent_id)]
     if available_adapters:
         slots.append({
@@ -198,7 +221,7 @@ async def get_agent_model_bindings(agent_id: str):
 
 
 @router.post("/agent-bindings/{agent_id}")
-async def update_agent_model_bindings(agent_id: str, bindings: dict):
+async def update_agent_model_bindings(agent_id: str, payload: dict):
     """Save multi-model slot assignments and persist into sandbox system info for an agent."""
     agent = store.get_agent(agent_id)
     if not agent:
@@ -207,11 +230,20 @@ async def update_agent_model_bindings(agent_id: str, bindings: dict):
     if not agent.runtime_manifest:
         agent.runtime_manifest = {}
     
+    bindings = payload.get("bindings") if (isinstance(payload, dict) and "bindings" in payload) else payload
+    slot_configs = payload.get("slot_configs") if (isinstance(payload, dict) and "slot_configs" in payload) else {}
+
     agent.runtime_manifest["model_bindings"] = bindings
+    if slot_configs:
+        existing_configs = agent.runtime_manifest.get("slot_configs", {})
+        existing_configs.update(slot_configs)
+        agent.runtime_manifest["slot_configs"] = existing_configs
     
     # Persist in sandbox system info
     sandbox_sys_info = agent.runtime_manifest.get("sandbox_system_info", {})
     sandbox_sys_info["selected_models"] = bindings
+    if slot_configs:
+        sandbox_sys_info["slot_configs"] = agent.runtime_manifest["slot_configs"]
     sandbox_sys_info["updated_at"] = _now() if "_now" in globals() else ""
     agent.runtime_manifest["sandbox_system_info"] = sandbox_sys_info
     store.save_agent(agent)
@@ -224,6 +256,8 @@ async def update_agent_model_bindings(agent_id: str, bindings: dict):
                 sandbox_spec.runtime = {}
             sandbox_spec.runtime["model_bindings"] = bindings
             sandbox_spec.runtime["sandbox_system_info"] = sandbox_sys_info
+            if slot_configs:
+                sandbox_spec.runtime["slot_configs"] = agent.runtime_manifest["slot_configs"]
             store.save_sandbox_spec(sandbox_spec)
     except Exception as e:
         logger.debug(f"Could not update SandboxSpecification: {e}")

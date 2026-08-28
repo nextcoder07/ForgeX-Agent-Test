@@ -14,8 +14,10 @@ from app.models.agent_behavior import WorkflowGraph, WorkflowNode
 
 class FrameworkAnalyzer:
     @staticmethod
-    def analyze_framework_workflow(ast_trees: Dict[str, ast.AST], raw_files: Dict[str, str]) -> Dict[str, Any]:
+    def analyze_framework_workflow(ast_trees: Dict[str, ast.AST] = None, raw_files: Dict[str, str] = None) -> Dict[str, Any]:
         """Dynamically inspects AST trees to extract framework identity and structured workflow graph."""
+        ast_trees = ast_trees or {}
+        raw_files = raw_files or {}
         nodes: List[WorkflowNode] = []
         edges: List[Dict[str, str]] = []
         entrypoint = "START"

@@ -174,7 +174,7 @@ def compute_reliability_scorecard(
         "rule_set_version": "reliability-rules-v2",
         "score_formula_version": FORMULA_VERSION,
         "judge_provider": binding.executed_provider if binding else "google",
-        "judge_model": binding.executed_model if binding else "gemini-2.5-flash",
+        "judge_model": binding.executed_model if binding else "gemini-3.7-flash",
         "created_at": _now(),
     }
 
@@ -220,7 +220,7 @@ def generate_explainable_evaluation_report(
     sub_bool = binding.model_substitution if binding else False
     conf_str = binding.confidence.upper() if binding else "HIGH"
     orig_m = binding.original_model if binding else "openai/gpt-5"
-    exec_m = binding.executed_model if binding else "google/gemini-2.5-flash"
+    exec_m = binding.executed_model if binding else "google/gemini-3.7-flash"
 
     explainability = [
         f"Overall Score: {dimensions.overall_score}/100 computed using formula {FORMULA_VERSION}.",

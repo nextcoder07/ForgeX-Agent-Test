@@ -50,6 +50,11 @@ def create_sanitized_environment(
         elif key.upper() in SENSITIVE_ENV_KEYS:
             env.pop(key, None)
 
+    # Set UTF-8 encoding so emojis and unicode strings print cleanly on all platforms (Windows cp1252 fix)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["LANG"] = "en_US.UTF-8"
+
     # 1. Inject active dedicated Test Agent keys (OPENAI_API_KEY, GEMINI_API_KEY, etc.)
     try:
         from app.core.llm.key_manager import TestAgentKeyManager
@@ -60,6 +65,88 @@ def create_sanitized_environment(
     except Exception as e:
         pass
 
+    # 1.5 Inject Agent-Specific Bound Model & Slot Credentials (from runtime_manifest or model_connections)
+    if agent:
+        raw_manifest = agent.runtime_manifest or {}
+        slot_configs = raw_manifest.get("slot_configs", {})
+        model_bindings = raw_manifest.get("model_bindings", {})
+
+        # Check direct slot configs
+        for slot_id, cfg in slot_configs.items():
+            if isinstance(cfg, dict):
+                provider = str(cfg.get("provider", "")).lower()
+                api_key = str(cfg.get("api_key", "")).strip()
+                base_url = str(cfg.get("base_url", "")).strip()
+                if api_key:
+                    if provider == "openai":
+                        env["OPENAI_API_KEY"] = api_key
+                    elif provider == "openrouter":
+                        env["OPENROUTER_API_KEY"] = api_key
+                        env["OPENAI_API_KEY"] = api_key
+                        env["OPENAI_API_BASE"] = base_url or "https://openrouter.ai/api/v1"
+                        env["OPENAI_BASE_URL"] = base_url or "https://openrouter.ai/api/v1"
+                    elif provider == "anthropic":
+                        env["ANTHROPIC_API_KEY"] = api_key
+                    elif provider in ("gemini", "google"):
+                        env["GEMINI_API_KEY"] = api_key
+                        env["GOOGLE_API_KEY"] = api_key
+                    elif provider == "groq":
+                        env["GROQ_API_KEY"] = api_key
+                        env["OPENAI_API_KEY"] = api_key
+                        if base_url:
+                            env["OPENAI_API_BASE"] = base_url
+                            env["OPENAI_BASE_URL"] = base_url
+                    elif provider == "deepseek":
+                        env["DEEPSEEK_API_KEY"] = api_key
+                        env["OPENAI_API_KEY"] = api_key
+                        if base_url:
+                            env["OPENAI_API_BASE"] = base_url
+                            env["OPENAI_BASE_URL"] = base_url
+
+        # Check persisted model_connections in store
+        try:
+            from app.services.store import store
+            for slot_id, conn_id in model_bindings.items():
+                if conn_id and conn_id != "system_default":
+                    conn = store.get_model_connection(conn_id)
+                    if conn and conn.api_key:
+                        provider = (conn.provider or "").lower()
+                        if provider == "openai":
+                            env["OPENAI_API_KEY"] = conn.api_key
+                        elif provider == "openrouter":
+                            env["OPENROUTER_API_KEY"] = conn.api_key
+                            env["OPENAI_API_KEY"] = conn.api_key
+                            env["OPENAI_API_BASE"] = conn.base_url or "https://openrouter.ai/api/v1"
+                            env["OPENAI_BASE_URL"] = conn.base_url or "https://openrouter.ai/api/v1"
+                        elif provider == "anthropic":
+                            env["ANTHROPIC_API_KEY"] = conn.api_key
+                        elif provider in ("gemini", "google"):
+                            env["GEMINI_API_KEY"] = conn.api_key
+                            env["GOOGLE_API_KEY"] = conn.api_key
+                        elif provider == "groq":
+                            env["GROQ_API_KEY"] = conn.api_key
+                            env["OPENAI_API_KEY"] = conn.api_key
+                            if conn.base_url:
+                                env["OPENAI_API_BASE"] = conn.base_url
+                                env["OPENAI_BASE_URL"] = conn.base_url
+                        elif provider == "deepseek":
+                            env["DEEPSEEK_API_KEY"] = conn.api_key
+                            env["OPENAI_API_KEY"] = conn.api_key
+                            if conn.base_url:
+                                env["OPENAI_API_BASE"] = conn.base_url
+                                env["OPENAI_BASE_URL"] = conn.base_url
+        except Exception:
+            pass
+
+    # 1.8 Ensure ChatOpenAI / LangChain always has a valid key if OpenRouter/Gemini is present
+    if "OPENAI_API_KEY" not in env or not env["OPENAI_API_KEY"]:
+        if "OPENROUTER_API_KEY" in env and env["OPENROUTER_API_KEY"]:
+            env["OPENAI_API_KEY"] = env["OPENROUTER_API_KEY"]
+            env.setdefault("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
+            env.setdefault("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+        elif "GEMINI_API_KEY" in env and env["GEMINI_API_KEY"]:
+            env["OPENAI_API_KEY"] = env["GEMINI_API_KEY"]
+
     # 2. Inject explicit user-provided secrets
     if provided_secrets:
         for k, v in provided_secrets.items():
@@ -69,12 +156,32 @@ def create_sanitized_environment(
     # 3. Auto-mock any missing agent tool credentials (e.g. WHO_CLINICAL_API_KEY, NEWS_API_KEY)
     if agent and agent.dependencies:
         for d in agent.dependencies:
-            if d.name and d.name not in env:
-                env[d.name] = f"mock-{d.name.lower().replace('_', '-')}"
+            dep_type = getattr(d, "type", "")
+            dep_type_str = dep_type.value if hasattr(dep_type, "value") else str(dep_type).lower()
+            if dep_type_str in ["credential", "service", "tool"]:
+                clean_name = d.name.strip()
+                if clean_name.isidentifier() and clean_name not in env:
+                    env[clean_name] = f"mock-{clean_name.lower().replace('_', '-')}"
 
-    env["SANDBOX_MODE"] = "isolated_subprocess"
-    env["PYTHONUNBUFFERED"] = "1"
-    return env
+    # Also check detected secrets for tool mocking
+    raw_manifest = (agent.runtime_manifest or {}) if agent else {}
+    for sec in raw_manifest.get("detected_secrets", []):
+        sec_name = sec.get("name") if isinstance(sec, dict) else getattr(sec, "name", "")
+        if sec_name and sec_name.isidentifier() and sec_name not in env:
+            env[sec_name] = f"mock-{sec_name.lower().replace('_', '-')}"
+
+    # Final cleanup: ensure all env keys are valid identifier strings with no '=' or illegal characters
+    cleaned_env = {}
+    for k, v in env.items():
+        if isinstance(k, str) and k.isidentifier() and "=" not in k and "\0" not in k:
+            cleaned_env[k] = str(v)
+
+    cleaned_env["SANDBOX_MODE"] = "isolated_subprocess"
+    cleaned_env["PYTHONUNBUFFERED"] = "1"
+    cleaned_env["PYTHONIOENCODING"] = "utf-8"
+    cleaned_env["PYTHONUTF8"] = "1"
+    return cleaned_env
+
 
 
 def run_scenario_in_subprocess(
@@ -82,7 +189,7 @@ def run_scenario_in_subprocess(
     scenario: Scenario,
     code_content: str,
     gateway: ToolGateway,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float = 35.0,
     provided_secrets: Optional[Dict[str, str]] = None
 ) -> ExecutionTrace:
     """Executes an agent scenario inside an isolated child process with real file staging and CLI/Chat support."""
@@ -126,6 +233,30 @@ def run_scenario_in_subprocess(
         with open(agent_script_path, "w", encoding="utf-8") as f:
             f.write(code_content)
 
+        # 2.5 Write Sandbox Compatibility Shims (e.g. LangChain 0.3 compatibility & OpenAI endpoint routing)
+        sitecustomize_path = os.path.join(sandbox_dir, "sitecustomize.py")
+        with open(sitecustomize_path, "w", encoding="utf-8") as f:
+            f.write("""import os
+import sys
+
+# Shim LangChain 0.3 globals
+try:
+    import langchain
+    if not hasattr(langchain, "verbose"):
+        langchain.verbose = False
+    if not hasattr(langchain, "debug"):
+        langchain.debug = False
+    if not hasattr(langchain, "llm_cache"):
+        langchain.llm_cache = None
+except Exception:
+    pass
+
+# Ensure OpenAI SDK routes to OpenRouter if base url is provided
+if os.getenv("OPENAI_BASE_URL") and not os.getenv("OPENAI_API_BASE"):
+    os.environ["OPENAI_API_BASE"] = os.getenv("OPENAI_BASE_URL")
+""")
+        sanitized_env["PYTHONPATH"] = f"{sandbox_dir}{os.pathsep}{sanitized_env.get('PYTHONPATH', '')}"
+
         if interface == "CLI":
             # --- CLI EXECUTION PATH ---
             invocation = scenario.invocation or {}
@@ -148,6 +279,19 @@ def run_scenario_in_subprocess(
                 else:
                     resolved_args.append(arg)
 
+            # Auto-ensure agent dependencies are installed
+            try:
+                from app.core.sandbox.dependency_installer import ensure_agent_dependencies, auto_install_missing_module_from_error
+                installed = ensure_agent_dependencies(agent, sandbox_dir=sandbox_dir)
+                if installed:
+                    events.append(TraceEvent(
+                        timestamp=_now(),
+                        role="sandbox",
+                        content=f"PACKAGES_AUTO_INSTALLED: Installed {', '.join(installed)} dynamically for execution."
+                    ))
+            except Exception:
+                pass
+
             cmd = [sys.executable, agent_script_path] + resolved_args
             events.append(TraceEvent(
                 timestamp=_now(),
@@ -161,11 +305,41 @@ def run_scenario_in_subprocess(
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     cwd=sandbox_dir,
                     env=sanitized_env
                 )
                 stdout_str, stderr_str = proc.communicate(timeout=timeout_seconds)
                 exit_code = proc.returncode
+
+                # Auto-recovery if ModuleNotFoundError occurred
+                if exit_code != 0 and stderr_str and ("ModuleNotFoundError" in stderr_str or "No module named" in stderr_str or "ImportError" in stderr_str):
+                    try:
+                        from app.core.sandbox.dependency_installer import auto_install_missing_module_from_error
+                        pkg_installed = auto_install_missing_module_from_error(stderr_str)
+                        if pkg_installed:
+                            events.append(TraceEvent(
+                                timestamp=_now(),
+                                role="sandbox",
+                                content=f"AUTO_RECOVERY: Installed missing package '{pkg_installed}' on-the-fly. Retrying execution..."
+                            ))
+                            # Retry process
+                            proc2 = subprocess.Popen(
+                                cmd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                cwd=sandbox_dir,
+                                env=sanitized_env
+                            )
+                            stdout_str, stderr_str = proc2.communicate(timeout=timeout_seconds)
+                            exit_code = proc2.returncode
+                    except Exception as retry_err:
+                        pass
+
 
                 if stdout_str:
                     events.append(TraceEvent(

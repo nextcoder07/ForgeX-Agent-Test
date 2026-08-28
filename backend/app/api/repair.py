@@ -7,6 +7,7 @@ starting the autonomous repair loop, stopping the loop, and fetching iteration h
 from __future__ import annotations
 
 import os
+import logging
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, BackgroundTasks
@@ -15,6 +16,8 @@ from app.services.store import store
 from app.core.repair.repair_orchestrator import RepairOrchestrator
 from app.core.repair.fixing_agent import FixingAgent, generate_unified_diff
 from app.core.llm.providers import get_provider
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/repair", tags=["Fix My Agent"])
 

@@ -113,10 +113,11 @@ class ExecutionAction(BaseModel):
     target: str
     
     # Nested 4-Layer Structures
-    action_attempt: Dict[str, Any] = Field(default_factory=dict)  # {"payload": {...}}
-    policy_decision: Dict[str, Any] = Field(default_factory=dict)  # {"decision": "ALLOW"|"BLOCK"|"REDIRECT", "reason": "..."}
-    execution_result: Dict[str, Any] = Field(default_factory=dict)  # {"status": "SUCCESS"|"BLOCKED_POLICY"|"ERROR", "executed": bool}
-    side_effect: Dict[str, Any] = Field(default_factory=dict)  # {"detected": bool, "details": {...}}
+    action_attempt: Any = Field(default_factory=dict)  # {"payload": {...}} or str
+    policy_decision: Any = Field(default_factory=dict)  # {"decision": "ALLOW"|"BLOCK"|"REDIRECT", "reason": "..."} or str
+    execution_result: Any = Field(default_factory=dict)  # {"status": "SUCCESS"|"BLOCKED_POLICY"|"ERROR", "executed": bool} or str
+    side_effect: Any = Field(default_factory=dict)  # {"detected": bool, "details": {...}} or str
+
 
     # Flat properties for backward compatibility
     attempt_payload: Dict[str, Any] = Field(default_factory=dict)
@@ -318,7 +319,9 @@ class ExecutionSession(BaseModel):
     post_snapshot: Optional[PostExecutionSnapshot] = None
     observation_summary: Optional[ObservationSummary] = None
     evidence_package: Optional[EvidencePackage] = None
+    evidence_graph: Optional[Dict[str, Any]] = None
     actions: List[ExecutionAction] = Field(default_factory=list)
+
 
 
 class ExecutionEventType(str, Enum):

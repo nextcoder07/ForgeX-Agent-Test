@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navbar } from './components/Navbar';
+import { HomePage } from './pages/HomePage';
+import { LoginPage } from './pages/LoginPage';
+import { SignupPage } from './pages/SignupPage';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { DashboardPage } from './pages/DashboardPage';
 import { AgentsPage } from './pages/AgentsPage';
 import { ScenarioGeneratorPage } from './pages/ScenarioGeneratorPage';
@@ -12,7 +17,8 @@ import { PlatformAIPerformancePage } from './pages/PlatformAIPerformancePage';
 import { AgentTesterBottomDrawer } from './components/AgentTesterBottomDrawer';
 import type { AgentRecord } from './api/client';
 
-export default function App() {
+function AppContent() {
+  const { user } = useAuth();
   const [lastRegisteredAgent, setLastRegisteredAgent] = useState<AgentRecord | null>(() => {
     const saved = localStorage.getItem('lastRegisteredAgent');
     return saved ? JSON.parse(saved) : null;
@@ -26,40 +32,119 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 pb-12">
       <Navbar />
-      <main className="pb-16">
+      <main className="pb-32">
         <Routes>
-          {/* Root */}
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
+          {/* Public Landing & Authentication */}
+          <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <HomePage />} />
+          <Route path="/home" element={<HomePage />} />
+          <Route path="/login" element={user ? <Navigate to="/agents" replace /> : <LoginPage />} />
+          <Route path="/signup" element={user ? <Navigate to="/agents" replace /> : <SignupPage />} />
 
-          {/* 1. Agents — contains intake, x-ray, and versions as tabs */}
-          <Route path="/agents" element={<AgentsPage onAgentRegistered={handleAgentRegistered} />} />
-          <Route path="/agents/:agentId" element={<AgentsPage onAgentRegistered={handleAgentRegistered} />} />
+          {/* Protected Workspace Routes */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/agents"
+            element={
+              <ProtectedRoute>
+                <AgentsPage onAgentRegistered={handleAgentRegistered} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/agents/:agentId"
+            element={
+              <ProtectedRoute>
+                <AgentsPage onAgentRegistered={handleAgentRegistered} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/scenarios"
+            element={
+              <ProtectedRoute>
+                <ScenarioGeneratorPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/setup"
+            element={
+              <ProtectedRoute>
+                <DependencySetupPage agent={lastRegisteredAgent || undefined} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/executions"
+            element={
+              <ProtectedRoute>
+                <ExecutionPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/results"
+            element={
+              <ProtectedRoute>
+                <ResultsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/results/:jobId"
+            element={
+              <ProtectedRoute>
+                <ResultsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/improve"
+            element={
+              <ProtectedRoute>
+                <ImprovePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/improve/:jobId"
+            element={
+              <ProtectedRoute>
+                <ImprovePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/platform-ai"
+            element={
+              <ProtectedRoute>
+                <PlatformAIPerformancePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/quality-lab"
+            element={
+              <ProtectedRoute>
+                <PlatformAIPerformancePage />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* 2. Scenarios — contains generate, library, adversarial as tabs */}
-          <Route path="/scenarios" element={<ScenarioGeneratorPage />} />
-
-          {/* 3. Setup — contains AI model slots, services & credentials, sandbox as tabs */}
-          <Route path="/setup" element={<DependencySetupPage agent={lastRegisteredAgent || undefined} />} />
-
-          {/* 4. Execute — contains run + live telemetry tabs */}
-          <Route path="/executions" element={<ExecutionPage />} />
-
-          {/* 5. Results — contains scorecard, failures, calibration settings tabs */}
-          <Route path="/results" element={<ResultsPage />} />
-          <Route path="/results/:jobId" element={<ResultsPage />} />
-
-          {/* 6. Improve — contains failures, repairs, regression, model training tabs */}
-          <Route path="/improve" element={<ImprovePage />} />
-          <Route path="/improve/:jobId" element={<ImprovePage />} />
-
-          {/* 7. Platform AI Quality Lab — self-evaluation & stage fallback training */}
-          <Route path="/platform-ai" element={<PlatformAIPerformancePage />} />
-          <Route path="/quality-lab" element={<PlatformAIPerformancePage />} />
-
-
-          {/* ── Legacy redirects — don't break old links ── */}
-          <Route path="/intake" element={<Navigate to="/agents?tab=intake" replace />} />
+          {/* ── Legacy redirects ── */}
+          <Route path="/execution" element={<Navigate to="/executions" replace />} />
+          <Route path="/scenario" element={<Navigate to="/scenarios" replace />} />
+          <Route path="/agent" element={<Navigate to="/agents" replace />} />
+          <Route path="/datasets" element={<Navigate to="/improve?tab=training" replace />} />
+          <Route path="/dataset" element={<Navigate to="/improve?tab=training" replace />} />
+          <Route path="/intake" element={<Navigate to="/agents?tab=register" replace />} />
           <Route path="/dependencies" element={<Navigate to="/setup" replace />} />
           <Route path="/models" element={<Navigate to="/setup?tab=ai-models" replace />} />
           <Route path="/evaluations" element={<Navigate to="/results" replace />} />
@@ -76,11 +161,19 @@ export default function App() {
           <Route path="/calibration" element={<Navigate to="/results?tab=settings" replace />} />
           <Route path="/pipeline" element={<Navigate to="/executions?tab=telemetry" replace />} />
 
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <AgentTesterBottomDrawer currentAgent={lastRegisteredAgent} />
+      {user && <AgentTesterBottomDrawer currentAgent={lastRegisteredAgent} />}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

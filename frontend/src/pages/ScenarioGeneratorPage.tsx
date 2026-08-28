@@ -53,6 +53,7 @@ export const ScenarioGeneratorPage: React.FC<{}> = () => {
   useEffect(() => {
     if (!selectedAgentId) return;
     fetchScenarioLibrary(selectedAgentId).then(setScenarios).catch(console.error);
+    fetchCoverageReport(selectedAgentId).then(setCoverage).catch(console.error);
   }, [selectedAgentId]);
 
   const handleLoadStrategy = async () => {

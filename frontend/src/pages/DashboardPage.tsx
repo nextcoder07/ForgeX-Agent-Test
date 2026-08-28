@@ -153,7 +153,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
       <div>
         <h2 className="text-base sm:text-lg font-extrabold text-slate-100 mb-3 flex items-center justify-between">
           <span>Six-Engine Evaluation Pipeline</span>
-          <span className="text-xs font-mono font-normal text-cyan-400">1 $\rightarrow$ 2 $\rightarrow$ 3 $\rightarrow$ 4 $\rightarrow$ 5 $\rightarrow$ 6</span>
+          <span className="text-xs font-mono font-semibold text-cyan-400">1 → 2 → 3 → 4 → 5 → 6</span>
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {engineSteps.map((step, idx) => {
