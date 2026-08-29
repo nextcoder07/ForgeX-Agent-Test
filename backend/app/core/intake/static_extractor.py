@@ -303,9 +303,9 @@ class StaticCodeExtractor:
                     ))
 
                 # 4. Network Requests
-                elif any(net_kw in fn_name for net_kw in ("requests.get", "requests.post", "requests.put", "requests.delete", "httpx.get", "httpx.post", "urllib.request")):
+                elif any(net_kw in fn_name for net_kw in ("requests.get", "requests.post", "requests.put", "requests.delete", "httpx.get", "httpx.post", "urllib.request", "TavilySearch", "Tavily")):
                     method = fn_name.split(".")[-1].upper() if "." in fn_name else "REQUEST"
-                    target_url = "http_endpoint"
+                    target_url = "tavily_search" if "tavily" in fn_name.lower() else "http_endpoint"
                     timeout_val = None
                     if node.args:
                         arg0 = node.args[0]
@@ -597,6 +597,8 @@ class StaticCodeExtractor:
                     for k in node.value.keys:
                         if isinstance(k, ast.Constant) and isinstance(k.value, str):
                             k_name = k.value
+                            if k_name in ("messages", "search_results"):
+                                continue
                             if k_name not in seen_keys:
                                 seen_keys.add(k_name)
                                 counter += 1
