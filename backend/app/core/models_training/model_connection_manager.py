@@ -49,7 +49,7 @@ class ModelConnectionManager:
         latency_ms = 0.0
 
         try:
-            async with httpx.AsyncClient(trust_env=True, timeout=25.0) as client:
+            async with httpx.AsyncClient(trust_env=False, timeout=25.0) as client:
                 content = ""
 
 
