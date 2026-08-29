@@ -107,13 +107,16 @@ class IntakeAuditor:
                 ))
                 break
 
-        has_framework = len(evidence_packet.framework_constructs) > 0 or bool(observed_fws)
+        fw_count = max(len(evidence_packet.framework_constructs), len(observed_fws))
+        has_framework = fw_count > 0 or bool(observed_fws)
         field_confidences.append(FieldConfidenceScore(
             field_name="framework",
             score=0.80 if has_fw_conflict else (1.0 if has_framework else 0.95),
             certainty=CertaintyLevel.INFERRED if has_fw_conflict else (CertaintyLevel.FACT if has_framework else CertaintyLevel.INFERRED),
-            evidence_count=len(evidence_packet.framework_constructs),
-            notes=f"Framework conflict detected: declared {declared_fws[0].title()} vs AST {observed_fws[0].title()}" if has_fw_conflict else "Framework native imports and constructors verified"
+            evidence_count=fw_count,
+            notes=f"Framework conflict detected: declared {declared_fws[0].title()} vs AST {observed_fws[0].title()}" if has_fw_conflict else (
+                f"Verified {fw_count} {', '.join(of.title() for of in observed_fws) or 'framework'} constructs (imports and constructors)" if has_framework else "Standard application architecture"
+            )
         ))
 
         # 4. Model Slot Audit

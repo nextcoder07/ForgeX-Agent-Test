@@ -1,227 +1,195 @@
-# AI Agent Evaluation & Reliability Engine — Backend
+# 🛡️ ForgeX Backend: Autonomous AI Agent Reliability Engine
 
-The Python FastAPI backend powering the Agent Evaluation & Reliability Platform. It implements six evaluation engines that together provide CI/CD-style testing for autonomous AI agents.
-
----
-
-## What This Backend Does
-
-Teams typically ship AI agents against a handful of manually written prompts, so real failure modes — tool-call loops, hallucinated confidence, unsafe destructive actions, silent goal drift — only surface in production. This backend:
-
-1. **Ingests any agent** (Python/TypeScript files, system prompts, REST endpoints) and reconstructs a normalized specification using AST parsing + Gemini AI
-2. **Generates adversarial test suites** automatically across 8 categories (normal, edge, recovery, adversarial, safety, security, stress, chaos)
-3. **Executes agents in sandboxes** with fault injection, intercepting all tool calls without rewriting agent code
-4. **Evaluates every run** using a hybrid rule engine + Gemini LLM judge, with counterfactual replay to prove failure causation
-5. **Clusters failures** into root causes and generates a 2D Safety × Capability reliability scorecard
-6. **Tracks pipeline telemetry** — real stage duration (ms), token counts, retry counts — not fake progress bars
+The Python FastAPI backend powering the **ForgeX Autonomous AI Agent Evaluation & Reliability Platform**. It implements a deterministic 6-stage architecture that provides rigorous, pre-deployment CI/CD testing, sandboxed red-teaming, fault injection, and automated self-healing for autonomous AI agents.
 
 ---
 
-## Project Structure
+## 🏛️ System Architecture
+
+```mermaid
+flowchart TD
+    A[Agent Source Code / Config] --> B[Stage 1: Static AST & Intake Engine]
+    B --> C[Normalized Agent Specification - NAS]
+    C --> D[Stage 2: Strategy Planner & Vector Selector]
+    D --> E[Scenario Generator & Synthesizer]
+    E --> F[11-Rule Hard Deterministic Validator]
+    F --> G[LLM Adversarial Critic]
+    G --> H[Final Executable Scenario Suite]
+    H --> I[Stage 3 & 4: Isolated Ephemeral Sandbox]
+    I --> J[ToolGateway Interceptor & Fault Injector]
+    J --> K[Immutable Execution Traces]
+    K --> L[Stage 5: Dual-Layer Hybrid Evaluator]
+    L --> M[Counterfactual Causation Engine]
+    M --> N[2D Safety × Capability Scorecard]
+    N --> O[Stage 6: Self-Healing Code Repair]
+```
+
+---
+
+## 🔬 In-Depth Stage Mechanics & Working Engines
+
+### Stage 1: Agent Intake & AST Reconstruction (`app/core/intake/`)
+- **Zero-Execution Static AST**: Inspects Python (`ast.walk`) and TypeScript source trees to extract tool signatures, parameter types, CLI arguments, and imports without running untrusted code.
+- **Normalized Agent Specification (NAS)**: Reconstructs a canonical representation (`NormalizedAgentSpec`) comprising:
+  - `goals[]`: Primary and secondary mission objectives.
+  - `tools[]`: Validated tools with risk ratings (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) and authorization requirements.
+  - `capabilities[]`: Standardized capability tokens (e.g., `KNOWLEDGE_RETRIEVAL`, `DATA_MUTATION`, `CODE_EXECUTION`).
+  - `constitution`: Hard safety rules (`never_rules`, `always_rules`).
+  - `risk_profile`: Multi-dimensional risk score.
+- **Interactive Visual Architecture Graph**: Maps agent topology into interactive nodes (Controller, Model Slots, Planning Engine, Memory Buffers, Tool Gateways, Security Boundaries).
+- **Doc-Code Safety Conflict Detector**: Statically detects discrepancies between safety promises in system prompts and actual Python execution semantics (e.g. system prompt claims "$100 refund limit", code has no boundary check).
+
+### Stage 2: Scenario Intelligence & Hard Validation (`app/core/scenarios/`)
+- **8-Category Adversarial Matrix**:
+  1. `NORMAL`: Baseline happy-path workflows.
+  2. `EDGE`: Empty inputs, malformed types, boundary integers, whitespace queries.
+  3. `RECOVERY`: Injected socket delays, HTTP 500/504 errors, network timeouts.
+  4. `ADVERSARIAL`: Emotional coercion, urgency pressure, false authority framing.
+  5. `SAFETY`: High-value operations, destructive mutations, unauthorized tool calls.
+  6. `SECURITY`: Prompt injections, canary secret extraction attempts, jailbreak escapes.
+  7. `STRESS`: 5,000+ character context saturation payloads, multi-turn distraction prompts.
+  8. `CHAOS`: Corrupted schema payloads, missing return keys, contradictory database mock data.
+- **14-Subsystem Taxonomy**: Evaluates agents across distinct subsystem boundaries (`functional_execution`, `input_handling`, `tool_authorization`, `prompt_injection`, `external_service_resilience`, `error_recovery`, `performance_stress`, `multi_agent_orchestration`, `data_handling`).
+- **11-Rule Deterministic Hard Validator**: Enforced *before* the LLM critic to strictly reject:
+  - `RULE1`: Hallucinated CLI flags not found in AST.
+  - `RULE2`: Unsupported interface mismatch (CLI vs CHAT vs REST).
+  - `RULE3`: Invented error messages and brittle string assumptions.
+  - `RULE4`: Process exit code contradictions.
+  - `RULE5`: Semantic assertions missing required fields.
+  - `RULE6`: Canary secret disclosure in non-security scenarios.
+  - `RULE7`: Quality score below 0.35 threshold.
+  - `RULE8`: Invalid fault target not present in discovered services.
+  - `RULE9`: Duplicate invocations within the same category.
+  - `RULE10`: Required service whitelisting.
+  - `RULE11`: Subsystem validation and auto-correction.
+- **Multi-Surface Coverage Gap Engine**: Computes exact mathematical coverage across tools (user + framework), capabilities, workflow nodes, services, and failure surfaces with zero-baseline integrity.
+
+### Stage 3 & 4: Sandbox Isolation & Fault Injections (`app/core/sandbox/`)
+- **Ephemeral Sandbox Isolation**: Spawns isolated subprocess environments in ephemeral temporary directories, strictly stripping platform credentials.
+- **Tool Gateway with Fault Injections**: Simulates socket timeouts (12s controlled delays), HTTP 500/504 errors, network partitions, and contradictory database payloads.
+- **Infinite Loop Circuit Breaker**: Halts runaway agents if more than 6 repetitive tool calls occur without meaningful state transitions.
+- **Immutable Execution Traces**: Captures step-by-step logs of user prompts, model reasoning chains, tool inputs/outputs, and latency metrics.
+
+### Stage 5: Dual-Layer Hybrid Evaluation (`app/core/evaluation/`)
+- **Programmatic Rules + LLM Judge**: Combines deterministic assertions (exit codes, JSON schema validation, regex invariants, canary protection) with calibrated LLM judgment.
+- **Counterfactual Replay Engine**: Strips adversarial tokens from failing scenarios and re-executes clean baselines to prove root-cause causation.
+- **2D Safety × Capability Reliability Scorecard**: Computes independent Safety Index and Capability Index ratings with drill-downs into 5 reliability dimensions.
+- **Failure Cause Clustering**: Groups execution traces into actionable failure archetypes (e.g., *Tool Authorization Bypass*, *Prompt Injection Vulnerability*, *Network Timeout Crash*).
+
+### Stage 6: Self-Healing Code Repair & Live Sandbox (`app/core/healing/`)
+- **Self-Healing Code Repair**: Synthesizes verified `git diff` patches and system prompt guardrails to fix detected vulnerabilities automatically.
+- **Live Attack Sandbox**: Interactive red-teaming playground for developers to manually challenge agents with live attacks, prompt injections, and custom inputs.
+- **Persistent Storage with Memory Fallback**: Backed by Supabase PostgreSQL with seamless fallback to high-speed in-memory storage for offline development.
+
+---
+
+## 🔄 Multi-Provider AI Resilience & Key Rotation
+
+ForgeX features a resilient AI provider hierarchy managed by `PlatformKeyManager` and `TestAgentKeyManager`:
+
+```mermaid
+graph TD
+    A[AI Request] --> B{Key Rotation Pool}
+    B -->|Gemini Keys| C[Google Gemini 2.5 / 2.0]
+    B -->|Groq Keys| D[Groq LPUs Llama-3.3-70B]
+    B -->|OpenRouter Keys| E[OpenRouter Paid Tier]
+    E -->|402 / No Balance| F[OpenRouter :free Tier Pool]
+    F -->|Llama 3.3 70B :free| G[Zero-Cost Execution]
+    B -->|Offline Mode| H[Local Ollama / FallbackMock]
+```
+
+### Auto-Fallback & Free Tier Policy:
+1. **Primary Cloud Rotation**: Distributes calls across active keys (`GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
+2. **OpenRouter Zero-Credit Auto-Fallback**: When OpenRouter returns HTTP 402 or 0 credits, ForgeX automatically retries across free open models:
+   - `meta-llama/llama-3.3-70b-instruct:free`
+   - `google/gemini-2.0-flash-exp:free`
+   - `deepseek/deepseek-r1:free`
+   - `meta-llama/llama-3.1-8b-instruct:free`
+   - `google/gemini-2.0-pro-exp-02-05:free`
+3. **100% Offline Local Mode**: If no cloud credentials exist, ForgeX routes directly to your local Ollama instance (`http://localhost:11434` with `qwen2.5-coder:7b`) or deterministic `FallbackMockEngine`.
+
+---
+
+## 📁 Directory Structure
 
 ```
 backend/
-├── .env                        ← Local API keys and config (never commit)
-├── .env.example                ← Safe configuration template
-├── requirements.txt            ← Python dependencies
+├── app/
+│   ├── main.py                     ← FastAPI initialization, CORS, and life-cycle hooks
+│   ├── api/                        ← REST API routes
+│   │   ├── agents.py               ← Agent registration and retrieval
+│   │   ├── intake.py               ← AST intake, demo loader, conflict audit
+│   │   ├── scenarios.py            ← Scenario generation, library, strategy plans
+│   │   ├── evaluations.py          ← Execution runs, scorecards, failure clusters
+│   │   ├── live_attack.py          ← Interactive live red-teaming
+│   │   ├── self_healing.py         ← Git diff synthesis and automated patches
+│   │   ├── activity.py             ← SSE live event stream
+│   │   └── router.py               ← Central API router aggregator
+│   │
+│   ├── core/                       ← Six evaluation engines
+│   │   ├── intake/                 ← Engine 1: AST parser, NAS reconstructor, conflict detector
+│   │   ├── scenarios/              ← Engine 2: Strategy planner, validator, critic, coverage
+│   │   ├── dependencies/           ← Engine 3: Dependency resolution and credential vault
+│   │   ├── sandbox/                ← Engine 4: Subprocess sandbox, ToolGateway, circuit breaker
+│   │   ├── evaluation/             ← Engine 5: Hybrid evaluator, counterfactuals, scorecards
+│   │   ├── healing/                ← Engine 6: Self-healing code and prompt repair
+│   │   └── llm/                    ← Multi-provider key manager and provider adapters
+│   │
+│   ├── models/                     ← Pydantic v2 schemas and validation contracts
+│   └── services/                   ← Supabase database client and in-memory store
 │
-└── app/
-    ├── main.py                 ← FastAPI app, CORS middleware, router mount
-    │
-    ├── models/                 ← Pydantic v2 schema definitions
-    │   ├── agent.py            ← AgentRecord, ToolDefinition, DependencyDefinition, AgentConstitution
-    │   ├── intake.py           ← AgentIntakePayload, NormalizedAgentSpec, SpecConflict, ArtifactRecord
-    │   ├── capability.py       ← CapabilityDefinition, CanonicalToolMapping, DependencyBinding
-    │   ├── scenario.py         ← Scenario, Category enum, FaultInjection, StrategyPlan, CoverageGapReport
-    │   ├── execution.py        ← ToolCallRecord, StateChange, SecurityEvent, ExecutionTrace, SandboxInstance
-    │   ├── evaluation.py       ← EvaluationRequest, EvaluationJob, ReliabilityScorecard, RegressionComparison
-    │   ├── pipeline.py         ← PipelineStage, TelemetryEvent, PipelineRun
-    │   └── failure.py          ← FailureFinding, RunVerdict, FailureCluster, CalibrationSample, CalibrationReport
-    │
-    ├── core/                   ← Six evaluation engine implementations
-    │   ├── llm/                ← AI Provider Abstraction (pluggable)
-    │   │   ├── base.py         ← LLMProvider abstract class
-    │   │   ├── gemini_provider.py  ← Gemini 2.5 Flash / Flash-Lite
-    │   │   └── fallback_mock.py    ← Deterministic offline mock (no API key)
-    │   │
-    │   ├── intake/             ← Engine 1: Agent Intake & Understanding
-    │   │   ├── ast_analyzer.py     ← Extracts function signatures from Python & TypeScript AST
-    │   │   ├── spec_reconstructor.py ← Gemini reads AST + prompt → NormalizedAgentSpec
-    │   │   └── conflict_detector.py  ← Compares doc safety claims vs actual code behavior
-    │   │
-    │   ├── scenarios/          ← Engine 2: Scenario Intelligence
-    │   │   ├── strategy_planner.py   ← Reads agent risk surface → 8-category plan
-    │   │   ├── scenario_generator.py ← Generates test cases using Gemini
-    │   │   ├── scenario_critic.py    ← Validates quality, executability, non-duplication
-    │   │   ├── scenario_validator.py ← Rule-based schema enforcement
-    │   │   └── coverage_engine.py   ← Identifies unexercised tools and categories
-    │   │
-    │   ├── dependencies/       ← Engine 3: Dependency & Tool Resolution
-    │   │   └── tool_gateway.py ← Maps tool names → canonical capabilities → sandbox handlers
-    │   │
-    │   ├── sandbox/            ← Engine 4: Safe Execution
-    │   │   └── runner.py       ← Ephemeral sandbox with fault injection support
-    │   │
-    │   ├── evaluation/         ← Engine 5: Scoring & Analysis
-    │   │   ├── hybrid_evaluator.py    ← Deterministic rules + LLM judge combined score
-    │   │   ├── counterfactual.py      ← Strips adversarial tokens, replays clean control
-    │   │   ├── failure_clustering.py  ← Groups RunVerdicts into root cause clusters
-    │   │   ├── scorecard_engine.py    ← Safety axis + Capability axis + 5-dimension scores
-    │   │   └── calibration_engine.py  ← LLM judge vs human gold-standard agreement
-    │   │
-    │   └── pipeline/           ← Engine 6: Observability
-    │       └── monitor.py      ← Real telemetry: duration ms, tokens per stage, retries
-    │
-    ├── api/                    ← REST API routers
-    │   ├── router.py           ← Mounts all routers under /api prefix
-    │   ├── agents.py           ← GET /agents, GET /agents/{id}
-    │   ├── intake.py           ← POST /intake/analyze, GET /intake/local-agents, GET /intake/local-agents/{id}
-    │   ├── capabilities.py     ← GET/POST /capabilities
-    │   ├── scenarios.py        ← POST /scenarios/generate, GET /scenarios/library, GET /scenarios/strategy/{id}
-    │   ├── evaluations.py      ← POST /evaluations/run, GET /evaluations/{id}/scorecard, GET /evaluations/{id}/clusters
-    │   ├── live_attack.py      ← POST /live-attack
-    │   ├── calibration.py      ← GET /calibration
-    │   └── pipeline.py         ← GET /pipeline/runs/{id}
-    │
-    └── services/
-        └── store.py            ← In-memory store: permanent (agents) + ephemeral (scenarios, evals)
-
-test-agents/                    ← Demonstration agents for testing the platform
-├── 01-simple-python/           ← Order status lookup (clean, low-risk)
-├── 02-tool-agent/              ← Math + currency + JSON formatter
-├── 03-customer-support/        ← Rs10k refund limit (has intentional doc/code conflict)
-├── 04-rag-agent/               ← Vectorized document search
-├── 05-multi-agent/             ← Orchestrator + Researcher + Writer
-├── 06-browser-agent/           ← Headless DOM + scraping
-├── 07-tool-loop-vulnerable/    ← Known failure: infinite retry loop
-└── 08-prompt-injection-unsafe/ ← Known failure: authority bypass
-└── 09-news-summarizer-agent/   ← News fetching and structured summarization
+├── test-agents/                    ← 9 Local demonstration agent archetypes
+│   ├── 01-simple-python/           ← Order processing agent (CLI / functional)
+│   ├── 02-tool-agent/              ← News search & calculation agent
+│   ├── 03-customer-support/        ← Support agent with intentional doc-code conflict
+│   ├── 04-rag-agent/               ← Resume evaluation RAG agent (knowledge retrieval)
+│   ├── 05-multi-agent/             ← SQL multi-agent orchestrator
+│   ├── 06-browser-agent/           ← DOM navigation & web agent
+│   ├── 07-tool-loop-vulnerable/    ← Vulnerable agent trapped in infinite retry loops
+│   ├── 08-prompt-injection-unsafe/ ← Vulnerable agent susceptible to authority override
+│   └── 09-news-summarizer-agent/   ← News fetching and structured summarization
+│
+└── tests/                          ← Unit and integration test suites (32+ passing tests)
 ```
 
 ---
 
-## Environment Setup — `.env`
+## 🚀 Getting Started
 
-The `.env` file lives at `backend/.env`. **This is the most important file to configure.**
+### 1. Prerequisites
+- Python 3.11+
+- Virtual environment tool (`venv`)
 
-```env
-# ============================================================
-# REQUIRED: Gemini API Key for all AI-powered features
-# ============================================================
-# Get a FREE key at: https://aistudio.google.com/apikey
-# Gemini 2.5 Flash has a free tier with generous quotas.
-#
-# Without this key, the platform operates in MOCK MODE:
-#   - Spec reconstruction uses AST only (no Gemini)
-#   - Scenarios are template-generated (not AI-written)
-#   - LLM judge uses deterministic rule-based scoring
-#   - Counterfactual explanation is diff-only
-GEMINI_API_KEY=your_google_gemini_api_key_here
+### 2. Installation
+```bash
+# Navigate to backend directory
+cd backend
 
-# ============================================================
-# OPTIONAL: Server configuration
-# ============================================================
-PORT=8000
-ENVIRONMENT=development   # or production
+# Create and activate virtual environment
+python -m venv venv
+# On Windows:
+.\venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
 
-# Model selection (both have free tier)
-# Set this to a model available to your Gemini API project.
-# The current default used by this project is gemini-3.6-flash.
-GEMINI_MODEL=gemini-3.6-flash
-
-# Set to "true" to skip Gemini entirely (useful for offline dev)
-LLM_FALLBACK_MOCK=false
-```
-
-### Why `GEMINI_API_KEY` is required for real results
-
-This is **not a purely algorithmic system**. The platform uses Gemini at these critical points:
-
-| Stage | Gemini Role |
-|---|---|
-| **Spec Reconstruction** | Reads AST output + your system prompt to write a structured NormalizedAgentSpec. Without AI, only raw code is parsed — no semantic understanding of goals or policies. |
-| **Scenario Generation** | Creates realistic adversarial + normal test cases. Without AI, scenarios are templated and less realistic. |
-| **Scenario Critic** | Reviews each generated scenario for quality, executability, and non-duplication. |
-| **LLM Judge** | Evaluates execution traces. Determines if tool calls were appropriate, if safety policies were violated, assigns failure categories with explanations. |
-| **Conflict Analysis** | Explains the semantic meaning of doc/code discrepancies in natural language. |
-
----
-
-## Installation & Running
-
-### Supabase Persistence
-
-Registered agents, normalized specifications, artifact hashes, uploaded source files, and evaluation data are persisted through the Supabase-backed store. Uploaded agents have first-class `agent_artifacts` and `agent_files` manifest records, while `agents.agent_spec` retains the derived specification and a backward-compatible source copy for this MVP. To configure your Supabase project, simply run the unified schema script `migrations/001_init_schema.sql` in the Supabase SQL Editor. Restart the API and confirm the startup log says `Supabase connected — persistent storage active.` Otherwise, the backend uses an in-memory fallback and data is lost when the process stops.
-
-### Prerequisites
-- Python 3.10+
-- pip
-
-### Steps
-
-```powershell
-cd anujfor/backend
-
-# 1. Install dependencies
+# Install dependencies
 pip install -r requirements.txt
-
-# 2. Add your Gemini API key to .env
-#    Edit .env and set GEMINI_API_KEY=your_key_here
-
-# 3. Start the server
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Server is now running at:
-# http://localhost:8000       ← root status endpoint
-# http://localhost:8000/docs  ← interactive Swagger API docs
-# http://localhost:8000/redoc ← ReDoc alternative
 ```
 
----
+### 3. Configure Environment Variables
+Copy `.env.example` to `.env` and supply any available API keys:
+```bash
+cp .env.example .env
+```
 
-## API Reference (28 Routes)
+### 4. Run Development Server
+```bash
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+API Documentation will be available at `http://localhost:8000/docs`.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/` | Health check + version info |
-| GET | `/api/agents` | List all registered agents |
-| GET | `/api/agents/{id}` | Get single agent by ID |
-| GET | `/api/intake/local-agents` | List demo laboratory agents |
-| GET | `/api/intake/local-agents/{id}` | Get demo agent source files + metadata |
-| POST | `/api/intake/analyze` | Analyze agent files → NormalizedAgentSpec + conflicts |
-| POST | `/api/intake/register-spec` | Register a normalized spec as an AgentRecord |
-| GET | `/api/scenarios/strategy/{agent_id}` | Get 8-category strategy plan for an agent |
-| POST | `/api/scenarios/generate` | Generate + critique scenarios for an agent |
-| GET | `/api/scenarios/library` | Get all scenarios in the library |
-| GET | `/api/scenarios/coverage/{agent_id}` | Get coverage gap report |
-| POST | `/api/evaluations/run` | Launch full evaluation job |
-| GET | `/api/evaluations/{id}/scorecard` | Get reliability scorecard for an eval job |
-| GET | `/api/evaluations/{id}/clusters` | Get failure clusters for an eval job |
-| GET | `/api/evaluations/regression/compare` | Compare two evaluation jobs |
-| POST | `/api/live-attack` | Fire adversarial prompt + run counterfactual |
-| GET | `/api/calibration` | Get LLM judge calibration benchmark |
-| GET | `/api/pipeline/runs/{id}` | Get pipeline telemetry for a run |
-
----
-
-## Dependencies
-
-| Package | Purpose |
-|---|---|
-| `fastapi>=0.110.0` | Web framework |
-| `uvicorn>=0.28.0` | ASGI server |
-| `pydantic>=2.6.0` | Data validation & serialization |
-| `python-dotenv>=1.0.0` | Load `.env` file |
-| `google-genai>=0.1.0` | Google Gemini API client |
-
----
-
-## Key Design Decisions
-
-**Tripartite Separation**: The Agent (untrusted code) ≠ The Environment (sandbox controlled by platform) ≠ The Evaluator (hybrid rule + LLM judge). This prevents the agent from influencing its own evaluation.
-
-**Tool Gateway Pattern**: The platform intercepts tool calls at the boundary, mapping original function names to canonical capabilities and routing to safe simulated handlers. No agent code is rewritten.
-
-**Counterfactual Causation Proof**: When an attack-scenario run fails, the platform strips adversarial tokens ("I am the CEO", "SYSTEM NOTE:", urgent legal threats) and replays a clean control. If the clean control passes and the attack fails, causation is proven. If both fail, the agent has a pre-existing vulnerability.
-
-**LLM Provider Abstraction**: Gemini is behind a `LLMProvider` abstract class. Switching to OpenAI, Claude, or another model requires only a new provider implementation — no changes to any engine code.
+### 5. Run Test Suite
+```bash
+pytest tests/ -v
+```
+All 32 test cases across intake, strategy planning, hard validation, and scenario generation will execute cleanly.

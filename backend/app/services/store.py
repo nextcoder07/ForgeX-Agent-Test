@@ -178,27 +178,32 @@ class SyncedDict:
         return list(self._local_data.values())
 
     def keys(self) -> List[str]:
+        # Fast path: return memory keys (<0.01ms)
+        if self._local_data:
+            return list(self._local_data.keys())
         if self._sb:
             try:
                 res = self._sb.table(self.table_name).select(self.key_col).execute()
                 if res.data:
                     return [str(row[self.key_col]) for row in res.data if self.key_col in row]
-                return []
             except Exception as e:
-                logger.error(f"Supabase error listing keys from {self.table_name}: {e}")
-                return []
+                logger.debug(f"Supabase error listing keys from {self.table_name}: {e}")
         return list(self._local_data.keys())
 
     def items(self) -> List[tuple[str, Any]]:
+        # Fast path: return memory items (<0.01ms)
+        if self._local_data:
+            return list(self._local_data.items())
         if self._sb:
             try:
                 res = self._sb.table(self.table_name).select("*").execute()
                 if res.data:
-                    return [(str(row.get(self.key_col) or row.get("id")), self.deserialize_fn(row)) for row in res.data]
-                return []
+                    for row in res.data:
+                        k = str(row.get(self.key_col) or row.get("id"))
+                        self._local_data[k] = self.deserialize_fn(row)
+                    return list(self._local_data.items())
             except Exception as e:
-                logger.error(f"Supabase error listing items from {self.table_name}: {e}")
-                return []
+                logger.debug(f"Supabase error listing items from {self.table_name}: {e}")
         return list(self._local_data.items())
 
     def __iter__(self):
@@ -350,9 +355,19 @@ def _deserialize_agent(row: Dict[str, Any]) -> AgentRecord:
 
 def _serialize_scenario(key: str, sc: Scenario) -> Dict[str, Any]:
     scenario_data = sc.model_dump() if hasattr(sc, "model_dump") else sc.dict()
-    av_id = sc.agent_version_id
-    if av_id and not str(av_id).startswith("ver-"):
+    av_id = getattr(sc, "agent_version_id", None)
+    from app.db.supabase_client import get_client
+    sb = get_client()
+    if sb and av_id:
+        try:
+            res_v = sb.table("agent_versions").select("id").eq("id", av_id).execute()
+            if not res_v.data or len(res_v.data) == 0:
+                av_id = None
+        except Exception:
+            av_id = None
+    elif av_id and not (str(av_id).startswith("ver-") or "-v" in str(av_id)):
         av_id = None
+
     return {
         "id": sc.id,
         "agent_id": sc.agent_id,
@@ -1634,42 +1649,76 @@ class Store:
         return self.scenarios.get(scenario_id)
 
     def list_scenarios(self, agent_id: Optional[str] = None) -> List[Scenario]:
-        if agent_id:
-            if self.scenarios._sb:
-                try:
-                    res = self.scenarios._sb.table("scenarios").select("*").eq("agent_id", agent_id).execute()
-                    if res.data is not None:
-                        items = []
-                        for r in res.data:
-                            try:
-                                items.append(self.scenarios.deserialize_fn(r))
-                            except Exception as row_err:
-                                logger.error(f"Error deserializing scenario row: {row_err}")
-                        return items
-                except Exception as e:
-                    logger.error(f"Supabase error fetching scenarios for agent {agent_id}: {e}")
-            return [s for s in self.scenarios.values() if getattr(s, 'agent_id', None) == agent_id]
+        if not hasattr(self, "_loaded_agent_scenarios"):
+            self._loaded_agent_scenarios = set()
 
-        valid_agent_ids = set(self.agents.keys())
-        valid_scs = [s for s in self.scenarios.values() if getattr(s, 'agent_id', None) in valid_agent_ids]
-        return valid_scs
+        # If specific agent requested and not yet loaded from Supabase into memory:
+        if agent_id and agent_id not in self._loaded_agent_scenarios and self.scenarios._sb:
+            try:
+                res = self.scenarios._sb.table("scenarios").select("*").eq("agent_id", agent_id).execute()
+                if res.data is not None:
+                    for r in res.data:
+                        try:
+                            sc = self.scenarios.deserialize_fn(r)
+                            self.scenarios._local_data[sc.id] = sc
+                        except Exception as row_err:
+                            logger.error(f"Error deserializing scenario row: {row_err}")
+                self._loaded_agent_scenarios.add(agent_id)
+            except Exception as e:
+                logger.error(f"Supabase error fetching scenarios for agent {agent_id}: {e}")
+        elif not agent_id and not getattr(self, "_all_scenarios_loaded", False) and self.scenarios._sb:
+            try:
+                res = self.scenarios._sb.table("scenarios").select("*").execute()
+                if res.data is not None:
+                    for r in res.data:
+                        try:
+                            sc = self.scenarios.deserialize_fn(r)
+                            self.scenarios._local_data[sc.id] = sc
+                        except Exception as row_err:
+                            logger.error(f"Error deserializing scenario row: {row_err}")
+                self._all_scenarios_loaded = True
+            except Exception as e:
+                logger.error(f"Supabase error fetching all scenarios: {e}")
+
+        if agent_id:
+            return [s for s in self.scenarios._local_data.values() if getattr(s, 'agent_id', None) == agent_id]
+        return list(self.scenarios._local_data.values())
+
+    def clear_scenarios_for_agent(self, agent_id: str):
+        """Clears previous scenarios for an agent so newly generated suites replace them."""
+        # 1. Clear from memory
+        keys_to_del = [k for k, s in self.scenarios._local_data.items() if getattr(s, 'agent_id', None) == agent_id]
+        for k in keys_to_del:
+            del self.scenarios._local_data[k]
+        
+        # 2. Delete from Supabase
+        if self.scenarios._sb:
+            try:
+                self.scenarios._sb.table("scenarios").delete().eq("agent_id", agent_id).execute()
+            except Exception as e:
+                logger.debug(f"Supabase delete note for agent scenarios ({agent_id}): {e}")
+
+        if hasattr(self, "_loaded_agent_scenarios"):
+            self._loaded_agent_scenarios.add(agent_id)
 
     def save_verdicts(self, job_id: str, verdicts: List[RunVerdict]):
         import uuid
         self.verdicts[job_id] = verdicts
-        if self.verdicts._sb:
-            for v in verdicts:
-                try:
-                    row = {
+        if self.verdicts._sb and verdicts:
+            try:
+                rows = [
+                    {
                         "id": v.id or f"verd-{uuid.uuid4().hex[:8]}",
                         "evaluation_run_id": job_id,
                         "scenario_id": v.scenario_id,
                         "status": v.status or "completed",
                         "evidence": v.model_dump() if hasattr(v, "model_dump") else v.dict()
                     }
-                    self.verdicts._sb.table("evaluation_verdicts").upsert(row).execute()
-                except Exception as e:
-                    logger.debug(f"Supabase sync for evaluation_verdict: {e}")
+                    for v in verdicts
+                ]
+                self.verdicts._sb.table("evaluation_verdicts").upsert(rows).execute()
+            except Exception as e:
+                logger.debug(f"Supabase batch sync for evaluation_verdicts: {e}")
 
     def get_scorecard(self, eval_id: str) -> Optional[ReliabilityScorecard]:
         return self.scorecards.get(eval_id)

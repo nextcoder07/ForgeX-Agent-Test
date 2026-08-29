@@ -31,10 +31,13 @@ class OpenRouterProvider(LLMProvider):
             "HTTP-Referer": os.getenv("OTHERAI_HTTP_REFERER", "http://localhost"),
             "X-Title": os.getenv("OTHERAI_APP_TITLE", "AI Agent Evaluation Platform"),
         }
+        # Explicitly set max_tokens to prevent OpenRouter from reserving default 16k tokens which causes HTTP 402
+        default_max_tokens = int(os.getenv("OPENROUTER_MAX_TOKENS", "3072"))
         payload: Dict[str, Any] = {
             "model": model_name,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "temperature": temperature,
+            "max_tokens": default_max_tokens,
         }
         # Only add json_object response format for models that require/support it
         if "gpt" in model_name.lower() or "claude" in model_name.lower() or "mistral" in model_name.lower():
@@ -46,6 +49,26 @@ class OpenRouterProvider(LLMProvider):
                 # Retry once without response_format constraint
                 payload.pop("response_format", None)
                 response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
+
+            # If 402/404/credits error, fall back across active OpenRouter free tier models
+            if response.status_code >= 400:
+                free_models = [
+                    "meta-llama/llama-3.3-70b-instruct:free",
+                    "google/gemini-2.0-flash-exp:free",
+                    "deepseek/deepseek-r1:free",
+                    "meta-llama/llama-3.1-8b-instruct:free",
+                    "google/gemini-2.0-pro-exp-02-05:free"
+                ]
+                for f_model in free_models:
+                    if f_model == model_name:
+                        continue
+                    payload["model"] = f_model
+                    payload["max_tokens"] = 4096
+                    payload.pop("response_format", None)
+                    resp = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
+                    if resp.status_code < 400:
+                        response = resp
+                        break
 
         if response.status_code >= 400:
             raise RuntimeError(f"OpenRouter {key_id} returned HTTP {response.status_code}: {response.text[:500]}")
@@ -93,13 +116,14 @@ class OpenRouterProvider(LLMProvider):
         return result
 
     async def analyze(self, code_evidence: str, doc_evidence: str) -> Dict[str, Any]:
-        raw = await self.generate(
-            "You are an expert AI agent analyzer. Return only valid JSON.",
+        prompt = (
             f"SOURCE CODE EVIDENCE:\n{code_evidence}\n\nDOCUMENTATION EVIDENCE:\n{doc_evidence}\n\n"
-            'Return JSON with name, domain, goals, instructions, capabilities, risks, never_rules, always_rules, state_management, architecture_components.',
-            stage="AGENT_INTAKE",
+            "Analyze this autonomous AI agent artifact strictly according to evidence. "
+            "Separate packages from symbols, distinguish required from optional credentials, and capture all hard invariants and transformations. "
+            "Return ONLY strict JSON."
         )
-        return json.loads(raw)
+        raw = await self.generate(system=MASTER_AGENT_ANALYZER_SYSTEM_PROMPT, user=prompt, stage="AGENT_INTAKE")
+        return safe_json_loads(raw)
 
     async def analyze_evidence_packet(self, evidence_packet: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze a complete structured evidence packet using the master analyzer instruction."""

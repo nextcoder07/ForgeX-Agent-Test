@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from app.core.llm.base import LLMProvider
 from app.core.llm.gemini_provider import GeminiProvider
 from app.core.llm.openrouter_provider import OpenRouterProvider
+from app.core.llm.groq_provider import GroqProvider
 from app.core.llm.mock_llm import MockLLM
 from app.core.llm.fallback_mock import FallbackMockEngine
 
@@ -288,6 +289,8 @@ def get_provider(provider_name: str, model_name: str = "", api_key: str = "", mo
         return GeminiProvider(api_key=api_key, model_name=valid_model)
     elif p_lower in ["openrouter", "otherai", "open-router"]:
         return OpenRouterProvider(api_key=api_key, model_name=model_name)
+    elif p_lower == "groq":
+        return GroqProvider(api_key=api_key, model_name=model_name or "llama-3.3-70b-versatile")
     elif p_lower == "anthropic":
         return AnthropicProvider(api_key=api_key, model_name=model_name or "claude-3-5-sonnet")
     elif p_lower in ["ollama", "local"]:
@@ -324,6 +327,8 @@ class UniversalProvider(LLMProvider):
                 provider = GeminiProvider(api_key=key.value, model_name=key.model_name)
             elif api_lower in ("openrouter", "openai", "otherai", "open-router"):
                 provider = OpenRouterProvider(api_key=key.value, model_name=key.model_name)
+            elif api_lower == "groq":
+                provider = GroqProvider(api_key=key.value, model_name=key.model_name)
             elif api_lower == "ollama":
                 endpoint = key.value.strip() or "http://localhost:11434"
                 provider = OllamaProvider(endpoint=endpoint, model_name=key.model_name)
@@ -363,8 +368,10 @@ class UniversalProvider(LLMProvider):
     async def analyze_evidence_packet(self, evidence_packet: Dict[str, Any]) -> Dict[str, Any]:
         return await self._execute_with_rotation("analyze_evidence_packet", evidence_packet)
 
-    async def critique(self, scenario_json: Dict[str, Any], agent_spec: Dict[str, Any]) -> Dict[str, Any]:
-        return await self._execute_with_rotation("critique", scenario_json, agent_spec)
+    async def critique(self, scenario_json: Dict[str, Any] = None, agent_spec: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
+        sc_data = scenario_json if scenario_json is not None else kwargs.get("scenario", {})
+        ctx_data = agent_spec if agent_spec is not None else kwargs.get("context", {})
+        return await self._execute_with_rotation("critique", sc_data, ctx_data)
 
     async def generate_scenarios(self, agent_spec: Dict[str, Any], strategy_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
         return await self._execute_with_rotation("generate_scenarios", agent_spec, strategy_plan)

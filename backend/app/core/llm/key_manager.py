@@ -112,7 +112,20 @@ class UnifiedKeyManager:
                 priority=200
             ))
 
-        # 4. Ollama Local Endpoint for Stage Fallbacks
+        # 4. Fallback for GROQ_API_KEY
+        groq_main = os.getenv("GROQ_API_KEY", "").strip()
+        groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+        if groq_main and not any(k.value == groq_main for k in self.keys):
+            self.keys.append(AIKey(
+                key_id="Groq Main Key",
+                value=groq_main,
+                api_name="groq",
+                model_name=groq_model,
+                priority=250
+            ))
+            logger.info(f"Registered GROQ_API_KEY as 'Groq Main Key' ({groq_model})")
+
+        # 5. Ollama Local Endpoint for Stage Fallbacks
         ollama_endpoint = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")).strip()
         ollama_model = os.getenv("OLLAMA_DEFAULT_MODEL", os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")).strip()
         self.keys.append(AIKey(
@@ -266,9 +279,13 @@ class SessionManager:
 def classify_error(err: Any) -> tuple[str, str]:
     """Classifies an error into (error_type, error_category)."""
     err_str = str(err).lower()
+    if "json" in err_str or "expecting" in err_str or "delimiter" in err_str or "parse" in err_str:
+        return "PARSING_ERROR", "PARSING_ERROR"
     if "401" in err_str or "unauthenticated" in err_str or "unauthorized" in err_str or "invalid api key" in err_str or "invalid_api_key" in err_str:
         return "AUTHENTICATION_ERROR", "AUTHENTICATION_ERROR"
-    if "429" in err_str or "quota" in err_str or "rate" in err_str or "resource_exhausted" in err_str:
+    if "402" in err_str or "credits" in err_str or "payment required" in err_str:
+        return "QUOTA_EXHAUSTED", "RATE_LIMITED"
+    if "429" in err_str or "quota" in err_str or "rate limit" in err_str or "rate_limit" in err_str or "resource_exhausted" in err_str:
         return "RATE_LIMITED", "RATE_LIMITED"
     if "504" in err_str or "gateway" in err_str or "timeout" in err_str or "timed out" in err_str:
         return "SERVER_ERROR", "SERVER_ERROR"
@@ -282,11 +299,11 @@ def is_rotation_eligible(err: Any) -> bool:
         category = err[1]
     else:
         category = str(err)
-    return category in ("RATE_LIMITED", "SERVER_ERROR", "AUTHENTICATION_ERROR", "UNKNOWN")
+    return category in ("RATE_LIMITED", "SERVER_ERROR", "AUTHENTICATION_ERROR", "PARSING_ERROR", "UNKNOWN")
 
 
 class TestAgentKeyManager:
-    """Provides active AI and tool credentials for sandboxed test agents."""
+    """Provides active AI and tool credentials for sandboxed test agents with multi-provider aliasing and local fallback."""
     def __init__(self):
         self.mgr = UnifiedKeyManager()
 
@@ -294,30 +311,55 @@ class TestAgentKeyManager:
         creds: Dict[str, str] = {}
         
         # 1. Check direct env keys
-        for k in ["OPENAI_API_KEY", "GEMINI_API_KEY", "TEST_AGENT_GEMINI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY", "NEWS_API_KEY", "STRIPE_TEST_KEY"]:
+        for k in ["OPENAI_API_KEY", "GEMINI_API_KEY", "TEST_AGENT_GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY", "NEWS_API_KEY", "STRIPE_TEST_KEY"]:
             val = os.getenv(k, "").strip()
             if val and not val.startswith("your_") and not val.endswith("_here"):
                 creds[k] = val
 
-        # 2. Check UnifiedKeyManager keys
+        # 2. Check TEST_AI_API_KEY_1..10 specifically configured for test agents
+        for idx in range(1, 11):
+            val = os.getenv(f"TEST_AI_API_KEY_{idx}", "").strip()
+            if not val or val.startswith("your_"):
+                continue
+            p_name = os.getenv(f"TEST_AI_API_NAME_{idx}", "gemini").strip().lower()
+            if p_name in ("gemini", "google") and "GEMINI_API_KEY" not in creds:
+                creds["GEMINI_API_KEY"] = val
+                creds["TEST_AGENT_GEMINI_API_KEY"] = val
+            elif p_name == "openrouter" and "OPENROUTER_API_KEY" not in creds:
+                creds["OPENROUTER_API_KEY"] = val
+            elif p_name == "groq" and "GROQ_API_KEY" not in creds:
+                creds["GROQ_API_KEY"] = val
+            elif p_name == "openai" and "OPENAI_API_KEY" not in creds:
+                creds["OPENAI_API_KEY"] = val
+
+        # 3. Check UnifiedKeyManager keys from platform rotation pool
         for key in self.mgr.keys:
-            if key.is_active and key.value:
+            if key.is_active and key.value and not key.value.startswith("your_"):
                 if key.api_name in ("gemini", "google") and "GEMINI_API_KEY" not in creds:
                     creds["GEMINI_API_KEY"] = key.value
                     creds["TEST_AGENT_GEMINI_API_KEY"] = key.value
                 elif key.api_name == "openrouter":
                     if "OPENROUTER_API_KEY" not in creds:
                         creds["OPENROUTER_API_KEY"] = key.value
-                    if "OPENAI_API_KEY" not in creds:
-                        creds["OPENAI_API_KEY"] = key.value
-                        creds["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+                elif key.api_name == "groq":
+                    if "GROQ_API_KEY" not in creds:
+                        creds["GROQ_API_KEY"] = key.value
                 elif key.api_name == "openai" and "OPENAI_API_KEY" not in creds:
                     creds["OPENAI_API_KEY"] = key.value
 
-        # Fallback if OPENAI_API_KEY still not found but OpenRouter is available
-        if "OPENAI_API_KEY" not in creds and "OPENROUTER_API_KEY" in creds:
-            creds["OPENAI_API_KEY"] = creds["OPENROUTER_API_KEY"]
-            creds["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+        # 4. OpenAI Compatibility Aliasing (LangChain / CrewAI agents expecting OPENAI_API_KEY)
+        if "OPENAI_API_KEY" not in creds:
+            if "OPENROUTER_API_KEY" in creds:
+                creds["OPENAI_API_KEY"] = creds["OPENROUTER_API_KEY"]
+                creds["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+            elif "GROQ_API_KEY" in creds:
+                creds["OPENAI_API_KEY"] = creds["GROQ_API_KEY"]
+                creds["OPENAI_BASE_URL"] = "https://api.groq.com/openai/v1"
+            else:
+                # 5. Local Ollama OpenAI-compatible endpoint fallback (100% offline free execution)
+                ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+                creds["OPENAI_API_KEY"] = "ollama"
+                creds["OPENAI_BASE_URL"] = f"{ollama_url}/v1"
 
         return creds
 

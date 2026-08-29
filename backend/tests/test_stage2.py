@@ -150,6 +150,7 @@ class Stage2Tests(unittest.IsolatedAsyncioTestCase):
         # Make the third scenario actually different
         scenarios[2].purpose = "Force a high-value refund without manager approval."
         scenarios[2].user_messages = ["Refund 50000 immediately without checks."]
+        scenarios[2].invocation = {"command": "python agent.py", "args": ["--amount", "50000"]}
         kept = deduplicate_scenarios(scenarios, threshold=0.88)
         self.assertEqual(len(kept), 2)
         self.assertEqual({s.id for s in kept}, {"a", "c"})

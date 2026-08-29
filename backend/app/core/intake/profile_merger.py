@@ -194,7 +194,15 @@ class ProfileMerger:
             node_outputs = {}
             if fn_name in ("build_agent", "create_agent", "get_agent"):
                 node_outputs = {"agent": "AgentExecutor", "toolkit": "DatabaseToolkit"}
-            elif fn_name in ("parse_resume", "score_fit", "extract_profile"):
+            elif fn_name == "parse_resume":
+                node_outputs = {
+                    "candidate_profile": "dictionary (name, email, phone, location, linkedin, github, summary, years_experience, current_title, skills, experience, education, certifications, languages_spoken)"
+                }
+            elif fn_name == "score_fit":
+                node_outputs = {
+                    "fit_evaluation": "dictionary (fit_score, fit_label, strengths, gaps, recommendation, recommendation_reason)"
+                }
+            elif fn_name in ("extract_profile",):
                 node_outputs = {"structured_profile": "dictionary", "score": "integer"}
             elif fn_name == "main":
                 node_outputs = {"execution_result": "string"}
@@ -227,8 +235,62 @@ class ProfileMerger:
         for i in range(len(fn_node_ids) - 1):
             s_node = fn_node_ids[i]
             t_node = fn_node_ids[i + 1]
+            edge_data = {"source": s_node, "target": t_node}
+            if t_node == "score_fit":
+                edge_data["condition"] = "if job_desc is provided"
             if not any(e["source"] == s_node and e["target"] == t_node for e in wf_edges):
-                wf_edges.append({"source": s_node, "target": t_node})
+                wf_edges.append(edge_data)
+
+        # 7b. Multi-Agent Sub-Nodes (CrewAI / AutoGen / Multi-Agent Frameworks)
+        fw_constructs = deterministic_evidence.get("framework_constructs", []) or (
+            deterministic_evidence.get("framework", {}).get("constructs", []) if isinstance(deterministic_evidence.get("framework"), dict) else []
+        ) or []
+        crew_agents = [c for c in fw_constructs if c.get("type") == "crewai_agent"]
+        crew_tasks = [c for c in fw_constructs if c.get("type") == "crewai_task"]
+
+        if crew_tasks or crew_agents:
+            for task in crew_tasks:
+                t_var = task.get("var_name", "task")
+                t_agent = task.get("agent", "")
+                t_desc = task.get("description", "")
+                t_out = task.get("expected_output", "")
+                t_context = task.get("context", []) or []
+                
+                agent_obj = next((a for a in crew_agents if a.get("var_name") == t_agent), None)
+                agent_role = agent_obj.get("role") if agent_obj else (t_agent or t_var)
+                
+                sub_inputs = {}
+                if "context" in t_desc.lower() or "analyst" in str(agent_role).lower():
+                    sub_inputs = {"context": "string", "recipient": "string", "tone": "string"}
+                elif t_context:
+                    sub_inputs = {c: "string" for c in t_context}
+                    sub_inputs.update({"recipient": "string", "tone": "string"})
+                else:
+                    sub_inputs = {"input_data": "string"}
+
+                sub_outputs = {"result": t_out or "string"}
+
+                wf_nodes.append(WorkflowNode(
+                    id=t_var,
+                    name=f"{agent_role} ({t_var})",
+                    implementation=f"Agent(role='{agent_role}') -> Task('{t_var}')",
+                    node_type="agent",
+                    inputs=sub_inputs,
+                    outputs=sub_outputs,
+                    state_dependencies=t_context,
+                    external_dependencies=["ChatOpenAI", "CrewAI"]
+                ))
+
+                for ctx in t_context:
+                    if not any(e["source"] == ctx and e["target"] == t_var for e in wf_edges):
+                        wf_edges.append({"source": ctx, "target": t_var})
+
+            if crew_tasks:
+                first_task_id = crew_tasks[0].get("var_name")
+                for fn_id in ["build_email_crew", "build_crew", "setup_crew"]:
+                    if any(n.id == fn_id for n in wf_nodes) and first_task_id:
+                        if not any(e["source"] == fn_id and e["target"] == first_task_id for e in wf_edges):
+                            wf_edges.append({"source": fn_id, "target": first_task_id})
 
         wf_graph = WorkflowGraph(
             entrypoint=entrypoint_path,
@@ -321,14 +383,28 @@ class ProfileMerger:
         ]
 
         raw_outputs = behavioral_raw.get("outputs", []) or deterministic_evidence.get("output_structures", [])
-        formatted_outputs = [
-            {
-                "name": (o.get("name") or o.get("field_name")) if isinstance(o, dict) else (getattr(o, "field_name", getattr(o, "name", str(o)))),
-                "type": (o.get("type") or o.get("field_type")) if isinstance(o, dict) else (getattr(o, "field_type", getattr(o, "type", "string"))),
-                "source": (o.get("source") or o.get("raw_snippet")) if isinstance(o, dict) else (getattr(o, "raw_snippet", getattr(o, "source", "output_contract")))
+        formatted_outputs = []
+        for o in raw_outputs:
+            o_name = (o.get("name") or o.get("field_name")) if isinstance(o, dict) else (getattr(o, "field_name", getattr(o, "name", str(o))))
+            o_type = (o.get("type") or o.get("field_type")) if isinstance(o, dict) else (getattr(o, "field_type", getattr(o, "type", "string")))
+            o_sem = o.get("semantic_type") if isinstance(o, dict) else getattr(o, "semantic_type", None)
+            o_desc = o.get("description") if isinstance(o, dict) else getattr(o, "description", None)
+            o_const = o.get("constraints") if isinstance(o, dict) else getattr(o, "constraints", None)
+            o_src = (o.get("source") or o.get("raw_snippet")) if isinstance(o, dict) else (getattr(o, "raw_snippet", getattr(o, "source", "output_contract")))
+            
+            out_dict = {
+                "name": o_name,
+                "type": o_type,
+                "source": o_src
             }
-            for o in raw_outputs
-        ]
+            if o_sem:
+                out_dict["semantic_type"] = o_sem
+            if o_desc:
+                out_dict["description"] = o_desc
+            if o_const:
+                out_dict["constraints"] = o_const
+            formatted_outputs.append(out_dict)
+
         security_surfaces = behavioral_raw.get("security_surfaces", []) or deterministic_evidence.get("security_surfaces", [])
 
         dec_surfaces = behavioral_raw.get("decision_surfaces", []) or deterministic_evidence.get("decision_surfaces", [])
@@ -391,6 +467,8 @@ class ProfileMerger:
             dependencies=deps,
             constitution=constitution,
             capabilities=merged_caps,
+            inputs=formatted_inputs,
+            outputs=formatted_outputs,
             archetypes=semantic_response.archetypes or ["UTILITY"],
             risks=[s.get("risk", "Security surface risk") if isinstance(s, dict) else getattr(s, "description", "") for s in security_surfaces] or ["Input validation boundary condition"],
             decision_surfaces=dec_surfaces,

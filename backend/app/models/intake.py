@@ -168,6 +168,8 @@ class NormalizedAgentSpec(BaseModel):
     side_effects: List[str] = Field(default_factory=list)
     evidence_packet: Dict[str, Any] = Field(default_factory=dict)
     audit_report: Dict[str, Any] = Field(default_factory=dict)
+    inputs: List[Dict[str, Any]] = Field(default_factory=list)
+    outputs: List[Dict[str, Any]] = Field(default_factory=list)
     workflow: List[Dict[str, Any]] = Field(default_factory=list)
     state_management: str = "In-memory session"
     architecture_components: List[str] = Field(default_factory=list)

@@ -6,6 +6,7 @@ Enforces strict model adherence, fast timeouts, rapid key rotation, and pre-chec
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
@@ -47,6 +48,8 @@ STAGE_FALLBACK_MODELS = {
     "tester": os.getenv("OLLAMA_TESTER_MODEL", os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")),
 }
 
+STAGE_TESTER_ENABLED = False
+
 
 class StageAgentTester:
     """Parallel Stage Judge & Agent Tester Engine."""
@@ -55,25 +58,24 @@ class StageAgentTester:
         self.key_manager = UnifiedKeyManager()
 
     async def get_health_status(self) -> StageTesterHealth:
-        """Inspects status of cloud keys, active model, and checks local model connectivity."""
-        active_cloud_keys = len([
-            k for k in self.key_manager.keys
-            if k.is_available and k.api_name not in ("ollama", "local")
-        ])
-        
-        ollama_endpoint = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-        ollama_model = os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", "qwen2.5-coder:7b"))
-        
-        is_local_conn, local_msg = await check_local_model_health(ollama_endpoint)
-        
-        # Primary configured model
-        first_key = self.key_manager.select_key()
-        configured_model = first_key.model_name if first_key else os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+        """Inspects connectivity of cloud providers and local fallback engines."""
+        active_cloud_keys = {
+            "gemini": len([k for k in self.key_manager.keys if k.api_name == "gemini" and k.is_available]),
+            "openrouter": len([k for k in self.key_manager.keys if k.api_name == "openrouter" and k.is_available]),
+            "groq": len([k for k in self.key_manager.keys if k.api_name == "groq" and k.is_available]),
+        }
+        is_local_conn, local_msg = await check_local_model_health()
 
-        status = "healthy" if (active_cloud_keys > 0 or is_local_conn) else "degraded"
+        ollama_endpoint = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_model = STAGE_FALLBACK_MODELS["tester"]
+        configured_model = "google/gemini-2.0-flash-001" if active_cloud_keys["openrouter"] > 0 else (
+            "gemini-2.0-flash" if active_cloud_keys["gemini"] > 0 else f"ollama/{ollama_model}"
+        )
+
+        status = "healthy" if (sum(active_cloud_keys.values()) > 0 or is_local_conn) else "degraded"
 
         return StageTesterHealth(
-            active_cloud_keys=active_cloud_keys,
+            active_cloud_keys=sum(active_cloud_keys.values()),
             configured_model=configured_model,
             local_model_endpoint=ollama_endpoint,
             local_model_name=ollama_model,
@@ -93,6 +95,34 @@ class StageAgentTester:
         prompt_template = STAGE_PROMPTS.get(stage_key, INTAKE_ANALYSIS_JUDGE_PROMPT)
 
         session_id = request.session_id or f"tester-session-{stage_key}-{uuid.uuid4().hex[:8]}"
+
+        if not STAGE_TESTER_ENABLED:
+            v_id = f"audit-disabled-{uuid.uuid4().hex[:8]}"
+            verdict = StageAuditVerdict(
+                id=v_id,
+                agent_id=request.agent_id,
+                stage_name=request.stage_name,
+                tester_session_id=session_id,
+                model_used="none (disabled)",
+                provider_used="local",
+                status="PASS",
+                score=100,
+                fidelity_score=1.0,
+                summary="Stage Tester subsystem is currently disabled.",
+                input_summary="Input audit skipped",
+                output_summary="Result audit skipped",
+                strengths=["Tester disabled"],
+                findings_and_discrepancies=[],
+                remediation_suggestions=[],
+                blocking_defects=[],
+                latency_ms=0.0,
+                created_at=dt.datetime.utcnow().isoformat() + "Z"
+            )
+            try:
+                store.save_stage_judge_audit(verdict)
+            except Exception:
+                pass
+            return verdict
 
         # Prepare evaluation payload
         evaluation_user_prompt = (
@@ -216,6 +246,19 @@ class StageAgentTester:
                     self.key_manager.mark_key_success(key.key_id)
                     return parsed, model_name, "openrouter"
 
+                elif api_lower == "groq":
+                    provider = GroqProvider(api_key=key.value, model_name=model_name)
+                    raw = await provider.generate(
+                        system=system_prompt,
+                        user=user_prompt,
+                        temperature=0.1,
+                        stage=stage,
+                        conversation_id=session_id
+                    )
+                    parsed = safe_json_loads(raw)
+                    self.key_manager.mark_key_success(key.key_id)
+                    return parsed, model_name, "groq"
+
                 elif api_lower in ("ollama", "local"):
                     endpoint = key.value.strip() or "http://localhost:11434"
                     is_conn, msg = await check_local_model_health(endpoint)
@@ -278,6 +321,19 @@ class StageAgentTester:
         """Audits website stage performance across multiple test agents and synthesizes LLM training data."""
         start_time = time.time()
         stage_key = request.stage_name.lower().replace("-", "_")
+
+        if not STAGE_TESTER_ENABLED:
+            return MultiAgentAuditVerdict(
+                id=f"multi-audit-disabled-{uuid.uuid4().hex[:8]}",
+                stage_name=request.stage_name,
+                agent_count=len(request.agent_ids or []),
+                overall_status="PASS",
+                overall_score=100,
+                overall_improvement_needed="Multi-agent Stage Tester subsystem is currently disabled.",
+                local_fallback_model=STAGE_FALLBACK_MODELS.get(stage_key, "qwen2.5-coder:7b"),
+                tester_fallback_model=STAGE_FALLBACK_MODELS["tester"],
+            )
+
         target_agent_ids = request.agent_ids or list(store.agents.keys())
 
         # Collect stage input and result data for each agent

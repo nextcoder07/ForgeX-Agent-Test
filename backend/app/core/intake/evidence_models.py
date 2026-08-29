@@ -138,6 +138,9 @@ class OutputStructureEvidence(BaseModel):
     artifact_id: str = ""
     field_name: str
     field_type: str          # "string", "integer", "float", "dictionary", "list", "boolean"
+    semantic_type: Optional[str] = None
+    description: Optional[str] = None
+    constraints: Optional[Dict[str, Any]] = None
     provenance: ProvenanceType = ProvenanceType.CODE_PROVEN
     source_file: str
     line_number: int = 1

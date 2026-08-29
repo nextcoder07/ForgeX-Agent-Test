@@ -303,6 +303,7 @@ async def process_agent_intake(
             "functions": [fn.model_dump() for fn in canonical_evidence_packet.functions],
         },
         "functions": [fn.model_dump() for fn in canonical_evidence_packet.functions],
+        "framework_constructs": canonical_evidence_packet.framework_constructs,
         "framework": {
             "name": framework_name,
             "constructs": canonical_evidence_packet.framework_constructs,

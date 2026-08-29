@@ -651,13 +651,74 @@ class StaticCodeExtractor:
                                 raw_snippet=f"Declared in prompt JSON template: '{k_name}'"
                             ))
 
+        # 2b. Framework Task Expected Outputs (e.g. CrewAI / AutoGen Task)
+        for fname, tree in ast_trees.items():
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    fn_name = ""
+                    if isinstance(node.func, ast.Name):
+                        fn_name = node.func.id
+                    elif isinstance(node.func, ast.Attribute):
+                        fn_name = node.func.attr
+
+                    if fn_name in ("Task", "AgentTask", "MessageTask"):
+                        expected_out = ""
+                        task_desc = ""
+                        for kw in node.keywords:
+                            if kw.arg == "expected_output" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                                expected_out = kw.value.value
+                            elif kw.arg == "description" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                                task_desc = kw.value.value
+                            elif kw.arg == "description" and isinstance(kw.value, ast.JoinedStr):
+                                task_desc = ast.unparse(kw.value) if hasattr(ast, "unparse") else ""
+
+                        if expected_out and expected_out not in seen_keys:
+                            seen_keys.add(expected_out)
+                            counter += 1
+                            is_email = "email" in expected_out.lower() or "email" in task_desc.lower() or "email" in fname.lower()
+                            
+                            if "brief" in expected_out.lower() or "extract" in task_desc.lower():
+                                field_id = "email_brief" if is_email else "analysis_brief"
+                                sem_type = "EMAIL_BRIEF" if is_email else "ANALYSIS_BRIEF"
+                            elif "ready to send" in expected_out.lower() or "formatted email" in expected_out.lower() or "draft" in expected_out.lower():
+                                field_id = "email"
+                                sem_type = "EMAIL_DRAFT"
+                            else:
+                                field_id = "email" if is_email else "output"
+                                sem_type = "EMAIL_DRAFT" if is_email else "STRUCTURED_DOCUMENT"
+                            
+                            # Extract constraints from task description
+                            constraints = {}
+                            if "under 200 words" in task_desc.lower() or "200 words" in task_desc.lower():
+                                constraints["body_max_words"] = 200
+                            sections = []
+                            for sec in ["Subject line", "greeting", "body paragraphs", "closing", "signature"]:
+                                if sec.lower() in task_desc.lower():
+                                    sections.append(sec)
+                            if sections:
+                                constraints["required_sections"] = sections
+
+                            outputs.append(OutputStructureEvidence(
+                                id=f"ev-out-{counter}",
+                                artifact_id=artifact_id,
+                                field_name=field_id,
+                                field_type="string",
+                                semantic_type=sem_type,
+                                description=expected_out,
+                                constraints=constraints or None,
+                                provenance=ProvenanceType.CODE_PROVEN,
+                                source_file=fname,
+                                line_number=getattr(node, "lineno", 1),
+                                raw_snippet=f"Task(expected_output='{expected_out[:40]}...')"
+                            ))
+
         # 3. Fallback for Executable Agents with LLM / Framework Invocations
         if not outputs:
             for fname, tree in ast_trees.items():
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Call):
                         fn_attr = getattr(node.func, "attr", "")
-                        if fn_attr in ("invoke", "run", "predict", "generate"):
+                        if fn_attr in ("invoke", "run", "predict", "generate", "kickoff"):
                             counter += 1
                             outputs.append(OutputStructureEvidence(
                                 id=f"ev-out-{counter}",

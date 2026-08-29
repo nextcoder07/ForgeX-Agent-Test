@@ -484,6 +484,7 @@ async def register_normalized_spec(
         workflow=workflow_val,
         data_surfaces={
             "pii_detected": pii_agent_capability,
+            "sensitive_fields": getattr(bp, "sensitive_fields", []) if bp else (["name", "email", "phone", "location", "linkedin", "github", "employment_history", "education"] if pii_agent_capability else []),
             "demo_dataset_contains_pii": demo_dataset_pii,
             "pii_query_possible": pii_query_possible,
             "transformations": [t.model_dump() if hasattr(t, "model_dump") else t for t in (bp.data_transformations if bp else [])]
@@ -656,31 +657,6 @@ async def register_normalized_spec(
         response_summary=f"Agent ID: {agent_id} | Domain: {rec.domain} | Status: {status_dict}",
         status="success" if overall == "COMPLETE" else "warning"
     )
-
-    # Automatically dispatch parallel Stage Agent Tester for Analysis in the background
-    try:
-        from app.agent_testers.stage_tester import stage_tester_orchestrator
-        from app.agent_testers.models import StageAuditRequest
-        import asyncio
-        asyncio.create_task(stage_tester_orchestrator.audit_stage(StageAuditRequest(
-            agent_id=rec.id,
-            stage_name="analysis",
-            input_data={
-                "source_files": list((payload.source_files or {}).keys()),
-                "total_bytes": sum(len(c) for c in (payload.source_files or {}).values()),
-                "endpoint_url": payload.endpoint_url
-            },
-            result_data={
-                "name": rec.name,
-                "domain": rec.domain,
-                "tools_count": len(rec.tools),
-                "dependencies_count": len(rec.dependencies),
-                "goals": rec.constitution.goals if rec.constitution else []
-            }
-        )))
-    except Exception as e:
-        logger.warning(f"Could not trigger background stage tester audit for intake: {e}")
-
     return rec
 
 

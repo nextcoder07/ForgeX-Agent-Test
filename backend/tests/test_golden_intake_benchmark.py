@@ -375,3 +375,152 @@ async def test_news_agent_golden_intake():
     discrepancy_types = [d.get("field") if isinstance(d, dict) else getattr(d, "field", "") for d in discrepancies_list]
     assert "framework" in discrepancy_types
 
+
+EMAIL_AGENT_CODE = """\"\"\"
+Email Drafting Agent using CrewAI.
+
+A two-agent crew that drafts professional emails:
+- Analyst agent: understands context and tone requirements
+- Writer agent: drafts the final email
+
+Usage:
+    python agent.py
+    python agent.py --context "Follow up on the Q3 proposal sent last week" --tone "professional"
+\"\"\"
+
+import argparse
+import os
+
+from crewai import Agent, Crew, Process, Task
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+
+load_dotenv()
+
+
+def build_email_crew(context: str, tone: str, recipient: str) -> str:
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+
+    analyst = Agent(
+        role="Email Context Analyst",
+        goal="Understand the email context, extract key points, and define the structure",
+        backstory="You are an expert business communication analyst who distills complex situations into clear email requirements.",
+        llm=llm,
+        verbose=False,
+    )
+
+    writer = Agent(
+        role="Professional Email Writer",
+        goal="Draft clear, concise, and effective professional emails",
+        backstory="You are a professional copywriter specializing in business emails that get responses.",
+        llm=llm,
+        verbose=False,
+    )
+
+    analyze_task = Task(
+        description=f\"\"\"Analyze this email requirement:
+Context: {context}
+Recipient: {recipient}
+Desired tone: {tone}
+
+Extract: purpose, key points to cover, call to action, subject line suggestion.\"\"\",
+        agent=analyst,
+        expected_output="Structured email brief: purpose, key points, CTA, and suggested subject line",
+    )
+
+    write_task = Task(
+        description=f\"\"\"Using the analysis, draft a complete professional email.
+Tone: {tone}. Recipient: {recipient}.
+Include: Subject line, greeting, body paragraphs, closing, signature placeholder.
+Keep it concise — under 200 words for the body.\"\"\",
+        agent=writer,
+        expected_output="Complete formatted email ready to send",
+        context=[analyze_task],
+    )
+
+    crew = Crew(
+        agents=[analyst, writer],
+        tasks=[analyze_task, write_task],
+        process=Process.sequential,
+        verbose=False,
+    )
+
+    result = crew.kickoff()
+    return str(result)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Email Drafting Agent")
+    parser.add_argument("--context", default="Follow up on our product demo from last Tuesday. They seemed interested but haven't responded.", help="Email context/purpose")
+    parser.add_argument("--tone", default="professional and friendly", help="Email tone")
+    parser.add_argument("--recipient", default="a potential client", help="Who the email is for")
+    args = parser.parse_args()
+
+    print(f"\\n✉️  Drafting email...\\n")
+    email = build_email_crew(args.context, args.tone, args.recipient)
+
+    print("=" * 60)
+    print("📧 DRAFTED EMAIL")
+    print("=" * 60)
+    print(email)
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+@pytest.mark.asyncio
+async def test_email_crewai_agent_golden_intake():
+    """Validates the multi-agent CrewAI Email Drafting Agent intake extraction."""
+    analysis_files = {
+        "05-email-drafting-agent/agent.py": EMAIL_AGENT_CODE,
+        "05-email-drafting-agent/requirements.txt": "crewai==0.80.0\nlangchain-openai==0.2.0\npython-dotenv==1.0.1\n",
+        "05-email-drafting-agent/.env.example": "OPENAI_API_KEY=your_openai_api_key_here\n",
+    }
+
+    payload = AgentIntakePayload(files=analysis_files, agent_name_hint="Email Drafting Agent")
+    result = await process_agent_intake(payload, MockLLM())
+
+    norm_spec = result.normalized_spec
+    bp = norm_spec.behavior_profile
+    assert bp is not None
+
+    # 1. Multi-Agent Framework Detected as CrewAI
+    assert norm_spec.identity.get("framework") == "CrewAI"
+
+    # 2. Multi-Agent sub-nodes and tasks extracted in workflow
+    node_ids = [n.id for n in bp.workflow_graph.nodes]
+    assert "analyze_task" in node_ids
+    assert "write_task" in node_ids
+    assert "build_email_crew" in node_ids
+    assert "main" in node_ids
+
+    # 3. Context flow edge: analyze_task -> write_task
+    edge_pairs = [(e["source"], e["target"]) for e in bp.workflow_graph.edges]
+    assert ("analyze_task", "write_task") in edge_pairs
+
+    # 4. Output contract extracted with semantic type and constraints
+    assert len(norm_spec.outputs) > 0
+    email_output = next((o for o in norm_spec.outputs if o.get("name") == "email" or o.get("semantic_type") == "EMAIL_DRAFT"), None)
+    assert email_output is not None
+    assert email_output.get("semantic_type") == "EMAIL_DRAFT"
+    assert "Complete formatted email ready to send" in email_output.get("description", "")
+    assert email_output.get("constraints", {}).get("body_max_words") == 200
+
+    # 5. Framework evidence provenance count > 0
+    audit = result.audit_report
+    assert audit is not None
+    field_confidences = {f["field_name"]: f for f in audit.get("field_confidences", [])}
+    assert "framework" in field_confidences
+    assert field_confidences["framework"]["evidence_count"] > 0
+    assert field_confidences["framework"]["certainty"] == "FACT"
+
+    # 6. Inputs preserved with defaults
+    inputs_by_name = {i["name"]: i for i in norm_spec.inputs}
+    assert "context" in inputs_by_name
+    assert "tone" in inputs_by_name
+    assert "recipient" in inputs_by_name
+    assert inputs_by_name["recipient"]["default"] == "a potential client"
+
+
