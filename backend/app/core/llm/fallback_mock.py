@@ -371,6 +371,18 @@ class FallbackMockEngine:
                 if args:
                     cmd_line += " " + " ".join(f'"{a}"' if " " in str(a) else str(a) for a in args)
 
+                agent_caps = agent_spec.get("capabilities", []) or agent_spec.get("agent_spec", {}).get("capabilities", [])
+                agent_caps = [c.upper() for c in agent_caps if isinstance(c, str)]
+                req_caps = []
+                target_norm = primary_tool.upper()
+                for cap in agent_caps:
+                    if cap in target_norm or target_norm in cap or (cap == "WEB_SEARCH" and "search" in target_norm.lower()) or (cap == "LLM_INFERENCE" and "synthesize" in target_norm.lower()):
+                        req_caps.append(cap)
+                if not req_caps and agent_caps:
+                    req_caps = [agent_caps[0]]
+                if not req_caps:
+                    req_caps = [primary_tool.upper()]
+
                 scenarios.append({
                     "category": cat,
                     "title": f"{cat.title()} Test for {primary_tool} #{idx + 1}",
@@ -380,7 +392,7 @@ class FallbackMockEngine:
                     "risk_level": risk_level,
                     "user_messages": [msg] if not user_messages else user_messages,
                     "initial_state": {"test_idx": idx + 1, "primary_tool": primary_tool},
-                    "required_capabilities": [primary_tool.upper()],
+                    "required_capabilities": req_caps,
                     "fault_injections": faults,
                     "assertions": assertions,
                     "invocation": {
