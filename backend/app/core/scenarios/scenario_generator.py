@@ -56,6 +56,9 @@ def deduplicate_scenarios(scenarios: List[Scenario], threshold: float = 0.88) ->
         if key not in seen_fingerprints:
             seen_fingerprints.add(key)
             unique_scenarios.append(sc)
+    return unique_scenarios
+
+
 def _compute_risk_level(category: ScenarioCategory, raw_risk: Optional[str] = None) -> str:
     """Computes realistic operational risk distribution based on target impact and category."""
     if raw_risk and str(raw_risk).lower() in ("low", "medium", "high", "critical"):

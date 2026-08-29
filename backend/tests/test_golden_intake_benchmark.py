@@ -170,11 +170,28 @@ async def test_sql_agent_golden_intake():
     construct_names = [c.get("name") for c in packet.framework_constructs]
     assert "create_sql_agent" in construct_names or "SQLDatabaseToolkit" in construct_names
 
-    # 2. Security Surfaces (SQL Execution & Conditional Write Flag)
+    # 2. Granular Database Security Surfaces (Connectivity, Generation, Execution, Mutation)
     sec_types = [s.surface_type for s in packet.security_surfaces]
+    assert "DATABASE_CONNECTIVITY" in sec_types
+    assert "SQL_QUERY_GENERATION" in sec_types
     assert "SQL_EXECUTION" in sec_types
-    sql_sec = [s for s in packet.security_surfaces if s.surface_type == "SQL_EXECUTION"][0]
-    assert "--allow-write" in sql_sec.trigger_condition
+    assert "DATABASE_MUTATION" in sec_types
+
+    # 3. Output Contract Extraction
+    assert len(packet.output_structures) > 0
+    assert any(o.field_name == "output" for o in packet.output_structures)
+
+    # 4. End-to-end Process Intake Verification
+    payload = AgentIntakePayload(files=files, agent_name_hint="SQL Autonomous Agent")
+    result = await process_agent_intake(payload, MockLLM())
+    
+    # Workflow graph enrichment
+    wf_nodes = result.behavior_profile.workflow_graph.nodes
+    assert len(wf_nodes) >= 2
+    build_node = next((n for n in wf_nodes if n.id == "build_sql_agent"), None)
+    assert build_node is not None
+    assert "db_uri" in build_node.inputs
+    assert len(build_node.external_dependencies) > 0
 
 
 # ===========================================================================
@@ -233,3 +250,128 @@ async def test_resume_agent_golden_intake():
     # 3. Static Call Graph Edges (main -> read_resume_text -> parse_resume -> score_fit)
     callers = {e.caller for e in packet.call_graph}
     assert "main" in callers
+
+
+# ===========================================================================
+# 5. NEWS SUMMARIZER AGENT FIXTURE (Network + URL Credential + Content Injection)
+# ===========================================================================
+NEWS_AGENT_CODE = '''"""
+News Summarizer Agent using AutoGen.
+
+Fetches news articles and produces structured summaries with key insights.
+"""
+
+import argparse
+import os
+import requests
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+
+load_dotenv()
+
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+
+
+def fetch_news(topic: str, count: int = 5) -> list[dict]:
+    if not NEWS_API_KEY:
+        return [
+            {"title": f"Major development in {topic}", "description": f"Researchers announce breakthrough in {topic} field.", "url": "https://example.com/1", "source": {"name": "Tech News"}}
+        ]
+
+    url = f"https://newsapi.org/v2/everything?q={topic}&language=en&pageSize={count}&sortBy=publishedAt&apiKey={NEWS_API_KEY}"
+    response = requests.get(url, timeout=10)
+    data = response.json()
+    return data.get("articles", [])
+
+
+def summarize_news(topic: str, articles: list[dict]) -> str:
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    articles_text = "\\n\\n".join(
+        f"Title: {a['title']}\\nSource: {a.get('source', {}).get('name', 'Unknown')}\\nSummary: {a.get('description', 'N/A')}"
+        for a in articles[:5]
+    )
+
+    messages = [
+        SystemMessage(content="You are a news analyst. Create a structured news briefing."),
+        HumanMessage(content=f"Topic: {topic}\\n\\nArticles:\\n{articles_text}"),
+    ]
+
+    response = llm.invoke(messages)
+    return response.content
+
+
+def main():
+    parser = argparse.ArgumentParser(description="News Summarizer Agent")
+    parser.add_argument("--topic", default="artificial intelligence", help="News topic to search")
+    parser.add_argument("--count", type=int, default=5, help="Number of articles to fetch")
+    args = parser.parse_args()
+
+    articles = fetch_news(args.topic, args.count)
+    summary = summarize_news(args.topic, articles)
+    print(summary)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+@pytest.mark.asyncio
+async def test_news_agent_golden_intake():
+    files = {
+        "agent.py": NEWS_AGENT_CODE,
+        "requirements.txt": "langchain==0.3.0\nlangchain-core==0.3.0\nlangchain-openai==0.2.0\nrequests==2.32.3\npython-dotenv==1.0.1"
+    }
+    payload = AgentIntakePayload(files=files, agent_name_hint="News Summarizer Agent")
+    result = await process_agent_intake(payload, MockLLM())
+    spec = result.normalized_spec
+    bp = result.behavior_profile
+    ev = result.evidence_packet
+
+    # 1. Network Side-Effect Promoted to Canonical Spec & Profile
+    assert bp is not None
+    assert any("NETWORK" in s.upper() or "HTTP" in s.upper() or "newsapi.org" in s for s in spec.side_effects)
+    assert any("NETWORK" in s.upper() or "HTTP" in s.upper() or "newsapi.org" in s for s in bp.side_effects)
+
+    # 2. Security Detection: CREDENTIAL_IN_URL & EXTERNAL_CONTENT_INJECTION
+    sec_surface_types = {s.get("surface_type") if isinstance(s, dict) else getattr(s, "surface_type", "") for s in spec.security_surfaces}
+    assert "CREDENTIAL_IN_URL" in sec_surface_types
+    assert "EXTERNAL_CONTENT_INJECTION" in sec_surface_types
+
+    # 3. Functional vs Technical Capabilities
+    cap_set = set(spec.capabilities + bp.capabilities)
+    assert "NEWS_RETRIEVAL" in cap_set or "NEWS_SUMMARIZATION" in cap_set or "STRUCTURED_NEWS_BRIEFING" in cap_set
+    assert "LLM_INFERENCE" in cap_set or "HTTP_API_ACCESS" in cap_set
+
+    # 4. Input Promotion Fidelity: Type & Defaults
+    inputs_by_name = {i["name"]: i for i in bp.inputs if isinstance(i, dict)}
+    assert "count" in inputs_by_name
+    assert inputs_by_name["count"]["type"] == "integer"
+    assert inputs_by_name["count"]["default"] == 5
+    assert inputs_by_name["count"]["required"] is False
+
+    assert "topic" in inputs_by_name
+    assert inputs_by_name["topic"]["type"] == "string"
+    assert inputs_by_name["topic"]["default"] == "artificial intelligence"
+    assert inputs_by_name["topic"]["required"] is False
+
+    # 5. Workflow external dependencies: Noisy builtins filtered out
+    fetch_node = next((n for n in bp.workflow_graph.nodes if n.id == "fetch_news"), None)
+    assert fetch_node is not None
+    assert "get" not in fetch_node.external_dependencies
+    assert "json" not in fetch_node.external_dependencies
+    assert "title" not in fetch_node.external_dependencies
+
+    # 6. Workflow Edges: main -> fetch_news -> summarize_news
+    edge_pairs = [(e["source"], e["target"]) for e in bp.workflow_graph.edges]
+    assert ("main", "fetch_news") in edge_pairs
+    assert ("fetch_news", "summarize_news") in edge_pairs
+
+    # 7. Framework conflict detected (Docstring claims AutoGen, implementation is LangChain)
+    audit = result.audit_report
+    assert audit is not None
+    discrepancies_list = audit.get("discrepancies", []) if isinstance(audit, dict) else getattr(audit, "discrepancies", [])
+    discrepancy_types = [d.get("field") if isinstance(d, dict) else getattr(d, "field", "") for d in discrepancies_list]
+    assert "framework" in discrepancy_types
+

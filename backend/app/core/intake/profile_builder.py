@@ -45,6 +45,8 @@ class ProfileBuilder:
         inputs: Optional[List[Dict[str, Any]]] = None,
         outputs: Optional[List[Dict[str, Any]]] = None,
         security_surfaces: Optional[List[Dict[str, Any]]] = None,
+        decision_surfaces: Optional[List[Dict[str, Any]]] = None,
+        side_effects: Optional[List[str]] = None,
         conflicts: Optional[List[DeclaredVsImplementedConflict]] = None,
         interface_contract: Optional[InterfaceContract] = None,
         output_contract: Optional[OutputContract] = None,
@@ -71,6 +73,14 @@ class ProfileBuilder:
         )
 
         profile_id = f"abp-{uuid.uuid4().hex[:8]}"
+
+        # Assemble comprehensive side effects
+        assembled_side_effects = list(dict.fromkeys(
+            (side_effects or []) +
+            ([f"MODEL_INFERENCE: {c.get('class_name', 'LLM')}" for c in external_calls if "LLM" in c.get("capability", "")] or ["MODEL_INFERENCE: LLM"]) +
+            ([f"FILESYSTEM_READ: {t.field}" for t in transformations if "pdf" in t.field or "file" in t.field] or []) +
+            ([f"DATABASE_OPERATION: {c.get('class_name', 'SQL')}" for c in external_calls if "SQL" in c.get("capability", "")] or [])
+        ))
 
         return AgentBehaviorProfile(
             id=profile_id,
@@ -102,7 +112,8 @@ class ProfileBuilder:
             invariants=invariants,
             failure_surfaces=failure_surfaces,
             security_surfaces=security_surfaces or [],
-            side_effects=[f"External service call to {c.get('capability', 'API')}" for c in external_calls],
+            decision_surfaces=decision_surfaces or [],
+            side_effects=assembled_side_effects,
             declared_behaviors=[f"Capability: {cap}" for cap in capabilities],
             observed_behaviors=[f"Workflow graph with {len(workflow_graph.nodes)} nodes"],
             conflicts=conflicts or [],

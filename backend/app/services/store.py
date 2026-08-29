@@ -265,12 +265,25 @@ def _serialize_agent(key: str, agent: AgentRecord) -> Dict[str, Any]:
         "source_files": agent.source_files,
         "runtime_manifest": agent.runtime_manifest,
         "execution_status": agent.execution_status,
+        "configuration_status": getattr(agent, "configuration_status", "READY"),
+        "blocking_reason": getattr(agent, "blocking_reason", None),
         "input_type": agent.input_type,
         "endpoint": agent.endpoint,
         "system_prompt": agent.system_prompt,
         "tools": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in agent.tools],
         "dependencies": [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in agent.dependencies],
         "constitution": agent.constitution.model_dump() if hasattr(agent.constitution, "model_dump") else agent.constitution.dict(),
+        "capabilities": getattr(agent, "capabilities", []),
+        "inputs": getattr(agent, "inputs", []),
+        "outputs": getattr(agent, "outputs", []),
+        "workflow": getattr(agent, "workflow", []),
+        "data_surfaces": getattr(agent, "data_surfaces", {}),
+        "decision_surfaces": getattr(agent, "decision_surfaces", []),
+        "security_surfaces": getattr(agent, "security_surfaces", []),
+        "side_effects": getattr(agent, "side_effects", []),
+        "evidence_packet": getattr(agent, "evidence_packet", {}),
+        "audit_report": getattr(agent, "audit_report", {}),
+        "confidence_score": getattr(agent, "confidence_score", 98.0),
         "version_label": agent.version_label,
         "user_id": owner_id or "default_user",
         "owner_id": owner_id,
@@ -293,33 +306,45 @@ def _deserialize_agent(row: Dict[str, Any]) -> AgentRecord:
     spec = row.get("agent_spec") or {}
     tools = [ToolDefinition(**t) for t in spec.get("tools", [])]
     deps = [DependencyDefinition(**d) for d in spec.get("dependencies", [])]
-    constitution = AgentConstitution(**spec.get("constitution", {}))
-    ws_id = row.get("workspace_id") or spec.get("workspace_id")
-    owner_id = row.get("owner_id") or spec.get("owner_id") or row.get("user_id")
+    const_data = spec.get("constitution") or {}
+    constitution = AgentConstitution(**const_data) if isinstance(const_data, dict) else AgentConstitution()
     return AgentRecord(
-        id=row["id"],
-        workspace_id=ws_id,
-        owner_id=owner_id,
-        name=row["name"],
-        display_name=row.get("display_name") or spec.get("display_name"),
-        source_name=spec.get("source_name") or row.get("name"),
+        id=row.get("id", ""),
+        name=row.get("name", ""),
         description=row.get("description", ""),
-        domain=spec.get("domain", ""),
+        display_name=spec.get("display_name"),
+        source_name=spec.get("source_name"),
+        domain=spec.get("domain", "general"),
         system_prompt=spec.get("system_prompt", ""),
         tools=tools,
         dependencies=deps,
         constitution=constitution,
-        endpoint=spec.get("endpoint") or row.get("endpoint"),
+        capabilities=spec.get("capabilities", []),
+        inputs=spec.get("inputs", []),
+        outputs=spec.get("outputs", []),
+        workflow=spec.get("workflow", []),
+        data_surfaces=spec.get("data_surfaces", {}),
+        decision_surfaces=spec.get("decision_surfaces", []),
+        security_surfaces=spec.get("security_surfaces", []),
+        side_effects=spec.get("side_effects", []),
+        evidence_packet=spec.get("evidence_packet", {}),
+        audit_report=spec.get("audit_report", {}),
+        confidence_score=spec.get("confidence_score", 98.0),
+        configuration_status=spec.get("configuration_status", "READY"),
+        blocking_reason=spec.get("blocking_reason"),
+        endpoint=spec.get("endpoint"),
         version_label=spec.get("version_label", "v1.0"),
         current_version_id=row.get("current_version_id") or spec.get("current_version_id"),
         artifact_id=spec.get("artifact_id"),
         artifact_hash=spec.get("artifact_hash"),
         source_files=spec.get("source_files", {}),
         runtime_manifest=spec.get("runtime_manifest", {}),
-        execution_status=spec.get("execution_status", "EXECUTION_BLOCKED"),
+        execution_status=spec.get("execution_status", "READY"),
         input_type=spec.get("input_type", "package"),
-        user_id=owner_id or "default_user",
-        created_at=str(row.get("created_at", _now())),
+        user_id=row.get("owner_id") or spec.get("user_id"),
+        owner_id=row.get("owner_id"),
+        workspace_id=row.get("workspace_id"),
+        created_at=str(row.get("created_at") or spec.get("created_at") or _now())
     )
 
 
@@ -1335,6 +1360,23 @@ class Store:
                 self.agents._sb.table("agent_versions").upsert(version_row).execute()
             except Exception as e:
                 logger.debug(f"Could not sync agent_version to Supabase: {e}")
+
+    def save_behavior_profile(self, bp: Any) -> None:
+        """Persists AgentBehaviorProfile directly to memory and Supabase agent_behavior_profiles."""
+        bp_dict = bp.model_dump() if hasattr(bp, "model_dump") else bp if isinstance(bp, dict) else bp.dict()
+        agent_id = bp_dict.get("agent_id")
+        bp_id = bp_dict.get("id") or f"abp-{agent_id}"
+        if self.agents._sb and agent_id:
+            try:
+                row = {
+                    "id": bp_id,
+                    "agent_id": agent_id,
+                    "agent_version_id": bp_dict.get("agent_version_id") or f"{agent_id}-v1.0",
+                    "profile_data": bp_dict
+                }
+                self.agents._sb.table("agent_behavior_profiles").upsert(row, on_conflict="id").execute()
+            except Exception as e:
+                logger.warning(f"Could not persist agent_behavior_profile to Supabase: {e}")
 
     def delete_agent(self, agent_id: str) -> None:
         """Completely deletes an agent and all associated scenarios, runs, and artifacts from memory, database, and local snapshots."""

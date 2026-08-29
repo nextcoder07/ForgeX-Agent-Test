@@ -101,10 +101,10 @@ export const AgentTesterBottomDrawer: React.FC<AgentTesterBottomDrawerProps> = (
   };
 
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 12000);
-    return () => clearInterval(interval);
-  }, [currentAgent?.id]);
+    if (isOpen) {
+      loadData();
+    }
+  }, [isOpen, currentAgent?.id]);
 
   const toggleAgentSelection = (agentId: string) => {
     const next = new Set(selectedAgentIds);

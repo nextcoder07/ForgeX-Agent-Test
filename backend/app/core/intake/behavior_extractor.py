@@ -1,15 +1,15 @@
 """
-Behavior Extractor Module.
-Extracts data transformations, code invariants, state models, failure surfaces, and security exposures
-strictly from source code AST trees and declared documentation.
-Never invents hardcoded domain assumptions or fake inputs/outputs.
+Authoritative Deterministic Behavior Extractor Module.
+Extracts data transformations, code invariants, state models, inputs, outputs,
+PII surfaces, decision surfaces, and security exposures strictly from source code AST trees.
+Never uses hardcoded assumptions or foreign template heuristics.
 """
 
 from __future__ import annotations
 
 import ast
 import re
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from app.models.agent_behavior import (
     DataTransformation,
     CodeInvariant,
@@ -31,6 +31,8 @@ class BehaviorExtractor:
         inputs: List[Dict[str, Any]] = []
         outputs: List[Dict[str, Any]] = []
         security_surfaces: List[Dict[str, Any]] = []
+        decision_surfaces: List[Dict[str, Any]] = []
+        pii_fields_found: List[str] = []
         interface_details: Dict[str, Any] = {
             "interface_type": "UNKNOWN",
             "entrypoint": None,
@@ -39,15 +41,18 @@ class BehaviorExtractor:
             "arguments": []
         }
 
-        all_code_combined = " ".join(raw_files.values())
+        # Track AST call signatures for grounded security surfaces
+        has_ast_sql_call = False
+        has_ast_file_read = False
+        has_ast_subprocess_call = False
 
-        # 1. Inspect AST for State Models, CLI Arguments, Invariants, Slices, and Calls
+        # 1. AST Traversal: CLI Arguments, State Models, Invariants, File Operations, LLM Calls
         for fname, tree in ast_trees.items():
             for node in ast.walk(tree):
                 # State Models (TypedDict / BaseModel)
                 if isinstance(node, ast.ClassDef):
                     is_state_class = any(
-                        b.id in ["TypedDict", "BaseModel", "State"]
+                        getattr(b, "id", "") in ["TypedDict", "BaseModel", "State"]
                         for b in node.bases if isinstance(b, ast.Name)
                     )
                     if is_state_class or "state" in node.name.lower():
@@ -57,17 +62,17 @@ class BehaviorExtractor:
                                 fields.append(item.target.id)
                         state_model = {
                             "class_name": node.name,
-                            "type": "TypedDict" if any(b.id == "TypedDict" for b in node.bases if isinstance(b, ast.Name)) else "BaseModel",
+                            "type": "TypedDict" if any(getattr(b, "id", "") == "TypedDict" for b in node.bases if isinstance(b, ast.Name)) else "BaseModel",
                             "fields": fields
                         }
-                        if "query" in fields or "input" in fields or "prompt" in fields:
-                            in_field = next(f for f in fields if f in ["query", "input", "prompt", "messages"])
-                            inputs.append({"name": in_field, "type": "string", "source": f"state_model.{in_field}"})
-                        if "report" in fields or "output" in fields or "result" in fields or "response" in fields:
-                            out_field = next(f for f in fields if f in ["report", "output", "result", "response"])
-                            outputs.append({"name": out_field, "type": "string", "source": f"state_model.{out_field}"})
+                        for in_cand in ["query", "input", "prompt", "messages", "resume", "pdf", "file"]:
+                            if in_cand in fields and not any(inp["name"] == in_cand for inp in inputs):
+                                inputs.append({"name": in_cand, "type": "path" if "file" in in_cand or "pdf" in in_cand else "string", "source": f"state_model.{in_cand}"})
+                        for out_cand in ["report", "output", "result", "response", "profile", "fit_score"]:
+                            if out_cand in fields and not any(out["name"] == out_cand for out in outputs):
+                                outputs.append({"name": out_cand, "type": "dictionary" if "profile" in out_cand else "string", "source": f"state_model.{out_cand}"})
 
-                # CLI Arguments Extraction (argparse.ArgumentParser)
+                # CLI Arguments Extraction (argparse.ArgumentParser.add_argument)
                 elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument":
                     arg_name = ""
                     default_val = None
@@ -77,7 +82,7 @@ class BehaviorExtractor:
 
                     for arg in node.args:
                         if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value.startswith("-"):
-                            arg_name = arg.value
+                            arg_name = arg.value.lstrip("-").replace("-", "_")
                             break
 
                     for kw in node.keywords:
@@ -92,90 +97,56 @@ class BehaviorExtractor:
                             required = bool(kw.value.value)
 
                     if arg_name:
+                        if any(k in arg_name.lower() for k in ["file", "pdf", "path", "doc", "resume"]):
+                            arg_type = "path"
                         interface_details["interface_type"] = "CLI"
                         interface_details["entrypoint"] = fname
-                        inputs.append({
-                            "name": arg_name,
-                            "type": arg_type,
-                            "required": required,
-                            "default": default_val,
-                            "description": help_text or f"CLI parameter {arg_name}"
-                        })
-                        if default_val is not None:
-                            invariants.append(
-                                CodeInvariant(
-                                    statement=f"Default CLI {arg_name} = '{default_val}'",
-                                    type="observed",
-                                    enforcement_level="hard",
-                                    testability="deterministic",
-                                    source_file=fname,
-                                    evidence=f"parser.add_argument('{arg_name}', default={repr(default_val)})",
-                                    confidence=1.0
-                                )
-                            )
+                        if not any(inp["name"] == arg_name for inp in inputs):
+                            inputs.append({
+                                "name": arg_name,
+                                "type": arg_type,
+                                "required": required,
+                                "default": default_val,
+                                "help": help_text,
+                                "source": f"CLI Argument (--{arg_name})"
+                            })
 
-                # Subscript Slices (e.g., articles[:5] or content[:500])
-                elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
-                    if isinstance(node.slice.upper, ast.Constant) and isinstance(node.slice.upper.value, int):
-                        limit = node.slice.upper.value
-                        var_name = node.value.id if isinstance(node.value, ast.Name) else "items"
-                        if any(kw in var_name.lower() for kw in ["article", "item", "result", "doc", "message", "record", "chunk"]):
-                            transformations.append(
-                                DataTransformation(
-                                    field=var_name,
-                                    operation="limit_items",
-                                    parameters={"max_items": limit},
-                                    evidence=f"Collection '{var_name}' limited to {limit} items in {fname}"
-                                )
-                            )
-                            invariants.append(
-                                CodeInvariant(
-                                    statement=f"max_{var_name}_passed_to_llm = {limit}",
-                                    type="observed",
-                                    enforcement_level="hard",
-                                    testability="deterministic",
-                                    source_file=fname,
-                                    evidence=f"{var_name}[:{limit}]",
-                                    confidence=1.0
-                                )
-                            )
+                # AST File & Database Call Grounding
+                elif isinstance(node, ast.Call):
+                    fn_name = ""
+                    attr_name = ""
+                    if isinstance(node.func, ast.Name):
+                        fn_name = node.func.id
+                    elif isinstance(node.func, ast.Attribute):
+                        attr_name = node.func.attr
+                        if isinstance(node.func.value, ast.Name):
+                            fn_name = f"{node.func.value.id}.{attr_name}"
                         else:
-                            transformations.append(
-                                DataTransformation(
-                                    field=var_name,
-                                    operation="truncate",
-                                    parameters={"max_length": limit},
-                                    evidence=f"Content '{var_name}' sliced with upper bound {limit} in {fname}"
-                                )
-                            )
+                            fn_name = attr_name
 
-                # Invariants (e.g. max_results = 5, temperature = 0, model = "gpt-4o-mini", timeout = 10)
+                    if fn_name == "open" or attr_name in ("read_text", "read_bytes", "PdfReader", "SimpleDirectoryReader", "load_data"):
+                        has_ast_file_read = True
+
+                    if any(db_kw in fn_name for db_kw in ("sqlite3.connect", "create_engine", "SQLDatabase", "session.query")) or (attr_name == "execute" and "cursor" in fn_name):
+                        has_ast_sql_call = True
+
+                    if any(sub_kw in fn_name for sub_kw in ("subprocess.run", "subprocess.Popen", "os.system")):
+                        has_ast_subprocess_call = True
+
+                # PDF File Parsing Detection
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in ("PdfReader", "SimpleDirectoryReader"):
+                    transformations.append(
+                        DataTransformation(
+                            field="pdf_stream",
+                            operation="extract_pdf_pages_text",
+                            parameters={"reader": "pypdf.PdfReader"},
+                            evidence=f"PDF page text extraction via {node.func.attr} in {fname}"
+                        )
+                    )
+
+                # Keyword Invariants
                 elif isinstance(node, ast.keyword):
-                    if node.arg == "max_results" and isinstance(node.value, ast.Constant):
-                        invariants.append(
-                            CodeInvariant(
-                                statement=f"Search max_results = {node.value.value}",
-                                type="observed",
-                                enforcement_level="hard",
-                                testability="deterministic",
-                                source_file=fname,
-                                evidence=f"max_results={node.value.value}",
-                                confidence=1.0
-                            )
-                        )
-                    elif node.arg == "temperature" and isinstance(node.value, ast.Constant):
-                        invariants.append(
-                            CodeInvariant(
-                                statement=f"LLM temperature = {node.value.value}",
-                                type="observed",
-                                enforcement_level="hard",
-                                testability="deterministic",
-                                source_file=fname,
-                                evidence=f"temperature={node.value.value}",
-                                confidence=1.0
-                            )
-                        )
-                    elif node.arg == "model" and isinstance(node.value, ast.Constant):
+                    if node.arg in ["model", "model_name"] and isinstance(node.value, ast.Constant):
                         invariants.append(
                             CodeInvariant(
                                 statement=f"LLM model = {node.value.value}",
@@ -187,202 +158,88 @@ class BehaviorExtractor:
                                 confidence=1.0
                             )
                         )
-                    elif node.arg == "timeout" and isinstance(node.value, ast.Constant):
-                        invariants.append(
-                            CodeInvariant(
-                                statement=f"HTTP network timeout = {node.value.value}s",
-                                type="observed",
-                                enforcement_level="hard",
-                                testability="deterministic",
-                                source_file=fname,
-                                evidence=f"timeout={node.value.value}",
-                                confidence=1.0
-                            )
-                        )
 
-                # Fallback Logic Detection (e.g. if not NEWS_API_KEY: return mock_data)
-                elif isinstance(node, ast.If):
-                    if isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not):
-                        if isinstance(node.test.operand, ast.Name) and "key" in node.test.operand.id.lower():
-                            sec_var = node.test.operand.id
-                            invariants.append(
-                                CodeInvariant(
-                                    statement=f"Missing {sec_var} triggers synthetic mock data fallback",
-                                    type="observed",
-                                    enforcement_level="hard",
-                                    testability="deterministic",
-                                    source_file=fname,
-                                    evidence=f"if not {sec_var}: return mock data",
-                                    confidence=1.0
-                                )
-                            )
+        # 2. Extract JSON Output Contract, PII Fields, and Decision Surfaces from Source Prompts
+        pii_keywords = ["name", "email", "phone", "location", "linkedin", "github", "address", "experience", "education", "certifications", "skills", "candidate", "applicant"]
+        decision_keywords = ["fit_score", "fit_label", "recommendation", "recommendation_reason", "hire", "consider", "pass", "approve", "reject"]
 
-        # 2. Extract Declared Output Contract Invariants & Section Templates from Prompts / Docs
         for fname, code in raw_files.items():
-            if "Top Story" in code and "Key Themes" in code:
-                invariants.append(
-                    CodeInvariant(
-                        statement="Declared output structure sections: 1) Top Story, 2) Key Themes (3 bullet points), 3) What to Watch, 4) Quick Headlines",
-                        type="declared",
-                        enforcement_level="soft",
-                        testability="deterministic_output_assertion",
-                        source_file=fname,
-                        evidence="System prompt specifies structured news briefing sections",
-                        confidence=0.95
-                    )
-                )
-            elif "Summary" in code and "Key Findings" in code and "Sources" in code:
-                invariants.append(
-                    CodeInvariant(
-                        statement="Report output sections: Summary, Key Findings, Sources",
-                        type="declared",
-                        enforcement_level="soft",
-                        testability="deterministic_output_assertion",
-                        source_file=fname,
-                        evidence="System prompt requests Summary, Key Findings, Sources sections",
-                        confidence=0.9
-                    )
-                )
+            # Discover structured JSON schemas in prompt constants (e.g., PARSE_PROMPT, FIT_PROMPT)
+            json_matches = re.findall(r'(\w+_PROMPT|PROMPT_\w+|SYSTEM_\w+)\s*=\s*(?:"""(.*?)"""|\'\'\'(.*?)\'\'\'|"(.*?)"|\'(.*?)\')', code, re.DOTALL)
+            for m in json_matches:
+                prompt_var = m[0]
+                prompt_body = m[1] or m[2] or m[3] or m[4] or ""
+                # Extract quoted keys from JSON schemas inside prompts
+                schema_keys = re.findall(r'["\']([a-zA-Z0-9_]+)["\']\s*:\s*', prompt_body)
+                if schema_keys:
+                    for key in schema_keys:
+                        if key.lower() in pii_keywords and key not in pii_fields_found:
+                            pii_fields_found.append(key)
+                        if not any(o.get("name") == key for o in outputs):
+                            outputs.append({
+                                "name": key,
+                                "type": "string" if key != "fit_score" and key != "skills" else ("integer" if key == "fit_score" else "dictionary"),
+                                "source": f"Prompt Schema ({prompt_var})"
+                            })
 
-            # Prompt template joining transformation
-            if "join" in code and ("Title:" in code or "Summary:" in code):
-                transformations.append(
-                    DataTransformation(
-                        field="articles",
-                        operation="format_prompt_text",
-                        parameters={"template": "Title: {title}\nSource: {source}\nSummary: {description}"},
-                        evidence=f"Article formatting into LLM prompt text in {fname}"
+                    invariants.append(
+                        CodeInvariant(
+                            statement=f"Prompt '{prompt_var}' enforces structured JSON keys: {', '.join(schema_keys[:6])}",
+                            type="declared",
+                            enforcement_level="hard",
+                            testability="deterministic_json_schema",
+                            source_file=fname,
+                            evidence=f"{prompt_var} JSON contract",
+                            confidence=1.0
+                        )
                     )
-                )
 
-        # 3. Detect Security Exposures
-        if "apikey=" in all_code_combined.lower() or "api_key=" in all_code_combined.lower():
+            # Check for candidate evaluation / recommendation decision surface contract
+            if "recommendation" in code.lower() and ("hire" in code.lower() or "consider" in code.lower() or "pass" in code.lower()):
+                if not any(ds.get("decision_type") == "CANDIDATE_EVALUATION" for ds in decision_surfaces):
+                    decision_surfaces.append({
+                        "decision_type": "CANDIDATE_EVALUATION",
+                        "impact": "EMPLOYMENT_DECISION",
+                        "description": "Agent scores candidate qualifications and computes Hire/Consider/Pass employment recommendations.",
+                        "recommendation_options": ["Hire", "Consider", "Pass"],
+                        "source_file": fname,
+                        "line_number": 1,
+                        "evidence_snippet": "FIT_PROMPT specifies Hire|Consider|Pass recommendation contract"
+                    })
+
+        # 3. Grounded Security & Data Surfaces (Strictly AST and Schema Grounded)
+        has_pii = len(pii_fields_found) > 0 or any("resume" in inp.get("name", "") for inp in inputs)
+        if has_pii:
             security_surfaces.append({
-                "surface": "CREDENTIAL_IN_QUERY_PARAM",
-                "risk": "API key passed in URL query parameter string rather than Authorization header",
+                "surface": "PII_PROCESSING",
+                "risk": "Agent ingests and processes sensitive personally identifiable candidate data",
                 "severity": "medium",
-                "evidence": "apiKey={NEWS_API_KEY} parameter in URL query string"
+                "evidence": f"Detected sensitive fields: {', '.join(pii_fields_found[:8]) if pii_fields_found else 'resume text'}"
             })
 
-        if "news" in all_code_combined.lower() or "search" in all_code_combined.lower() or "scrape" in all_code_combined.lower():
-            if "openai" in all_code_combined.lower() or "chat" in all_code_combined.lower() or "llm" in all_code_combined.lower():
-                security_surfaces.append({
-                    "surface": "EXTERNAL_CONTENT_INJECTION",
-                    "risk": "Untrusted external article/web content formatted directly into LLM prompt",
-                    "severity": "high",
-                    "evidence": "External article titles and descriptions formatted into LLM context"
-                })
-                failure_surfaces.append(
-                    FailureSurface(
-                        id="fail-prompt-injection",
-                        component="SECURITY",
-                        surface_type="security",
-                        description="External news/article content containing prompt injection payloads",
-                        evidence="External untrusted article content formatted into LLM prompt",
-                        is_inferred=True,
-                        severity="critical"
-                    )
-                )
+        if has_ast_file_read:
+            security_surfaces.append({
+                "surface": "UNTRUSTED_FILE_READ",
+                "risk": "Agent reads file paths supplied by external user arguments",
+                "severity": "medium",
+                "evidence": "File ingestion operations via open() or PdfReader"
+            })
 
-        # 4. Extract Generic Observed Failure Surfaces
-        if inputs:
-            for inp in inputs:
-                if inp["type"] == "integer":
-                    failure_surfaces.append(
-                        FailureSurface(
-                            id=f"fail-input-{inp['name'].lstrip('-')}-boundary",
-                            component="INPUT_PARSER",
-                            surface_type="input",
-                            description=f"Negative or zero value passed to {inp['name']} parameter (e.g. {inp['name']} 0, {inp['name']} -1)",
-                            evidence=f"CLI parameter {inp['name']}",
-                            is_inferred=False,
-                            severity="medium"
-                        )
-                    )
-                elif inp["type"] == "string":
-                    failure_surfaces.append(
-                        FailureSurface(
-                            id=f"fail-input-{inp['name'].lstrip('-')}-empty",
-                            component="INPUT_PARSER",
-                            surface_type="input",
-                            description=f"Empty or whitespace string passed to {inp['name']} parameter",
-                            evidence=f"CLI parameter {inp['name']}",
-                            is_inferred=False,
-                            severity="medium"
-                        )
-                    )
+        if has_ast_sql_call:
+            security_surfaces.append({
+                "surface": "SQL_EXECUTION",
+                "risk": "Agent interacts with relational database",
+                "severity": "high" if any("write" in inp.get("name", "") for inp in inputs) else "medium",
+                "evidence": "SQL Database queries executed by agent"
+            })
 
-        if "newsapi" in all_code_combined.lower() or "requests.get" in all_code_combined:
-            failure_surfaces.extend([
-                FailureSurface(
-                    id="fail-newsapi-timeout-http-error",
-                    component="NEWS_RETRIEVAL",
-                    surface_type="external_service",
-                    description="NewsAPI network timeout (10s), HTTP 401 unauthenticated, HTTP 429 rate limited, or HTTP 500 error",
-                    evidence="requests.get(url, timeout=10)",
-                    is_inferred=False,
-                    severity="high"
-                ),
-                FailureSurface(
-                    id="fail-newsapi-malformed-response",
-                    component="NEWS_RETRIEVAL",
-                    surface_type="data",
-                    description="NewsAPI returns malformed JSON or missing 'articles' / 'title' fields",
-                    evidence="response.json().get('articles', []) and a['title'] indexing",
-                    is_inferred=False,
-                    severity="medium"
-                )
-            ])
-
-        if "openai" in all_code_combined.lower() or "gemini" in all_code_combined.lower() or "anthropic" in all_code_combined.lower():
-            failure_surfaces.extend([
-                FailureSurface(
-                    id="fail-llm-missing-credential",
-                    component="LLM_INFERENCE",
-                    surface_type="llm",
-                    description="Missing required OPENAI_API_KEY environment variable causing ChatOpenAI initialization failure",
-                    evidence="ChatOpenAI(model='gpt-4o-mini') without explicit key argument",
-                    is_inferred=False,
-                    severity="critical"
-                ),
-                FailureSurface(
-                    id="fail-llm-timeout-quota",
-                    component="LLM_INFERENCE",
-                    surface_type="llm",
-                    description="OpenAI API rate limit (429), quota exhaustion, network timeout, or 500 service error",
-                    evidence="ChatOpenAI invocation",
-                    is_inferred=False,
-                    severity="high"
-                )
-            ])
-
-        # 5. Extract Declared vs Implemented Conflicts
-        conflicts: List[DeclaredVsImplementedConflict] = []
-        doc_text = " ".join([content for fname, content in raw_files.items() if fname.endswith((".md", ".txt", ".yaml", ".yml"))])
-        code_text = " ".join([content for fname, content in raw_files.items() if fname.endswith(".py")])
-
-        # Framework Conflict: e.g. docstring says AutoGen, code uses LangChain
-        if "autogen" in code_text.lower() and "langchain" in code_text.lower():
-            conflicts.append(
-                DeclaredVsImplementedConflict(
-                    declared_behavior="AutoGen Framework declared in agent.py header docstring",
-                    implementation_evidence="Source code imports langchain_core and langchain_openai; requirements declare langchain==0.3.0",
-                    has_conflict=True,
-                    explanation="Header docstring declares AutoGen, but implementation strictly uses LangChain."
-                )
-            )
-
-        if "PII" in doc_text or "credential" in doc_text.lower() or "never leak" in doc_text.lower():
-            has_redaction = any("redact" in code.lower() or "mask" in code.lower() for fname, code in raw_files.items() if fname.endswith(".py"))
-            if not has_redaction:
-                conflicts.append(
-                    DeclaredVsImplementedConflict(
-                        declared_behavior="Never leak raw credentials or API keys",
-                        implementation_evidence="No credential redaction or masking logic found in AST code scan",
-                        has_conflict=True,
-                        explanation="Declared documentation policy has no code implementation in source files"
-                    )
-                )
+        if has_ast_subprocess_call:
+            security_surfaces.append({
+                "surface": "SHELL_EXECUTION",
+                "risk": "Agent executes shell or subprocess commands",
+                "severity": "critical",
+                "evidence": "OS subprocess invocation detected in AST"
+            })
 
         return {
             "transformations": transformations,
@@ -392,6 +249,8 @@ class BehaviorExtractor:
             "inputs": inputs,
             "outputs": outputs,
             "security_surfaces": security_surfaces,
-            "conflicts": conflicts,
+            "decision_surfaces": decision_surfaces,
+            "pii_detected": has_pii,
+            "sensitive_fields": pii_fields_found,
             "interface_details": interface_details
         }

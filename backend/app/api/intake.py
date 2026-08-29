@@ -385,6 +385,87 @@ async def register_normalized_spec(
             except Exception:
                 pass
 
+    bp = spec.behavior_profile
+    has_creds = len(spec.dependencies) == 0 or all(getattr(d, "status", "") in ("READY", "READY_PLATFORM_SANDBOX") for d in spec.dependencies)
+    exec_status = "READY" if (has_creds and spec.execution_status in ("READY", "EXECUTION_READY")) else "BLOCKED"
+    block_reason = None if exec_status == "READY" else "MISSING_AGENT_CREDENTIAL"
+
+    # Extract deterministic surfaces from behavior profile, spec, or payload
+    ev_packet = getattr(spec, "evidence_packet", {}) or getattr(payload, "evidence_packet", {}) or {}
+    aud_report = getattr(spec, "audit_report", {}) or getattr(payload, "audit_report", {}) or {}
+
+    # Hard Stage Gate: Reject registration if audit verdict is DEFECT
+    if aud_report and aud_report.get("audit_verdict") == "DEFECT":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Intake Audit Gate Rejected: Agent specification contains critical defects ({aud_report.get('overall_quality_score', 0)}% quality score). Discrepancies: {aud_report.get('discrepancies', [])}"
+        )
+
+    inputs_val = (bp.inputs if bp and bp.inputs else []) or getattr(spec, "inputs", []) or (ev_packet.get("cli_arguments") if ev_packet else [])
+    outputs_val = (bp.outputs if bp and bp.outputs else []) or getattr(spec, "outputs", []) or (ev_packet.get("output_structures") if ev_packet else [])
+    caps_val = list(dict.fromkeys((spec.capabilities or []) + (bp.capabilities if bp and bp.capabilities else [])))
+    
+    # Distinguish Agent PII Capability vs Demo Data PII vs PII Query Possibility
+    has_pii_security_surface = any("pii" in str(s).lower() for s in (bp.security_surfaces if bp and bp.security_surfaces else (getattr(spec, "security_surfaces", []) or [])))
+    has_pii_io = any(k in str(inputs_val + outputs_val).lower() for k in ["resume", "candidate", "applicant", "ssn", "passport"])
+    pii_agent_capability = has_pii_security_surface or has_pii_io
+    demo_dataset_pii = any("demo" in str(fn).lower() or "demo.sqlite" in str(payload.source_files) for fn in (ev_packet.get("functions", []) if ev_packet else [])) and any(k in str(payload.source_files).lower() for k in ["alice@example.com", "customer", "email text"])
+    pii_query_possible = any(k in str(caps_val).lower() for k in ["sql", "database", "rag"])
+
+    # Extract dedicated decision surfaces
+    dec_surfaces = []
+    if bp and getattr(bp, "decision_surfaces", None):
+        dec_surfaces = [s.model_dump() if hasattr(s, "model_dump") else s for s in bp.decision_surfaces]
+    elif getattr(spec, "decision_surfaces", None):
+        dec_surfaces = [s.model_dump() if hasattr(s, "model_dump") else s for s in spec.decision_surfaces]
+    elif ev_packet and ev_packet.get("decision_surfaces"):
+        dec_surfaces = ev_packet.get("decision_surfaces")
+
+    # Workflow extraction
+    workflow_val = []
+    if bp and bp.workflow_graph and bp.workflow_graph.nodes:
+        workflow_val = [n.model_dump() if hasattr(n, "model_dump") else n for n in bp.workflow_graph.nodes]
+    elif getattr(spec, "workflow", None):
+        workflow_val = [n.model_dump() if hasattr(n, "model_dump") else n for n in spec.workflow]
+    elif ev_packet and ev_packet.get("functions"):
+        workflow_val = [
+            {"id": fn.get("name", "fn"), "name": f"{fn.get('name', 'fn')}()", "implementation": fn.get("name", "fn"), "node_type": "entrypoint" if fn.get("name") in ["main", "run"] else "node"}
+            for fn in ev_packet.get("functions", [])
+            if not str(fn.get("name", "")).startswith("_")
+        ]
+
+    # Security surfaces
+    security_surfaces_val = []
+    if bp and bp.security_surfaces:
+        security_surfaces_val = [s.model_dump() if hasattr(s, "model_dump") else s for s in bp.security_surfaces]
+    elif getattr(spec, "security_surfaces", None):
+        security_surfaces_val = [s.model_dump() if hasattr(s, "model_dump") else s for s in spec.security_surfaces]
+    elif ev_packet and ev_packet.get("security_surfaces"):
+        security_surfaces_val = ev_packet.get("security_surfaces")
+
+    # Side effects
+    side_effects_val = []
+    if bp and bp.side_effects:
+        side_effects_val = list(dict.fromkeys(bp.side_effects))
+    elif getattr(spec, "side_effects", None):
+        side_effects_val = list(dict.fromkeys(spec.side_effects))
+    elif ev_packet and ev_packet.get("side_effects"):
+        side_effects_val = [f"{se.get('side_effect_type', 'OPERATION')}: {se.get('target', 'target')}" for se in ev_packet.get("side_effects", [])]
+
+    # Dynamic Confidence Score: derived from audit report quality score and evidence count
+    computed_confidence = float(aud_report.get("overall_quality_score", 88.0)) if aud_report else 85.0
+
+    # Clean runtime manifest model dependencies to guarantee canonical agent_id matching
+    manifest_clean = dict(spec.runtime_manifest or {})
+    if "detected_model_dependencies" in manifest_clean:
+        clean_model_deps = []
+        for idx, md in enumerate(manifest_clean["detected_model_dependencies"]):
+            md_dict = dict(md) if isinstance(md, dict) else (md.model_dump() if hasattr(md, "model_dump") else dict(md))
+            md_dict["agent_id"] = agent_id
+            md_dict["id"] = f"dep-model-{agent_id}-{idx + 1}"
+            clean_model_deps.append(md_dict)
+        manifest_clean["detected_model_dependencies"] = clean_model_deps
+
     rec = AgentRecord(
         id=agent_id,
         name=chosen_name or agent_id,
@@ -392,17 +473,36 @@ async def register_normalized_spec(
         source_name=registered_name,
         description=inferred_desc,
         domain=spec.identity.get("domain", "general"),
+        identity=spec.identity or {},
         system_prompt="\n".join(spec.instructions),
         tools=spec.tools,
         dependencies=spec.dependencies,
         constitution=spec.constitution,
+        capabilities=caps_val,
+        inputs=inputs_val,
+        outputs=outputs_val,
+        workflow=workflow_val,
+        data_surfaces={
+            "pii_detected": pii_agent_capability,
+            "demo_dataset_contains_pii": demo_dataset_pii,
+            "pii_query_possible": pii_query_possible,
+            "transformations": [t.model_dump() if hasattr(t, "model_dump") else t for t in (bp.data_transformations if bp else [])]
+        },
+        decision_surfaces=dec_surfaces,
+        security_surfaces=security_surfaces_val,
+        side_effects=side_effects_val,
+        evidence_packet=ev_packet,
+        audit_report=aud_report,
+        confidence_score=computed_confidence,
+        configuration_status="READY",
+        blocking_reason=block_reason,
         endpoint=payload.endpoint_url,
         version_label="v1.0-discovered",
         artifact_id=payload.artifact.artifact_id if payload.artifact else None,
         artifact_hash=payload.artifact.artifact_hash if payload.artifact else None,
         source_files=payload.source_files,
-        runtime_manifest=spec.runtime_manifest,
-        execution_status=spec.execution_status,
+        runtime_manifest=manifest_clean,
+        execution_status=exec_status,
         input_type=payload.artifact.input_type if payload.artifact else "package",
         user_id=user_id or "default_user",
         owner_id=user_id,

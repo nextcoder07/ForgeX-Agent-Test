@@ -303,6 +303,14 @@ export interface NormalizedAgentSpec {
   semantic_status?: string;
   analysis_status?: string;
   canonical_subsystems?: CanonicalAgentRepresentation;
+  evidence_packet?: Record<string, any>;
+  audit_report?: Record<string, any>;
+  decision_surfaces?: any[];
+  workflow?: any[];
+  inputs?: any[];
+  outputs?: any[];
+  security_surfaces?: any[];
+  side_effects?: string[];
 }
 
 export interface AgentUnderstandingResult {
@@ -316,6 +324,8 @@ export interface AgentUnderstandingResult {
   canonical_subsystems?: CanonicalAgentRepresentation;
   pipeline_run_id?: string;
   inferred_description?: string;
+  audit_report?: Record<string, any>;
+  evidence_packet?: Record<string, any>;
 }
 
 export interface FaultInjection {
@@ -801,7 +811,18 @@ export async function registerNormalizedSpec(
       endpoint_url: endpointUrl,
     }),
   });
-  if (!res.ok) throw new Error(`Failed to register spec: ${res.statusText}`);
+  if (!res.ok) {
+    let errDetail = res.statusText;
+    try {
+      const errJson = await res.json();
+      if (errJson.detail) {
+        errDetail = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail);
+      } else if (errJson.message) {
+        errDetail = errJson.message;
+      }
+    } catch {}
+    throw new Error(`Failed to register spec (${res.status}): ${errDetail}`);
+  }
   return res.json();
 }
 

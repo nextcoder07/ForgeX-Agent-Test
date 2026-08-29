@@ -151,7 +151,7 @@ from app.models.canonical_agent import CanonicalAgentRepresentation
 
 
 class NormalizedAgentSpec(BaseModel):
-    identity: Dict[str, str]  # name, domain, framework, language, entrypoint
+    identity: Dict[str, Any] = Field(default_factory=dict)  # name, domain, framework, language, entrypoint, archetypes
     agent_description: Optional[str] = None
     behavior_profile: Optional[AgentBehaviorProfile] = None
     canonical_subsystems: Optional[CanonicalAgentRepresentation] = None
@@ -163,6 +163,12 @@ class NormalizedAgentSpec(BaseModel):
     capabilities: List[str] = Field(default_factory=list)
     archetypes: List[str] = Field(default_factory=list)
     risks: List[str] = Field(default_factory=list)
+    decision_surfaces: List[Dict[str, Any]] = Field(default_factory=list)
+    security_surfaces: List[Dict[str, Any]] = Field(default_factory=list)
+    side_effects: List[str] = Field(default_factory=list)
+    evidence_packet: Dict[str, Any] = Field(default_factory=dict)
+    audit_report: Dict[str, Any] = Field(default_factory=dict)
+    workflow: List[Dict[str, Any]] = Field(default_factory=list)
     state_management: str = "In-memory session"
     architecture_components: List[str] = Field(default_factory=list)
     runtime_manifest: Dict[str, Any] = Field(default_factory=dict)
@@ -177,6 +183,9 @@ class RegisterSpecRequest(BaseModel):
     artifact: Optional[ArtifactRecord] = None
     source_files: Dict[str, str] = Field(default_factory=dict)
     endpoint_url: Optional[str] = None
+    evidence_packet: Optional[Dict[str, Any]] = None
+    audit_report: Optional[Dict[str, Any]] = None
+    decision_surfaces: Optional[List[Dict[str, Any]]] = None
 
 
 class AgentUnderstandingResult(BaseModel):

@@ -287,8 +287,9 @@ async def process_agent_intake(
 
     # 3. Build Authoritative Deterministic Evidence Packet
     from app.core.intake.evidence_builder import EvidencePacketBuilder
+    redacted_analysis_files, _ = DependencyDetector.redact_source_files(analysis_files)
     canonical_evidence_packet = EvidencePacketBuilder.build_packet(
-        source_files=analysis_files,
+        source_files=redacted_analysis_files,
         artifact_id=artifact_record.artifact_id,
         entrypoint=runtime_manifest.get("entrypoint", "agent.py")
     )
@@ -299,7 +300,9 @@ async def process_agent_intake(
             "tools": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in dedup_tools],
             "cli_arguments": [opt.model_dump() for opt in canonical_evidence_packet.cli_arguments],
             "llm_constructors": [llm.model_dump() for llm in canonical_evidence_packet.llm_constructors],
+            "functions": [fn.model_dump() for fn in canonical_evidence_packet.functions],
         },
+        "functions": [fn.model_dump() for fn in canonical_evidence_packet.functions],
         "framework": {
             "name": framework_name,
             "constructs": canonical_evidence_packet.framework_constructs,
@@ -311,6 +314,9 @@ async def process_agent_intake(
         "dependencies": [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in extracted_deps],
         "runtime": runtime_manifest,
         "security_surfaces": [s.model_dump() for s in canonical_evidence_packet.security_surfaces],
+        "decision_surfaces": [d.model_dump() for d in canonical_evidence_packet.decision_surfaces],
+        "side_effects": [s.model_dump() for s in canonical_evidence_packet.side_effects],
+        "output_structures": [o.model_dump() for o in canonical_evidence_packet.output_structures],
         "call_graph": [e.model_dump() for e in canonical_evidence_packet.call_graph],
         "behavioral_facts": {
             "transformations": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in behavioral_facts.get("transformations", [])],
@@ -318,7 +324,8 @@ async def process_agent_intake(
             "failure_surfaces": [f.model_dump() if hasattr(f, "model_dump") else f.dict() for f in behavioral_facts.get("failure_surfaces", [])],
             "inputs": [opt.name for opt in canonical_evidence_packet.cli_arguments] or behavioral_facts.get("inputs", []),
             "outputs": behavioral_facts.get("outputs", []),
-            "security_surfaces": behavioral_facts.get("security_surfaces", []),
+            "security_surfaces": [s.model_dump() for s in canonical_evidence_packet.security_surfaces],
+            "decision_surfaces": [d.model_dump() for d in canonical_evidence_packet.decision_surfaces],
             "conflicts": [c.model_dump() if hasattr(c, "model_dump") else c for c in behavioral_facts.get("conflicts", [])],
             "interface_details": behavioral_facts.get("interface_details", {}),
             "state_model": behavioral_facts.get("state_model", {})
@@ -613,6 +620,12 @@ async def process_agent_intake(
     # 8. 4-Layer Intake Quality Audit
     from app.core.intake.intake_auditor import IntakeAuditor
     audit_report = IntakeAuditor.audit_spec_against_evidence(norm_spec, canonical_evidence_packet)
+
+    # Attach authoritative evidence artifacts and decision surfaces directly to norm_spec
+    norm_spec.evidence_packet = canonical_evidence_packet.model_dump()
+    norm_spec.audit_report = audit_report.model_dump()
+    norm_spec.decision_surfaces = [d.model_dump() for d in canonical_evidence_packet.decision_surfaces]
+    norm_spec.workflow = [n.model_dump() for n in behavior_profile.workflow_graph.nodes]
 
     t4_dur = (time.time() - t4_start) * 1000.0
     if tracker:

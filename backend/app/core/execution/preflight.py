@@ -148,38 +148,22 @@ def run_scenario_preflight(
                 masked_value=f"***{str(val)[-4:] if len(str(val)) > 4 else 'USER_BOUND'}***",
                 credential_reference=f"ref-user-{key_name.lower()}"
             ))
-        elif any(k in provided_vars for k in ["OPENROUTER_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]) or os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY") or os.getenv("GEMINI_API_KEY"):
-            resolved_variables.append(VariableBinding(
-                name=key_name,
-                type="secret",
-                required=True,
-                source=VariableSource.SAFE_DEFAULT,
-                value_status="BOUND",
-                masked_value="***PLATFORM_TEST_POOL***",
-                credential_reference=f"ref-platform-{key_name.lower()}"
-            ))
-            findings.append(PreflightFinding(
-                check_name=f"CREDENTIAL_{key_name}",
-                passed=True,
-                message=f"Credential '{key_name}' auto-bound via active platform test pool.",
-                severity="INFO"
-            ))
         else:
-            # Auto-mock for mockable services rather than hard blocking
+            credential_status = "BLOCKED"
             resolved_variables.append(VariableBinding(
                 name=key_name,
                 type="secret",
                 required=True,
-                source=VariableSource.SAFE_DEFAULT,
-                value_status="BOUND",
-                masked_value="***MOCK_GATEWAY***",
-                credential_reference=f"ref-mock-{key_name.lower()}"
+                source=VariableSource.USER,
+                value_status="UNRESOLVED",
+                masked_value="***UNRESOLVED***",
+                credential_reference=f"ref-unresolved-{key_name.lower()}"
             ))
             findings.append(PreflightFinding(
                 check_name=f"CREDENTIAL_{key_name}",
-                passed=True,
-                message=f"Auto-mocked '{key_name}' with sandbox gateway stub.",
-                severity="INFO"
+                passed=False,
+                message=f"Missing required credential '{key_name}'.",
+                severity="ERROR"
             ))
 
     # Default LOG_LEVEL safe default variable

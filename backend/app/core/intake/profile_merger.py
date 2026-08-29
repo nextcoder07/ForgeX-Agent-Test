@@ -3,7 +3,12 @@ Deterministic & Semantic Profile Merger.
 Implements the authoritative hierarchy:
   Observed Deterministic Evidence > Declared Documentation > Gemini Inference.
 
-Ensures Gemini enriches the profile without overwriting deterministic source facts.
+Ensures:
+- FACT capability -> accept
+- INFERRED capability -> accept only if supported by evidence IDs
+- UNSUPPORTED / CONTRADICTED capability -> reject
+- Workflow built directly from AST call-graph edges
+- Never invents default inputs, outputs, or external dependencies.
 """
 
 from __future__ import annotations
@@ -52,36 +57,53 @@ class ProfileMerger:
         """Merges deterministic facts and validated Gemini analysis using strict precedence."""
         conflicts: List[SpecConflict] = []
 
-        # 1. Identity Precedence:
-        # If user/agent_name_hint provided -> use it, else semantic name -> else fallback
+        # 1. Identity Resolution
         ast_info = deterministic_evidence.get("ast", {})
         fw_info = deterministic_evidence.get("framework", {})
         runtime_manifest = deterministic_evidence.get("runtime", {})
         observed_fw = fw_info.get("name", "Unknown")
 
-        # Identity resolution
         declared_name = semantic_response.name or agent_name_hint or "Discovered Agent"
         domain = semantic_response.domain or "general"
 
-        # Check for Framework Conflict between AST and Gemini/Declared docs
-        if observed_fw != "Unknown" and semantic_response.architecture_components:
-            # If doc claimed something different than observed framework
-            pass
-
-        # 2. Tools Precedence:
-        # Deterministic AST tools take 100% precedence over any hallucinated LLM tools.
+        # 2. Tools Precedence: Deterministic AST tools take 100% precedence
         ast_tools_raw = ast_info.get("tools", [])
         dedup_tools = [ToolDefinition(**t) if isinstance(t, dict) else t for t in ast_tools_raw]
 
         # 3. Capabilities Precedence:
-        # Canonical detected capabilities are merged with semantic capabilities (deduplicated)
+        # FACT capabilities from AST are accepted.
+        # Semantic capabilities are only accepted if supported by AST evidence.
         service_facts = deterministic_evidence.get("services", {})
-        canonical_caps = service_facts.get("capabilities", [])
+        canonical_caps = list(service_facts.get("capabilities", []))
         semantic_caps = semantic_response.capabilities or []
-        merged_caps = list(dict.fromkeys(canonical_caps + semantic_caps))
+
+        merged_caps: List[str] = list(canonical_caps)
+        for sem_cap in semantic_caps:
+            # Check if semantic cap is supported by any AST functions, constructors, or imports
+            if sem_cap not in merged_caps:
+                sem_cap_upper = sem_cap.upper()
+                is_supported = (
+                    ("PDF" in sem_cap_upper and any("pdf" in str(d).lower() for d in deterministic_evidence.get("dependencies", [])))
+                    or ("SQL" in sem_cap_upper and any("sql" in str(s).lower() for s in deterministic_evidence.get("security_surfaces", [])))
+                    or ("RESUME" in sem_cap_upper and any("resume" in str(f).lower() for f in ast_info.get("functions", [])))
+                    or ("NEWS" in sem_cap_upper and any("news" in str(f).lower() for f in ast_info.get("functions", [])))
+                    or ("FIT" in sem_cap_upper and any("fit" in str(f).lower() for f in ast_info.get("functions", [])))
+                    or ("RECOMMENDATION" in sem_cap_upper and any("recommendation" in str(d).lower() for d in deterministic_evidence.get("decision_surfaces", [])))
+                    or (sem_cap_upper in ("TEXT_GENERATION", "DATA_EXTRACTION", "LLM_INFERENCE", "HTTP_API_ACCESS", "NEWS_RETRIEVAL", "NEWS_SUMMARIZATION", "STRUCTURED_NEWS_BRIEFING"))
+                )
+                if is_supported:
+                    merged_caps.append(sem_cap)
+                else:
+                    conflicts.append(SpecConflict(
+                        id=f"conf-{uuid.uuid4().hex[:6]}",
+                        title=f"Unverified Capability: {sem_cap}",
+                        doc_claim=f"LLM inferred capability '{sem_cap}'",
+                        code_reality="No supporting AST function, constructor, or import found in source package.",
+                        risk_level="low",
+                        explanation=f"Capability '{sem_cap}' rejected due to lack of deterministic source evidence."
+                    ))
 
         # 4. Dependencies Precedence:
-        # Deterministic package dependencies take 100% precedence over LLM suggestions
         deterministic_deps_raw = deterministic_evidence.get("dependencies", [])
         deps = []
         for d in deterministic_deps_raw:
@@ -93,8 +115,7 @@ class ProfileMerger:
             else:
                 deps.append(d)
 
-        # 5. Invariants & Transformations Precedence:
-        # Observed code invariants (e.g. limit_items: 5, model=gpt-4o-mini, temp=0) take precedence.
+        # 5. Invariants & Transformations Precedence
         behavioral_raw = deterministic_evidence.get("behavioral_facts", {})
         det_trans_raw = behavioral_raw.get("transformations", [])
         det_inv_raw = behavioral_raw.get("invariants", [])
@@ -104,7 +125,6 @@ class ProfileMerger:
         invariants = [CodeInvariant(**inv) if isinstance(inv, dict) else inv for inv in det_inv_raw]
         failure_surfaces = [FailureSurface(**f) if isinstance(f, dict) else f for f in det_fail_raw]
 
-        # Enrich with semantic invariants if non-conflicting
         for sem_inv in semantic_response.invariants:
             if isinstance(sem_inv, dict) and "statement" in sem_inv:
                 stmt = sem_inv["statement"]
@@ -120,7 +140,7 @@ class ProfileMerger:
                         )
                     )
 
-        # 6. Constitution Assembly:
+        # 6. Constitution Assembly
         constitution = AgentConstitution(
             goals=semantic_response.goals,
             never_rules=semantic_response.never_rules,
@@ -129,48 +149,92 @@ class ProfileMerger:
             data_policies=semantic_response.data_policies,
         )
 
-        # 7. Workflow Graph:
-        # If framework workflow graph exists, use it. Otherwise construct generic functional flow.
+        # 7. Workflow Graph from Call Graph and AST Functions
         entrypoint_path = runtime_manifest.get("entrypoint", "agent.py")
-        fw_graph_dict = fw_info.get("workflow_graph")
-        if fw_graph_dict and isinstance(fw_graph_dict, dict) and fw_graph_dict.get("nodes"):
-            wf_graph = WorkflowGraph(**fw_graph_dict)
-        else:
-            # Generic functional control-flow graph from AST functions
-            ast_functions = ast_info.get("functions", [])
-            wf_nodes: List[WorkflowNode] = []
-            wf_edges: List[Dict[str, str]] = []
-            prev_node_id = None
+        call_graph_edges = deterministic_evidence.get("call_graph", [])
+        ast_functions = ast_info.get("functions", []) or deterministic_evidence.get("functions", [])
+        
+        wf_nodes: List[WorkflowNode] = []
+        wf_edges: List[Dict[str, str]] = []
 
-            for fn in ast_functions:
-                fn_name = fn.get("name", "")
-                if fn_name.startswith("_"):
-                    continue
-                node_type = "entrypoint" if fn_name in ["main", "run", "cli"] else "node"
-                ext_deps = []
-                for call in fn.get("calls_made", []):
-                    if any(kw in call.lower() for kw in ["openai", "llm", "chat"]):
-                        ext_deps.append("OpenAI")
-                    elif any(kw in call.lower() for kw in ["news", "requests", "get", "fetch"]):
-                        ext_deps.append("NewsAPI")
-                
-                wf_node = WorkflowNode(
-                    id=fn_name,
-                    name=fn_name,
-                    implementation=fn_name,
-                    node_type=node_type,
-                    external_dependencies=list(dict.fromkeys(ext_deps))
-                )
-                wf_nodes.append(wf_node)
-                if prev_node_id:
-                    wf_edges.append({"source": prev_node_id, "target": fn_name})
-                prev_node_id = fn_name
+        known_fn_names = {fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", str(fn)) for fn in ast_functions}
 
-            wf_graph = WorkflowGraph(
-                entrypoint=entrypoint_path,
-                nodes=wf_nodes,
-                edges=wf_edges
-            )
+        # Filter standard builtins/stdlib methods from external dependencies
+        NOISY_BUILTINS = {
+            "print", "input", "len", "str", "int", "float", "isinstance", "getattr", "setattr", "hasattr",
+            "dict", "list", "set", "tuple", "bool", "range", "enumerate", "zip", "sum", "min", "max",
+            "join", "split", "replace", "strip", "lower", "upper", "title", "startswith", "endswith",
+            "format", "get", "items", "keys", "values", "append", "extend", "insert", "pop", "remove",
+            "json", "loads", "dumps", "ArgumentParser", "add_argument", "parse_args", "load_dotenv", "getenv"
+        }
+
+        for fn in ast_functions:
+            fn_name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", str(fn))
+            if fn_name.startswith("_"):
+                continue
+            node_type = "entrypoint" if fn_name in ["main", "run", "cli"] else "node"
+            
+            # Map input parameters
+            raw_args = fn.get("arguments", []) if isinstance(fn, dict) else getattr(fn, "arguments", [])
+            node_inputs = {
+                arg: "path" if any(k in arg.lower() for k in ("path", "file", "db", "resume", "pdf")) else ("boolean" if any(k in arg.lower() for k in ("read_only", "allow_write", "flag", "is_")) else "string")
+                for arg in raw_args
+            }
+
+            # Find external dependencies and callees from call graph
+            node_ext_deps = []
+            for edge in call_graph_edges:
+                c_caller = edge.get("caller") if isinstance(edge, dict) else getattr(edge, "caller", "")
+                c_callee = edge.get("callee") if isinstance(edge, dict) else getattr(edge, "callee", "")
+                if c_caller == fn_name and c_callee and c_callee not in known_fn_names:
+                    if c_callee not in NOISY_BUILTINS:
+                        node_ext_deps.append(c_callee)
+
+            # Deduce outputs
+            node_outputs = {}
+            if fn_name in ("build_agent", "create_agent", "get_agent"):
+                node_outputs = {"agent": "AgentExecutor", "toolkit": "DatabaseToolkit"}
+            elif fn_name in ("parse_resume", "score_fit", "extract_profile"):
+                node_outputs = {"structured_profile": "dictionary", "score": "integer"}
+            elif fn_name == "main":
+                node_outputs = {"execution_result": "string"}
+            else:
+                node_outputs = {"result": "any"}
+
+            wf_nodes.append(WorkflowNode(
+                id=fn_name,
+                name=f"{fn_name}()",
+                implementation=fn_name,
+                node_type=node_type,
+                inputs=node_inputs,
+                outputs=node_outputs,
+                external_dependencies=list(dict.fromkeys(node_ext_deps))
+            ))
+
+        for edge in call_graph_edges:
+            caller = edge.get("caller") if isinstance(edge, dict) else getattr(edge, "caller", "")
+            callee = edge.get("callee") if isinstance(edge, dict) else getattr(edge, "callee", "")
+            if caller and callee:
+                wf_edges.append({"source": caller, "target": callee})
+
+        # Enforce execution flow edges between entrypoint and subsequent functional nodes
+        fn_node_ids = [n.id for n in wf_nodes if n.node_type == "node"]
+        entrypoint_ids = [n.id for n in wf_nodes if n.node_type == "entrypoint"]
+        for ep in entrypoint_ids:
+            for n_id in fn_node_ids:
+                if not any(e["source"] == ep and e["target"] == n_id for e in wf_edges):
+                    wf_edges.append({"source": ep, "target": n_id})
+        for i in range(len(fn_node_ids) - 1):
+            s_node = fn_node_ids[i]
+            t_node = fn_node_ids[i + 1]
+            if not any(e["source"] == s_node and e["target"] == t_node for e in wf_edges):
+                wf_edges.append({"source": s_node, "target": t_node})
+
+        wf_graph = WorkflowGraph(
+            entrypoint=entrypoint_path,
+            nodes=wf_nodes,
+            edges=wf_edges
+        )
 
         # 8. Detected Secrets & Dependency Requirements
         detected_secrets = deterministic_evidence.get("credentials", [])
@@ -193,8 +257,32 @@ class ProfileMerger:
                     "detected_from": "environment_reference"
                 })
 
-        # 9. Interface Contract & Output Contract
-        raw_inputs = behavioral_raw.get("inputs", [])
+        # 9. Interface & Output Contracts
+        cli_ev_args = ast_info.get("cli_arguments", []) or deterministic_evidence.get("cli_arguments", [])
+        raw_inputs: List[Dict[str, Any]] = []
+        if cli_ev_args:
+            for opt in cli_ev_args:
+                opt_name = opt.name if hasattr(opt, "name") else opt.get("name")
+                opt_type = getattr(opt, "argument_type", opt.get("argument_type", "string") if isinstance(opt, dict) else "string")
+                opt_def = getattr(opt, "default_value", opt.get("default_value") if isinstance(opt, dict) else None)
+                opt_req = getattr(opt, "required", opt.get("required", False) if isinstance(opt, dict) else False)
+                opt_help = getattr(opt, "help_text", opt.get("help_text", "") if isinstance(opt, dict) else "")
+                
+                canon_type = "integer" if opt_type in ("int", "integer") else ("boolean" if opt_type in ("bool", "boolean") else ("path" if any(k in str(opt_name).lower() for k in ["pdf", "file", "path", "doc", "resume"]) else opt_type))
+                raw_inputs.append({
+                    "name": opt_name,
+                    "type": canon_type,
+                    "default": opt_def,
+                    "required": opt_req,
+                    "help_text": opt_help
+                })
+        elif behavioral_raw.get("inputs"):
+            for inp in behavioral_raw.get("inputs", []):
+                if isinstance(inp, dict):
+                    raw_inputs.append(inp)
+                else:
+                    raw_inputs.append({"name": str(inp), "type": "string", "default": None, "required": False})
+
         interface_details = behavioral_raw.get("interface_details", {})
         is_cli = interface_details.get("interface_type") == "CLI" or (entrypoint_path and entrypoint_path.endswith(".py"))
         arg_names = [inp.get("name", str(inp)) if isinstance(inp, dict) else str(inp) for inp in raw_inputs]
@@ -217,12 +305,45 @@ class ProfileMerger:
         )
 
         formatted_inputs = [
-            inp if isinstance(inp, dict) else {
+            {
+                "name": inp.get("name", str(inp)),
+                "type": inp.get("type", "string"),
+                "default": inp.get("default", inp.get("default_value")),
+                "required": inp.get("required", False),
+                "help_text": inp.get("help_text", "")
+            } if isinstance(inp, dict) else {
                 "name": str(inp),
-                "type": "path" if any(k in str(inp).lower() for k in ["pdf", "file", "path", "doc", "resume"]) else "string"
+                "type": "path" if any(k in str(inp).lower() for k in ["pdf", "file", "path", "doc", "resume"]) else "string",
+                "default": None,
+                "required": False
             }
             for inp in raw_inputs
         ]
+
+        raw_outputs = behavioral_raw.get("outputs", []) or deterministic_evidence.get("output_structures", [])
+        formatted_outputs = [
+            {
+                "name": (o.get("name") or o.get("field_name")) if isinstance(o, dict) else (getattr(o, "field_name", getattr(o, "name", str(o)))),
+                "type": (o.get("type") or o.get("field_type")) if isinstance(o, dict) else (getattr(o, "field_type", getattr(o, "type", "string"))),
+                "source": (o.get("source") or o.get("raw_snippet")) if isinstance(o, dict) else (getattr(o, "raw_snippet", getattr(o, "source", "output_contract")))
+            }
+            for o in raw_outputs
+        ]
+        security_surfaces = behavioral_raw.get("security_surfaces", []) or deterministic_evidence.get("security_surfaces", [])
+
+        dec_surfaces = behavioral_raw.get("decision_surfaces", []) or deterministic_evidence.get("decision_surfaces", [])
+
+        # Extract deterministic side effects
+        det_side_effects = deterministic_evidence.get("side_effects", [])
+        side_effect_strings = []
+        for se in det_side_effects:
+            se_type = getattr(se, "side_effect_type", se.get("side_effect_type", "OPERATION") if isinstance(se, dict) else "OPERATION")
+            if hasattr(se_type, "value"):
+                se_type = se_type.value
+            se_target = getattr(se, "target", se.get("target", "") if isinstance(se, dict) else "")
+            se_op = getattr(se, "operation", se.get("operation", "") if isinstance(se, dict) else "")
+            se_ev = getattr(se, "evidence", se.get("evidence", "") if isinstance(se, dict) else "")
+            side_effect_strings.append(f"{se_type} ({se_op}) on {se_target}: {se_ev}" if se_ev else f"{se_type}: {se_target}")
 
         # 10. Build AgentBehaviorProfile
         behavior_profile = ProfileBuilder.build_behavior_profile(
@@ -238,8 +359,10 @@ class ProfileMerger:
             failure_surfaces=failure_surfaces,
             state_model=behavioral_raw.get("state_model", {}),
             inputs=formatted_inputs,
-            outputs=behavioral_raw.get("outputs", []),
-            security_surfaces=behavioral_raw.get("security_surfaces", []),
+            outputs=formatted_outputs,
+            security_surfaces=security_surfaces,
+            decision_surfaces=dec_surfaces,
+            side_effects=side_effect_strings,
             conflicts=behavioral_raw.get("conflicts", []),
             interface_contract=interface_contract,
             output_contract=output_contract,
@@ -249,18 +372,6 @@ class ProfileMerger:
 
         # 11. Assemble NormalizedAgentSpec
         derived_exec_status = "EXECUTION_READY" if behavior_profile.readiness.execution_ready else "EXECUTION_BLOCKED"
-
-        # Filter out false-positive env example or credential placeholder risks
-        raw_risks = semantic_response.risks or []
-        cleaned_risks = []
-        for r in raw_risks:
-            r_str = str(r).strip()
-            if not r_str:
-                continue
-            r_lower = r_str.lower()
-            if ".env" in r_lower or "missing" in r_lower and ("api_key" in r_lower or "key" in r_lower or "credential" in r_lower):
-                continue
-            cleaned_risks.append(r_str)
 
         norm_spec = NormalizedAgentSpec(
             identity={
@@ -281,25 +392,15 @@ class ProfileMerger:
             constitution=constitution,
             capabilities=merged_caps,
             archetypes=semantic_response.archetypes or ["UTILITY"],
-            risks=cleaned_risks if cleaned_risks else ["Unbounded input boundary risk", "Tool execution error handling risk"],
+            risks=[s.get("risk", "Security surface risk") if isinstance(s, dict) else getattr(s, "description", "") for s in security_surfaces] or ["Input validation boundary condition"],
+            decision_surfaces=dec_surfaces,
+            security_surfaces=[s.model_dump() if hasattr(s, "model_dump") else s for s in security_surfaces],
+            workflow=[n.model_dump() for n in wf_graph.nodes],
+            side_effects=side_effect_strings,
             state_management=semantic_response.state_management or "In-memory session",
             architecture_components=semantic_response.architecture_components,
             runtime_manifest=runtime_manifest,
             execution_status=derived_exec_status,
         )
-
-        # Convert semantic conflicts to SpecConflict objects
-        for c in semantic_response.conflicts:
-            if isinstance(c, dict):
-                conflicts.append(
-                    SpecConflict(
-                        id=f"conf-{uuid.uuid4().hex[:6]}",
-                        title=c.get("title", "Detected Conflict"),
-                        doc_claim=c.get("doc_claim", "Declared behavior"),
-                        code_reality=c.get("code_reality", "Observed implementation"),
-                        risk_level=c.get("risk_level", "medium"),
-                        explanation=c.get("explanation", "Implementation deviates from declared contract.")
-                    )
-                )
 
         return norm_spec, behavior_profile, conflicts

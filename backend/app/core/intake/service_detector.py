@@ -14,14 +14,23 @@ from app.models.dependency_model import DetectedSecret
 
 
 class ServiceDetector:
-    # Generic mapping patterns: SDK / Class Name -> Capability
+    # Generic mapping patterns: SDK / Class Name / Modules -> Capability
     CAPABILITY_PATTERNS = {
         r"Tavily|Serper|DuckDuckGo|BraveSearch|GoogleSearch": "WEB_SEARCH",
         r"ChatOpenAI|ChatGoogleGenerativeAI|Anthropic|ChatAnthropic|LLM|OpenAI": "LLM_INFERENCE",
+        r"pypdf|PdfReader|pdfplumber|PyPDF2|fitz|SimpleDirectoryReader": "PDF_TEXT_EXTRACTION",
+        r"parse_resume|resume_parser|candidate_profile": "RESUME_PARSING",
+        r"parse_resume|parse_json_response|extract_profile|structured_profile": "STRUCTURED_PROFILE_EXTRACTION",
+        r"score_fit|fit_score|job_fit|fit_analysis": "JOB_FIT_SCORING",
+        r"recommendation|candidate_recommendation|fit_label": "CANDIDATE_RECOMMENDATION",
         r"Stripe|PayPal|Razorpay": "PAYMENT",
         r"SMTP|SendGrid|Mailgun|Email": "EMAIL",
-        r"Postgres|MySQL|MongoDB|Supabase|SQLite|Redis|SQLAlchemy": "DATABASE",
+        r"Postgres|MySQL|MongoDB|Supabase|SQLite|Redis|SQLAlchemy|SQLDatabase": "SQL_DATABASE_QUERY",
         r"S3|GoogleDrive|Dropbox|FileSystem": "FILESYSTEM",
+        r"requests|httpx|urllib|http_endpoint": "HTTP_API_ACCESS",
+        r"fetch_news|get_news|newsapi": "NEWS_RETRIEVAL",
+        r"summarize_news|news_summary|summarize_articles": "NEWS_SUMMARIZATION",
+        r"news_briefing|structured_briefing|briefing": "STRUCTURED_NEWS_BRIEFING",
     }
 
     # Credential Patterns
@@ -91,6 +100,14 @@ class ServiceDetector:
                             if re.search(pattern, full_name, re.IGNORECASE) or re.search(pattern, alias.name, re.IGNORECASE):
                                 if cap not in capabilities:
                                     capabilities.append(cap)
+
+                # Detect Function Definitions (e.g. parse_resume, score_fit, read_pdf_text)
+                elif isinstance(node, ast.FunctionDef):
+                    fn_name = node.name.lower()
+                    for pattern, cap in ServiceDetector.CAPABILITY_PATTERNS.items():
+                        if re.search(pattern, fn_name, re.IGNORECASE):
+                            if cap not in capabilities:
+                                capabilities.append(cap)
 
                 # Detect os.getenv / os.environ references in code
                 elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):

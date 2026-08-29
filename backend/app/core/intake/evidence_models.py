@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +20,14 @@ class CertaintyLevel(str, Enum):
     FACT = "FACT"          # Indisputable static AST fact
     INFERRED = "INFERRED"  # Synthesized from evidence combinations
     UNKNOWN = "UNKNOWN"    # Unstated in source code / unobservable statically
+
+
+class ProvenanceType(str, Enum):
+    CODE_PROVEN = "CODE_PROVEN"          # Found directly in executable AST / signatures
+    PROMPT_DECLARED = "PROMPT_DECLARED"  # Declared in system prompts / prompt templates
+    DOC_DECLARED = "DOC_DECLARED"        # Declared in README, docstrings, or metadata files
+    INFERRED = "INFERRED"                # Deduced from contextual operations
+    UNKNOWN = "UNKNOWN"                  # Cannot be proven
 
 
 class SideEffectType(str, Enum):
@@ -47,10 +55,13 @@ class EvidenceCategory(str, Enum):
     NETWORK_CALL = "NETWORK_CALL"
     SUBPROCESS_EXECUTION = "SUBPROCESS_EXECUTION"
     SECURITY_SURFACE = "SECURITY_SURFACE"
+    DECISION_SURFACE = "DECISION_SURFACE"
     ENVIRONMENT_VARIABLE = "ENVIRONMENT_VARIABLE"
     STATE_MEMORY = "STATE_MEMORY"
     CALL_EDGE = "CALL_EDGE"
+    CONDITIONAL_BRANCH = "CONDITIONAL_BRANCH"
     OUTPUT_STRUCTURE = "OUTPUT_STRUCTURE"
+    DATA_TRANSFORMATION = "DATA_TRANSFORMATION"
 
 
 class EvidenceItem(BaseModel):
@@ -58,6 +69,7 @@ class EvidenceItem(BaseModel):
     artifact_id: str
     category: EvidenceCategory
     certainty: CertaintyLevel = CertaintyLevel.FACT
+    provenance: ProvenanceType = ProvenanceType.CODE_PROVEN
     name: str
     source_file: str
     line_number: int = 1
@@ -68,6 +80,7 @@ class EvidenceItem(BaseModel):
 
 class CLIOptionEvidence(BaseModel):
     id: str
+    artifact_id: str = ""
     flags: List[str]
     name: str
     argument_type: str = "string"  # "string", "path", "int", "boolean", "float"
@@ -81,8 +94,11 @@ class CLIOptionEvidence(BaseModel):
 
 class LLMConstructorEvidence(BaseModel):
     id: str
+    artifact_id: str = ""
     provider: str            # "openai", "anthropic", "google", "ollama", "local"
-    model_name: str          # e.g. "gpt-4o-mini", "gemini-1.5-flash", "claude-3-5-sonnet"
+    model_name: str          # e.g. "gpt-4o-mini", "gemini-1.5-flash", "UNKNOWN"
+    model_certainty: CertaintyLevel = CertaintyLevel.FACT
+    is_dynamic_model: bool = False
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     is_streaming: bool = False
@@ -93,6 +109,7 @@ class LLMConstructorEvidence(BaseModel):
 
 class SecuritySurfaceEvidence(BaseModel):
     id: str
+    artifact_id: str = ""
     surface_type: str        # "SQL_EXECUTION", "PII_PROCESSING", "UNTRUSTED_FILE_READ", "SHELL_EXECUTION", "API_KEY_READ", "CONDITIONAL_WRITE"
     severity: str            # "low", "medium", "high", "critical"
     description: str
@@ -100,6 +117,53 @@ class SecuritySurfaceEvidence(BaseModel):
     line_number: int
     trigger_condition: Optional[str] = None
     mitigation_hint: Optional[str] = None
+    supporting_evidence_ids: List[str] = Field(default_factory=list)
+
+
+class DecisionSurfaceEvidence(BaseModel):
+    id: str
+    artifact_id: str = ""
+    decision_type: str       # "CANDIDATE_EVALUATION", "FINANCIAL_DECISION", "ACCESS_APPROVAL", "CLASSIFICATION", "SCORING"
+    impact: str              # "EMPLOYMENT_DECISION", "MONETARY_TRANSACTION", "DATA_ACCESS", "ROUTING"
+    description: str
+    recommendation_options: List[str] = Field(default_factory=list)
+    source_file: str
+    line_number: int
+    evidence_snippet: str = ""
+    supporting_evidence_ids: List[str] = Field(default_factory=list)
+
+
+class OutputStructureEvidence(BaseModel):
+    id: str
+    artifact_id: str = ""
+    field_name: str
+    field_type: str          # "string", "integer", "float", "dictionary", "list", "boolean"
+    provenance: ProvenanceType = ProvenanceType.CODE_PROVEN
+    source_file: str
+    line_number: int = 1
+    raw_snippet: str = ""
+
+
+class SideEffectEvidence(BaseModel):
+    id: str
+    artifact_id: str = ""
+    side_effect_type: SideEffectType
+    target: str
+    operation: str
+    source_file: str
+    line_number: int = 1
+    evidence: str = ""
+
+
+class FunctionDefEvidence(BaseModel):
+    id: str
+    artifact_id: str = ""
+    name: str
+    arguments: List[str] = Field(default_factory=list)
+    decorators: List[str] = Field(default_factory=list)
+    docstring: Optional[str] = None
+    source_file: str
+    line_number: int = 1
 
 
 class CallGraphEdge(BaseModel):
@@ -108,6 +172,16 @@ class CallGraphEdge(BaseModel):
     source_file: str
     line_number: int
     is_conditional: bool = False
+    condition_snippet: Optional[str] = None
+
+
+class ConditionalBranchEvidence(BaseModel):
+    id: str
+    artifact_id: str = ""
+    condition_code: str
+    branch_type: str         # "if", "elif", "else", "try", "except"
+    source_file: str
+    line_number: int
 
 
 class FieldConfidenceScore(BaseModel):
@@ -123,14 +197,18 @@ class EvidencePacket(BaseModel):
     entrypoint: str
     source_files: Dict[str, str] = Field(default_factory=dict)
     evidence_items: List[EvidenceItem] = Field(default_factory=list)
+    functions: List[FunctionDefEvidence] = Field(default_factory=list)
     cli_arguments: List[CLIOptionEvidence] = Field(default_factory=list)
     llm_constructors: List[LLMConstructorEvidence] = Field(default_factory=list)
     security_surfaces: List[SecuritySurfaceEvidence] = Field(default_factory=list)
+    decision_surfaces: List[DecisionSurfaceEvidence] = Field(default_factory=list)
+    output_structures: List[OutputStructureEvidence] = Field(default_factory=list)
     call_graph: List[CallGraphEdge] = Field(default_factory=list)
+    conditional_branches: List[ConditionalBranchEvidence] = Field(default_factory=list)
     framework_constructs: List[Dict[str, Any]] = Field(default_factory=list)
     detected_packages: List[str] = Field(default_factory=list)
     environment_variables: List[str] = Field(default_factory=list)
-    side_effects: List[Dict[str, Any]] = Field(default_factory=list)
+    side_effects: List[SideEffectEvidence] = Field(default_factory=list)
     created_at: str = Field(default_factory=_now)
 
     def get_evidence_by_id(self, ev_id: str) -> Optional[EvidenceItem]:

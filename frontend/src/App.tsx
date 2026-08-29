@@ -166,7 +166,9 @@ function AppContent() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      {user && <AgentTesterBottomDrawer currentAgent={lastRegisteredAgent} />}
+      {/* Agent Tester Subsystem temporarily turned off to prevent automated AI token consumption */}
+      {/* Can be re-enabled whenever needed by toggling the flag below */}
+      {false && user && <AgentTesterBottomDrawer currentAgent={lastRegisteredAgent} />}
     </div>
   );
 }

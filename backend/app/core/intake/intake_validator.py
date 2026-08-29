@@ -106,7 +106,7 @@ class IntakeValidator:
         spec.tools = valid_tools
 
         # 2. Plaintext Secret Scanning & Canary Masking
-        # Scrub instructions
+        # Scrub instructions & goals
         cleaned_instructions = []
         for inst in spec.instructions:
             cleaned_inst, reds = cls.sanitize_secrets_in_text(inst)
@@ -114,11 +114,39 @@ class IntakeValidator:
             all_redacted_secrets.extend(reds)
         spec.instructions = cleaned_instructions
 
-        # Scrub runtime manifest
-        if spec.runtime_manifest and isinstance(spec.runtime_manifest, dict):
-            raw_manifest_str = str(spec.runtime_manifest)
-            _, reds = cls.sanitize_secrets_in_text(raw_manifest_str)
+        cleaned_goals = []
+        for g in spec.goals:
+            cleaned_g, reds = cls.sanitize_secrets_in_text(g)
+            cleaned_goals.append(cleaned_g)
             all_redacted_secrets.extend(reds)
+        spec.goals = cleaned_goals
+
+        # Scrub constitution
+        if spec.constitution:
+            cleaned_always = []
+            for r in spec.constitution.always_rules:
+                cr, reds = cls.sanitize_secrets_in_text(r)
+                cleaned_always.append(cr)
+                all_redacted_secrets.extend(reds)
+            spec.constitution.always_rules = cleaned_always
+
+            cleaned_never = []
+            for r in spec.constitution.never_rules:
+                cr, reds = cls.sanitize_secrets_in_text(r)
+                cleaned_never.append(cr)
+                all_redacted_secrets.extend(reds)
+            spec.constitution.never_rules = cleaned_never
+
+        # Scan source files for secrets and record masked inventory
+        for fname, fcontent in source_files.items():
+            _, reds = cls.sanitize_secrets_in_text(fcontent)
+            all_redacted_secrets.extend(reds)
+
+        # Record redacted secrets in runtime manifest
+        if isinstance(spec.runtime_manifest, dict):
+            spec.runtime_manifest["redacted_secrets_count"] = len(all_redacted_secrets)
+            if all_redacted_secrets:
+                spec.runtime_manifest["secret_sanitization"] = "CANARY_SECRET_AUTH_TOKEN_FORGEX_APPLIED"
 
         # 3. Interface Contract Accuracy Check
         manifest = spec.runtime_manifest or {}

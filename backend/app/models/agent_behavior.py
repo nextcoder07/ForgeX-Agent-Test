@@ -137,6 +137,7 @@ class AgentBehaviorProfile(BaseModel):
     invariants: List[CodeInvariant] = Field(default_factory=list)
     failure_surfaces: List[FailureSurface] = Field(default_factory=list)
     security_surfaces: List[Dict[str, Any]] = Field(default_factory=list)
+    decision_surfaces: List[Dict[str, Any]] = Field(default_factory=list)
     side_effects: List[str] = Field(default_factory=list)
     declared_behaviors: List[str] = Field(default_factory=list)
     observed_behaviors: List[str] = Field(default_factory=list)

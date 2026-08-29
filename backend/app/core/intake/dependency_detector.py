@@ -34,6 +34,27 @@ def redact_secret_string(value: str) -> str:
 
 class DependencyDetector:
     @staticmethod
+    def redact_source_files(files: Dict[str, str]) -> Tuple[Dict[str, str], int]:
+        """Scrub plaintext secrets from raw files, replacing with synthetic canary tokens."""
+        redacted = {}
+        redacted_count = 0
+        patterns = [
+            (r'sk-[a-zA-Z0-9_-]{20,}', 'sk-canary-openai-masked-token-000000000'),
+            (r'AIzaSy[a-zA-Z0-9_-]{33}', 'AIzaSyCanaryGoogleMaskedToken000000000000'),
+            (r'ghp_[a-zA-Z0-9]{36}', 'ghp_canaryGitHubMaskedToken0000000000000000'),
+            (r'xoxb-[0-9]{11,13}-[0-9]{11,13}-[a-zA-Z0-9]{24}', 'xoxb-canary-slack-masked-token-000000000000000000000000'),
+        ]
+        for path, content in files.items():
+            current_content = content
+            for pat, repl in patterns:
+                matches = re.findall(pat, current_content)
+                if matches:
+                    redacted_count += len(matches)
+                    current_content = re.sub(pat, repl, current_content)
+            redacted[path] = current_content
+        return redacted, redacted_count
+
+    @staticmethod
     def detect_environment_secrets(code_text: str, raw_files: Dict[str, str] = None) -> List[DetectedSecret]:
         """Detect os.getenv(), os.environ.get(), .env templates, and model SDK credentials without executing code."""
         detected: List[DetectedSecret] = []
@@ -132,12 +153,12 @@ class DependencyDetector:
         )
 
         matches = instantiation_pattern.findall(code_text)
-        idx = 1
 
+        # Group and deduplicate by (provider, model_name)
+        grouped_models: Dict[Tuple[str, str], Dict[str, Any]] = {}
         for var_name, class_name, args_text in matches:
-            # Try to extract the model parameter (e.g., model="gpt-4o" or model_name="gpt-4")
             model_match = re.search(r'(?:model|model_name)\s*=\s*["\']([a-zA-Z0-9_\-\./:]+)', args_text)
-            detected_model = model_match.group(1) if model_match else "default-model"
+            detected_model = model_match.group(1) if model_match else "UNKNOWN"
 
             provider_map = {
                 "ChatOpenAI": "openai",
@@ -160,7 +181,21 @@ class DependencyDetector:
                 "ollama": "http://localhost:11434/v1",
             }
             endpoint = endpoint_map.get(provider, "https://api.openai.com/v1")
+            
+            key = (provider, detected_model)
+            if key not in grouped_models:
+                grouped_models[key] = {
+                    "provider": provider,
+                    "model_name": detected_model,
+                    "endpoint": endpoint,
+                    "call_sites": [f"assignment to {var_name} ({class_name})"],
+                }
+            else:
+                grouped_models[key]["call_sites"].append(f"assignment to {var_name} ({class_name})")
 
+        idx = 1
+        for (provider, detected_model), info in grouped_models.items():
+            call_sites_str = ", ".join(info["call_sites"])
             deps.append(
                 AgentModelDependency(
                     id=f"dep-model-{agent_id}-{idx}",
@@ -170,8 +205,8 @@ class DependencyDetector:
                     dependency_type="llm",
                     required=True,
                     original_provider=provider,
-                    original_endpoint=endpoint,
-                    detected_from=f"Line assignment to {var_name}",
+                    original_endpoint=info["endpoint"],
+                    detected_from=f"Detected invocations: {call_sites_str}",
                     created_at=_now()
                 )
             )

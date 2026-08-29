@@ -248,17 +248,13 @@ class SubsystemDetector:
                 tree = ast.parse(content)
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
+                        fn_name = node.name
                         # Check decorator @tool
                         is_tool = any(
                             (isinstance(d, ast.Name) and d.id in ("tool", "agent_tool")) or
                             (isinstance(d, ast.Call) and isinstance(d.func, ast.Name) and d.func.id in ("tool", "agent_tool"))
                             for d in node.decorator_list
                         )
-                        # Check name conventions or docstring tool hints
-                        fn_name = node.name
-                        if not is_tool and fn_name in ("refund_order", "send_email", "cancel_order", "delete_file", "search_web", "execute_sql"):
-                            is_tool = True
-
                         if is_tool:
                             # Analyze side effect
                             side_effect = ToolSideEffectType.NONE
@@ -299,23 +295,6 @@ class SubsystemDetector:
                             ))
             except Exception as e:
                 logger.debug(f"AST parsing error on {fname}: {e}")
-
-        # Fallback keyword scanning if AST found no decorated tools
-        if not tools:
-            for line in all_code.splitlines():
-                if "def " in line and any(w in line for w in ["search", "fetch", "query", "calculate", "summarize", "scrape"]):
-                    match = re.search(r"def\s+([a-zA-Z0-9_]+)\s*\(", line)
-                    if match:
-                        name = match.group(1)
-                        if not any(t.name == name for t in tools):
-                            tools.append(ToolProfile(
-                                tool_id=f"tool-{uuid.uuid4().hex[:6]}",
-                                name=name,
-                                description=f"Observed tool/function {name}",
-                                side_effect_type=ToolSideEffectType.NONE,
-                                is_read_only=True,
-                                source_evidence=f"Line: {line.strip()}"
-                            ))
 
         return tools
 

@@ -152,23 +152,8 @@ async def analyze_agent(agent_path: str, api_key: Optional[str] = None) -> Agent
     instructions_summary = "; ".join(instructions) if instructions else "Assist user requests."
 
     inputs = semantic_data.get("inputs", {})
-    if not inputs:
-        # Infer inputs from metadata or tools
-        inputs = {
-            "topic": "string (topic to query)",
-            "count": "integer (number of items)"
-        } if "news" in agent_name.lower() or "summarize" in agent_name.lower() else {
-            "query": "string (user request payload)"
-        }
-
     outputs = semantic_data.get("outputs", {})
-    if not outputs:
-        outputs = {
-            "status": "success/error indicator",
-            "result": "structured briefing or transaction log"
-        }
-
-    workflow = semantic_data.get("workflow_summary") or "Reads user requests, fetches database entries, processes mathematical transformations, and prints formatted output."
+    workflow = semantic_data.get("workflow_summary") or f"Executes {agent_name} workflow based on discovered entrypoint."
     risks = semantic_data.get("risks", ["Input boundary override risk", "Tool execution failure risk"])
     
     # 3. Extract Capabilities
