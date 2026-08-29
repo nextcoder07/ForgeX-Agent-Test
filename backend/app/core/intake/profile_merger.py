@@ -197,13 +197,14 @@ class ProfileMerger:
         raw_inputs = behavioral_raw.get("inputs", [])
         interface_details = behavioral_raw.get("interface_details", {})
         is_cli = interface_details.get("interface_type") == "CLI" or (entrypoint_path and entrypoint_path.endswith(".py"))
+        arg_names = [inp.get("name", str(inp)) if isinstance(inp, dict) else str(inp) for inp in raw_inputs]
 
         interface_contract = InterfaceContract(
             interface_type="CLI" if is_cli else "UNKNOWN",
             entrypoint=entrypoint_path,
             invocation_pattern={
-                "command": f"python {entrypoint_path}" + (" " + " ".join(inp["name"] for inp in raw_inputs) if raw_inputs else ""),
-                "arguments": [inp["name"] for inp in raw_inputs]
+                "command": f"python {entrypoint_path}" + (" " + " ".join(f"--{a}" if not a.startswith("-") else a for a in arg_names) if arg_names else ""),
+                "arguments": arg_names
             },
             interactive=False,
             stdin_supported=False,
@@ -214,6 +215,14 @@ class ProfileMerger:
             stdout_format="TEXT",
             exit_codes={0: "SUCCESS"}
         )
+
+        formatted_inputs = [
+            inp if isinstance(inp, dict) else {
+                "name": str(inp),
+                "type": "path" if any(k in str(inp).lower() for k in ["pdf", "file", "path", "doc", "resume"]) else "string"
+            }
+            for inp in raw_inputs
+        ]
 
         # 10. Build AgentBehaviorProfile
         behavior_profile = ProfileBuilder.build_behavior_profile(
@@ -228,7 +237,7 @@ class ProfileMerger:
             invariants=invariants,
             failure_surfaces=failure_surfaces,
             state_model=behavioral_raw.get("state_model", {}),
-            inputs=raw_inputs,
+            inputs=formatted_inputs,
             outputs=behavioral_raw.get("outputs", []),
             security_surfaces=behavioral_raw.get("security_surfaces", []),
             conflicts=behavioral_raw.get("conflicts", []),

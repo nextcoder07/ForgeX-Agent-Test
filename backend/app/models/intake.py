@@ -189,8 +189,9 @@ class AgentUnderstandingResult(BaseModel):
     confidence_score: float  # e.g., 96.4%
     ambiguities: List[str]
     graph_nodes: List[GraphNode]
-    graph_edges: List[GraphEdge]
     pipeline_run_id: Optional[str] = None
+    audit_report: Optional[Dict[str, Any]] = None
+    evidence_packet: Optional[Dict[str, Any]] = None
     semantic_status: str = "AI_ANALYSIS_COMPLETED"
     analysis_status: str = "COMPLETE"
 

@@ -285,37 +285,24 @@ async def process_agent_intake(
     ]
     agent_category = DependencyDetector.classify_agent_category(all_code, detected_model_deps, dedup_tools, extracted_deps)
 
-    # 3. Build Structured Evidence Packet
-    typed_source_files = []
-    for fpath, fcontent in analysis_files.items():
-        lower_f = fpath.lower()
-        if lower_f.endswith(".py"):
-            ftype = "python"
-        elif lower_f.endswith((".ts", ".js")):
-            ftype = "javascript"
-        elif lower_f.endswith((".md", ".txt", ".rst")):
-            ftype = "documentation"
-        elif "requirements" in lower_f or lower_f.endswith((".toml", ".lock")):
-            ftype = "dependency_manifest"
-        elif ".env" in lower_f:
-            ftype = "configuration_template"
-        elif lower_f.endswith((".yaml", ".yml", ".json")):
-            ftype = "metadata"
-        else:
-            ftype = "file"
-        typed_source_files.append({
-            "path": fpath,
-            "type": ftype,
-            "content": fcontent
-        })
+    # 3. Build Authoritative Deterministic Evidence Packet
+    from app.core.intake.evidence_builder import EvidencePacketBuilder
+    canonical_evidence_packet = EvidencePacketBuilder.build_packet(
+        source_files=analysis_files,
+        artifact_id=artifact_record.artifact_id,
+        entrypoint=runtime_manifest.get("entrypoint", "agent.py")
+    )
 
     deterministic_evidence = {
         "ast": {
             "tools_count": len(dedup_tools),
             "tools": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in dedup_tools],
+            "cli_arguments": [opt.model_dump() for opt in canonical_evidence_packet.cli_arguments],
+            "llm_constructors": [llm.model_dump() for llm in canonical_evidence_packet.llm_constructors],
         },
         "framework": {
             "name": framework_name,
+            "constructs": canonical_evidence_packet.framework_constructs,
             "workflow_nodes_count": len(workflow_graph.nodes),
             "workflow_edges_count": len(workflow_graph.edges),
         },
@@ -323,11 +310,13 @@ async def process_agent_intake(
         "credentials": [s.model_dump() if hasattr(s, "model_dump") else s.dict() for s in detected_secrets],
         "dependencies": [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in extracted_deps],
         "runtime": runtime_manifest,
+        "security_surfaces": [s.model_dump() for s in canonical_evidence_packet.security_surfaces],
+        "call_graph": [e.model_dump() for e in canonical_evidence_packet.call_graph],
         "behavioral_facts": {
             "transformations": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in behavioral_facts.get("transformations", [])],
             "invariants": [inv.model_dump() if hasattr(inv, "model_dump") else inv.dict() for inv in behavioral_facts.get("invariants", [])],
             "failure_surfaces": [f.model_dump() if hasattr(f, "model_dump") else f.dict() for f in behavioral_facts.get("failure_surfaces", [])],
-            "inputs": behavioral_facts.get("inputs", []),
+            "inputs": [opt.name for opt in canonical_evidence_packet.cli_arguments] or behavioral_facts.get("inputs", []),
             "outputs": behavioral_facts.get("outputs", []),
             "security_surfaces": behavioral_facts.get("security_surfaces", []),
             "conflicts": [c.model_dump() if hasattr(c, "model_dump") else c for c in behavioral_facts.get("conflicts", [])],
@@ -338,6 +327,8 @@ async def process_agent_intake(
 
     safe_deterministic_evidence = to_json_safe(deterministic_evidence)
 
+    typed_source_files = [{"path": fpath, "content": fcontent} for fpath, fcontent in analysis_files.items()]
+
     evidence_packet = {
         "analysis_context": {
             "analysis_run_id": f"run-{hasher.hexdigest()[:8]}",
@@ -347,6 +338,7 @@ async def process_agent_intake(
             "agent_name_hint": payload.agent_name_hint
         },
         "analysis_contract": {
+            "instruction": "Reconstruct the behavioral specification strictly from the supplied deterministic evidence facts. Do NOT hallucinate tools, dependencies, or inputs. For inferred properties, distinguish FACT from INFERRED. Mark unstated properties as UNKNOWN.",
             "required_outputs": [
                 "identity",
                 "interface_contract",
@@ -365,6 +357,7 @@ async def process_agent_intake(
         },
         "source_files": typed_source_files,
         "deterministic_evidence": safe_deterministic_evidence,
+        "evidence_items": [item.model_dump() for item in canonical_evidence_packet.evidence_items],
         "user_instructions": payload.pasted_prompt or None
     }
 
@@ -374,7 +367,7 @@ async def process_agent_intake(
     activity_log.emit(
         category="INTAKE",
         action="EVIDENCE_PACKET_READY",
-        detail=f"Evidence packet normalized: {len(typed_source_files)} files, {len(dedup_tools)} tools, {len(extracted_deps)} deps, {len(detected_secrets)} credentials ({serialized_bytes} bytes).",
+        detail=f"Evidence packet normalized: {len(typed_source_files)} files, {len(canonical_evidence_packet.evidence_items)} static evidence items ({serialized_bytes} bytes).",
         request_summary=f"Run: run-{hasher.hexdigest()[:8]} | Size: {serialized_bytes}b",
         status="success"
     )
@@ -617,6 +610,10 @@ async def process_agent_intake(
         nodes = [n for n in nodes if not any(f"node-tool-{pt}" == n.id for pt in validation_gate.purged_tools)]
         edges = [e for e in edges if not any(f"node-tool-{pt}" in (e.source, e.target) for pt in validation_gate.purged_tools)]
 
+    # 8. 4-Layer Intake Quality Audit
+    from app.core.intake.intake_auditor import IntakeAuditor
+    audit_report = IntakeAuditor.audit_spec_against_evidence(norm_spec, canonical_evidence_packet)
+
     t4_dur = (time.time() - t4_start) * 1000.0
     if tracker:
         tracker.complete_stage(4, duration_ms=round(t4_dur, 2), input_tokens=0, output_tokens=0)
@@ -635,10 +632,12 @@ async def process_agent_intake(
         behavior_profile=behavior_profile,
         canonical_subsystems=canonical_subsystems,
         conflicts=conflicts,
-        confidence_score=98.0 if validation_gate.is_valid and analysis_status == "COMPLETE" else 82.0,
+        confidence_score=audit_report.overall_quality_score if validation_gate.is_valid and analysis_status == "COMPLETE" else 82.0,
         ambiguities=ambiguities,
         graph_nodes=nodes,
         graph_edges=edges,
+        audit_report=audit_report.model_dump(),
+        evidence_packet=canonical_evidence_packet.model_dump(),
         semantic_status=semantic_status,
         analysis_status=analysis_status
     )
