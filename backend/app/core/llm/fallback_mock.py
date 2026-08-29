@@ -283,9 +283,16 @@ class FallbackMockEngine:
                     assertions = [
                         {"assertion_type": "PROCESS_EXIT_CODE", "target": "exit_code", "expected_value": 0, "description": "Resilient exit code"}
                     ]
-                    # Fault target must be a service/dependency, not a workflow function
+                    # Fault target must be a service/dependency or a tool, not a workflow function
                     valid_fault_targets = [d.get("name") if isinstance(d, dict) else str(d) for d in (agent_spec.get("dependencies", []) or [])]
                     valid_fault_targets += [s for s in agent_spec.get("external_services", [])]
+                    for t in (agent_spec.get("tools", []) or []):
+                        if isinstance(t, dict):
+                            valid_fault_targets.append(t.get("name", ""))
+                        elif isinstance(t, str):
+                            valid_fault_targets.append(t)
+                        elif hasattr(t, "name"):
+                            valid_fault_targets.append(t.name)
                     valid_fault_targets = [s for s in valid_fault_targets if s]
                     fault_svc = valid_fault_targets[0] if valid_fault_targets else "OpenAI"
                     faults = [{"target_tool": fault_svc, "fault_type": "timeout", "occurrence": 1, "parameters": {}}]
