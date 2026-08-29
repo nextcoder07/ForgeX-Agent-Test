@@ -5,11 +5,13 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  deleteUser,
   onAuthStateChanged,
   updateProfile,
   sendEmailVerification
 } from 'firebase/auth';
 import { auth, googleProvider } from '../config/firebase';
+import { API_BASE_URL } from '../api/client';
 
 export interface AuthContextType {
   user: User | null;
@@ -22,12 +24,48 @@ export interface AuthContextType {
   sendVerificationEmail: () => Promise<void>;
   reloadUser: () => Promise<boolean>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_USER_KEY = 'forgex_active_user_session';
 const LOCAL_STORAGE_TOKEN_KEY = 'forgex_active_user_token';
+
+// Server-side profile & workspace bootstrap synchronizer
+const syncProfileToBackend = async (firebaseUser: User, idToken: string) => {
+  try {
+    const url = `${API_BASE_URL}/auth/bootstrap`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
+        'X-User-ID': firebaseUser.uid,
+        'X-User-Email': firebaseUser.email || '',
+        'X-User-Email-Verified': 'true'
+      },
+      body: JSON.stringify({
+        display_name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+        avatar_url: firebaseUser.photoURL || undefined
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.active_workspace?.id) {
+        localStorage.setItem('forgex_active_workspace_id', data.active_workspace.id);
+        localStorage.setItem('forgex_active_workspace', JSON.stringify(data.active_workspace));
+      }
+      console.log('✅ Supabase user profile & workspace synced:', data);
+    } else {
+      const errText = await res.text();
+      console.warn('⚠️ Supabase bootstrap response:', res.status, errText);
+    }
+  } catch (err) {
+    console.warn('⚠️ Could not connect to ForgeX backend for profile sync:', err);
+  }
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -58,17 +96,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }));
             localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, idToken);
 
-            // Background bootstrap user profile and default workspace in backend
-            fetch('/api/auth/bootstrap', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ display_name: firebaseUser.displayName || undefined })
-            }).then(res => res.ok ? res.json() : null).then(data => {
-              if (data?.active_workspace?.id) {
-                localStorage.setItem('forgex_active_workspace_id', data.active_workspace.id);
-                localStorage.setItem('forgex_active_workspace', JSON.stringify(data.active_workspace));
-              }
-            }).catch(() => {});
+            // Synchronize user profile & workspace into Supabase backend
+            await syncProfileToBackend(firebaseUser, idToken);
           } catch (err) {
             console.warn('Could not fetch Firebase ID token:', err);
           }
@@ -99,7 +128,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Strict verification check
       if (!cred.user.emailVerified) {
-        // Send a fresh verification email just in case
         try {
           await sendEmailVerification(cred.user);
         } catch (e) {}
@@ -120,6 +148,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         displayName: cred.user.displayName || email.split('@')[0],
       }));
       localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, idToken);
+
+      // Await server sync to guarantee Supabase record exists before navigating
+      await syncProfileToBackend(cred.user, idToken);
     } catch (firebaseErr: any) {
       console.error('Firebase sign-in error:', firebaseErr.code, firebaseErr.message);
       if (firebaseErr.code === 'auth/invalid-credential' || firebaseErr.code === 'auth/wrong-password' || firebaseErr.code === 'auth/user-not-found') {
@@ -172,12 +203,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         photoURL: cred.user.photoURL
       }));
       localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, idToken);
+
+      // Await server sync to guarantee Supabase record exists before navigating
+      await syncProfileToBackend(cred.user, idToken);
     } catch (firebaseErr: any) {
       console.error('Firebase Google auth error:', firebaseErr.code, firebaseErr.message);
       if (firebaseErr.code === 'auth/popup-closed-by-user') {
         throw new Error('Google sign-in window was closed before completion.');
       } else if (firebaseErr.code === 'auth/popup-blocked') {
         throw new Error('Google popup was blocked by browser. Please allow popups for localhost.');
+      } else if (firebaseErr.code === 'auth/account-exists-with-different-credential') {
+        throw new Error('An account already exists with this email address. Please sign in with email and password.');
       } else if (firebaseErr.code === 'auth/operation-not-allowed') {
         throw new Error('Google Sign-In is not enabled in Firebase Console. Enable Google provider in Authentication > Sign-in method.');
       } else if (firebaseErr.code === 'auth/unauthorized-domain') {
@@ -213,6 +249,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           photoURL: updated.photoURL
         }));
         localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, idToken);
+
+        // Sync verified user profile & default workspace into Supabase backend
+        await syncProfileToBackend(updated, idToken);
+
         return true;
       }
     }
@@ -234,6 +274,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const deleteAccount = async (): Promise<void> => {
+    const currentUser = auth.currentUser;
+    const currentToken = token || (currentUser ? await currentUser.getIdToken() : null);
+
+    // 1. Delete all Supabase workspaces, agents, runs, and user profile in backend
+    try {
+      if (currentToken) {
+        await fetch(`${API_BASE_URL}/auth/me`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${currentToken}`,
+            'X-User-ID': currentUser?.uid || ''
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Backend data deletion note:', err);
+    }
+
+    // 2. Delete user from Firebase Authentication
+    if (currentUser) {
+      try {
+        await deleteUser(currentUser);
+      } catch (fbErr: any) {
+        console.error('Firebase deleteUser error:', fbErr);
+        if (fbErr.code === 'auth/requires-recent-login') {
+          throw new Error('For security, deleting your account requires a recent login. Please sign in again and retry.');
+        }
+        throw fbErr;
+      }
+    }
+
+    // 3. Purge all local state
+    setUser(null);
+    setToken(null);
+    localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+    localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
+    localStorage.removeItem('forgex_active_workspace_id');
+    localStorage.removeItem('forgex_active_workspace');
+    localStorage.removeItem('lastRegisteredAgent');
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -246,7 +328,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signInWithGoogle,
         sendVerificationEmail,
         reloadUser,
-        logout
+        logout,
+        deleteAccount
       }}
     >
       {children}

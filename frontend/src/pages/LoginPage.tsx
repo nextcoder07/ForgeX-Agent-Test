@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../config/firebase';
 import {
   Cpu,
   Lock,
   Mail,
   ArrowRight,
-  AlertCircle
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
@@ -17,10 +20,26 @@ export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [resetSuccess, setResetSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   // Return to intended page or default to agents workspace
   const from = (location.state as any)?.from?.pathname || '/agents';
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Please enter your email address above first to receive a password reset link.');
+      return;
+    }
+    setError('');
+    setResetSuccess('');
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setResetSuccess(`Password setup/reset email sent to ${email}. Check your inbox to create or reset your password.`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send password reset email.');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,6 +110,13 @@ export const LoginPage: React.FC = () => {
             </div>
           )}
 
+          {resetSuccess && (
+            <div className="p-3.5 rounded-xl bg-emerald-950/50 border border-emerald-500/40 text-emerald-300 text-xs flex items-start gap-2.5 animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <div className="flex-1 leading-relaxed">{resetSuccess}</div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300">Email Address</label>
@@ -110,6 +136,13 @@ export const LoginPage: React.FC = () => {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold text-slate-300">Password</label>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                >
+                  Forgot or set password?
+                </button>
               </div>
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />

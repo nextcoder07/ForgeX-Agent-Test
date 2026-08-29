@@ -21,6 +21,7 @@ import {
   Sliders,
   Check,
   Info,
+  AlertCircle,
 } from 'lucide-react';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
@@ -44,6 +45,7 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onAgentRegiste
   const [endpointUrl, setEndpointUrl] = useState<string | undefined>();
   const [inputType, setInputType] = useState('package');
   const [registering, setRegistering] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
 
   // Credentials Setup State
   const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
@@ -106,6 +108,7 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onAgentRegiste
     }
     setRegisteredAgent(null);
     setDisplayName('');
+    setRegisterError(null);
     setSourceFiles(uploadedFiles);
     setEndpointUrl(analyzedEndpoint);
     setInputType(analyzedInputType || 'package');
@@ -114,19 +117,25 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onAgentRegiste
 
   const handleRegister = async () => {
     if (!analysisResult) return;
+    if (!displayName.trim()) {
+      setRegisterError('Please enter a unique agent name.');
+      return;
+    }
     setRegistering(true);
+    setRegisterError(null);
     try {
       const agent = await registerNormalizedSpec(
         analysisResult.normalized_spec,
-        displayName,
+        displayName.trim(),
         analysisResult.artifact,
         sourceFiles,
         endpointUrl,
       );
       setRegisteredAgent(agent);
       onAgentRegistered(agent);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error('Agent registration error:', e);
+      setRegisterError(e.message || 'Failed to register agent. Please try again.');
     } finally {
       setRegistering(false);
     }
@@ -215,7 +224,7 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onAgentRegiste
                   <button
                     onClick={handleRegister}
                     disabled={registering || !displayName.trim()}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-slate-100 font-bold text-xs shadow-lg shadow-emerald-500/20 flex items-center space-x-2 transition disabled:opacity-50"
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-slate-100 font-bold text-xs shadow-lg shadow-emerald-500/20 flex items-center space-x-2 transition disabled:opacity-50 cursor-pointer"
                   >
                     {registering ? (
                       <><RefreshCw className="w-4 h-4 animate-spin" /><span>Registering...</span></>
@@ -248,6 +257,12 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onAgentRegiste
                 </div>
               )}
             </div>
+            {registerError && (
+              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2 mt-3">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{registerError}</span>
+              </div>
+            )}
           </div>
 
           {/* Quick Credentials & Environment Prompt (Interactive Card) */}

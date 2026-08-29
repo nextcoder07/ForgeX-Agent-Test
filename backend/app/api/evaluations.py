@@ -51,6 +51,7 @@ class EvaluateExecutionRequest(BaseModel):
 
 def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List[ExecutionTrace], binding: Any):
     """Background worker to evaluate existing sandbox execution traces with real-time lifecycle updates."""
+    import asyncio
     import traceback as _tb
     import app.core.evaluation.scorecard_engine as _sc_mod
     from app.core.evaluation.scorecard_engine import compute_ten_dimension_scores as _ctds

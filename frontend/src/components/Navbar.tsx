@@ -14,7 +14,8 @@ import {
   X,
   User as UserIcon,
   LogOut,
-  ChevronDown
+  ChevronDown,
+  Trash2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -34,7 +35,7 @@ export const Navbar: React.FC = () => {
   const [sentNotice, setSentNotice] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, sendVerificationEmail, reloadUser } = useAuth();
+  const { user, logout, deleteAccount, sendVerificationEmail, reloadUser } = useAuth();
 
   // Determine active page from current pathname
   const currentPath = location.pathname.split('/')[1] || 'dashboard';
@@ -63,6 +64,22 @@ export const Navbar: React.FC = () => {
     setProfileDropdownOpen(false);
     await logout();
     navigate('/login');
+  };
+
+  const handleDeleteAccount = async () => {
+    setProfileDropdownOpen(false);
+    const confirmed = window.confirm(
+      '⚠️ PERMANENT ACTION:\n\nAre you sure you want to delete your ForgeX account?\n\nThis will permanently delete your identity from Firebase Authentication AND delete all your workspaces, agents, scenarios, test executions, evaluation reports, and repairs from the Supabase database. This action cannot be undone.'
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteAccount();
+      alert('Your account and all associated workspace data have been permanently deleted.');
+      navigate('/signup');
+    } catch (e: any) {
+      alert(e.message || 'Failed to delete account.');
+    }
   };
 
   const handleResend = async () => {
@@ -176,10 +193,17 @@ export const Navbar: React.FC = () => {
                     </div>
                     <button
                       onClick={handleSignOut}
-                      className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200 flex items-center gap-2 transition cursor-pointer"
+                      className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2 transition cursor-pointer"
                     >
-                      <LogOut className="w-3.5 h-3.5" />
+                      <LogOut className="w-3.5 h-3.5 text-slate-400" />
                       <span>Sign Out</span>
+                    </button>
+                    <button
+                      onClick={handleDeleteAccount}
+                      className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 flex items-center gap-2 transition cursor-pointer mt-1 border-t border-slate-800/60 pt-2"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Delete Account & Wipe Data</span>
                     </button>
                   </div>
                 )}

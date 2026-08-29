@@ -221,6 +221,42 @@ class SyncedDict:
 # Serializer / Deserializer Functions
 # ---------------------------------------------------------------------------
 def _serialize_agent(key: str, agent: AgentRecord) -> Dict[str, Any]:
+    ws_id = getattr(agent, "workspace_id", None)
+    owner_id = getattr(agent, "owner_id", None) or getattr(agent, "user_id", None)
+    if owner_id == "default_user":
+        owner_id = None
+
+    from app.db.supabase_client import get_client
+    sb = get_client()
+    if sb:
+        try:
+            # Validate owner_id exists in user_profiles
+            if owner_id:
+                res_u = sb.table("user_profiles").select("id").eq("id", owner_id).execute()
+                if not res_u.data or len(res_u.data) == 0:
+                    owner_id = None
+            if not owner_id:
+                res_u_first = sb.table("user_profiles").select("id").limit(1).execute()
+                if res_u_first.data and len(res_u_first.data) > 0:
+                    owner_id = res_u_first.data[0]["id"]
+
+            # Validate ws_id exists in workspaces
+            if ws_id:
+                res_w = sb.table("workspaces").select("id").eq("id", ws_id).execute()
+                if not res_w.data or len(res_w.data) == 0:
+                    ws_id = None
+            if not ws_id and owner_id:
+                res_m = sb.table("workspace_members").select("workspace_id").eq("user_id", owner_id).limit(1).execute()
+                if res_m.data and len(res_m.data) > 0:
+                    ws_id = res_m.data[0].get("workspace_id")
+            if not ws_id:
+                res_w_first = sb.table("workspaces").select("id, owner_id").limit(1).execute()
+                if res_w_first.data and len(res_w_first.data) > 0:
+                    ws_id = res_w_first.data[0]["id"]
+                    if not owner_id:
+                        owner_id = res_w_first.data[0].get("owner_id")
+        except Exception as e:
+            logger.debug(f"FK validation note in serialize_agent: {e}")
     spec = {
         "domain": agent.domain,
         "display_name": agent.display_name,
@@ -237,15 +273,16 @@ def _serialize_agent(key: str, agent: AgentRecord) -> Dict[str, Any]:
         "dependencies": [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in agent.dependencies],
         "constitution": agent.constitution.model_dump() if hasattr(agent.constitution, "model_dump") else agent.constitution.dict(),
         "version_label": agent.version_label,
-        "runtime_manifest": agent.runtime_manifest,
-        "execution_status": agent.execution_status,
-        "input_type": agent.input_type,
-        "user_id": getattr(agent, "user_id", "default_user"),
+        "user_id": owner_id or "default_user",
+        "owner_id": owner_id,
+        "workspace_id": ws_id,
         "created_at": agent.created_at,
         "current_version_id": agent.current_version_id
     }
     return {
         "id": agent.id,
+        "workspace_id": ws_id,
+        "owner_id": owner_id,
         "name": agent.name,
         "description": agent.description,
         "status": "active",
@@ -258,8 +295,12 @@ def _deserialize_agent(row: Dict[str, Any]) -> AgentRecord:
     tools = [ToolDefinition(**t) for t in spec.get("tools", [])]
     deps = [DependencyDefinition(**d) for d in spec.get("dependencies", [])]
     constitution = AgentConstitution(**spec.get("constitution", {}))
+    ws_id = row.get("workspace_id") or spec.get("workspace_id")
+    owner_id = row.get("owner_id") or spec.get("owner_id") or row.get("user_id")
     return AgentRecord(
         id=row["id"],
+        workspace_id=ws_id,
+        owner_id=owner_id,
         name=row["name"],
         display_name=row.get("display_name") or spec.get("display_name"),
         source_name=spec.get("source_name") or row.get("name"),
@@ -278,7 +319,7 @@ def _deserialize_agent(row: Dict[str, Any]) -> AgentRecord:
         runtime_manifest=spec.get("runtime_manifest", {}),
         execution_status=spec.get("execution_status", "EXECUTION_BLOCKED"),
         input_type=spec.get("input_type", "package"),
-        user_id=row.get("user_id") or spec.get("user_id", "default_user"),
+        user_id=owner_id or "default_user",
         created_at=str(row.get("created_at", _now())),
     )
 
@@ -391,19 +432,12 @@ def _serialize_job(key: str, job: EvaluationJob) -> Dict[str, Any]:
 
 def _deserialize_job(row: Dict[str, Any]) -> EvaluationJob:
     spec = row.get("job_spec") or {}
-    status = row.get("status", "completed")
+    status = row.get("status") or spec.get("status") or "completed"
     current_step = spec.get("current_step") or row.get("current_step") or "Evaluation job processed."
-
-    # Auto-recover active jobs interrupted by backend server restart
-    if status in ["running", "evaluating", "aggregating", "pending"]:
-        status = "failed"
-        current_step = "Job interrupted by backend server restart. Click Retry to re-run."
-        error_msg = "Server process restarted during active execution."
-    else:
-        error_msg = spec.get("error_message") or row.get("error_message")
+    error_msg = spec.get("error_message") or row.get("error_message")
 
     total_sc = int(spec.get("total_scenarios") or row.get("total_scenarios") or 0)
-    passed_sc = int(spec.get("completed_scenarios") or row.get("passed_scenarios") or row.get("completed_scenarios") or total_sc)
+    passed_sc = int(spec.get("completed_scenarios") or row.get("passed_scenarios") or row.get("completed_scenarios") or 0)
     total_vd = int(spec.get("total_verdicts") or row.get("total_verdicts") or passed_sc)
 
     return EvaluationJob(
@@ -1592,9 +1626,9 @@ class Store:
                         "status": v.status or "completed",
                         "evidence": v.model_dump() if hasattr(v, "model_dump") else v.dict()
                     }
-                    self.verdicts._sb.table("evaluation_results").upsert(row).execute()
+                    self.verdicts._sb.table("evaluation_verdicts").upsert(row).execute()
                 except Exception as e:
-                    logger.error(f"Supabase error inserting into evaluation_results: {e}")
+                    logger.debug(f"Supabase sync for evaluation_verdict: {e}")
 
     def get_scorecard(self, eval_id: str) -> Optional[ReliabilityScorecard]:
         return self.scorecards.get(eval_id)

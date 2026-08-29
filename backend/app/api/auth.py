@@ -78,21 +78,34 @@ async def bootstrap_user(
         "avatar_url": avatar_url,
         "status": "ACTIVE",
         "email_verified_at": now_iso,
-        "is_platform_admin": user.is_admin
+        "role": "admin" if user.is_admin else "user",
+        "is_platform_admin": user.is_admin,
+        "metadata": {
+            "status": "ACTIVE",
+            "avatar_url": avatar_url,
+            "email_verified_at": now_iso
+        }
     }
 
     # 1. Supabase / Persistent Store synchronization
     if sb:
         try:
-            # Check profile
-            res_p = sb.table("profiles").select("*").eq("id", user_id).execute()
-            if not res_p.data:
+            # Check and upsert in user_profiles table
+            res_up = sb.table("user_profiles").select("*").eq("id", user_id).execute()
+            if not res_up.data:
                 is_new = True
-                sb.table("profiles").insert(profile_data).execute()
+                sb.table("user_profiles").insert(profile_data).execute()
             else:
-                profile_data["display_name"] = res_p.data[0].get("display_name", display_name)
-                profile_data["avatar_url"] = res_p.data[0].get("avatar_url", avatar_url)
-                profile_data["is_platform_admin"] = res_p.data[0].get("is_platform_admin", user.is_admin)
+                update_fields = {
+                    "email": email,
+                    "display_name": res_up.data[0].get("display_name") or display_name,
+                    "avatar_url": avatar_url or res_up.data[0].get("avatar_url"),
+                    "role": "admin" if user.is_admin else "user",
+                    "status": "ACTIVE",
+                    "email_verified_at": now_iso
+                }
+                sb.table("user_profiles").update(update_fields).eq("id", user_id).execute()
+                profile_data.update(update_fields)
 
             # Check memberships / workspaces
             res_m = sb.table("workspace_members").select("*, workspaces(*)").eq("user_id", user_id).execute()
@@ -113,9 +126,10 @@ async def bootstrap_user(
                         ))
 
             if not workspaces_list:
-                # Create default workspace
+                # Create default workspace with guaranteed unique slug
                 default_ws_id = f"ws-{uuid.uuid4().hex[:8]}"
-                default_slug = f"ws-{user_id[:8].lower()}"
+                clean_uid = "".join(c for c in user_id if c.isalnum())[:8].lower()
+                default_slug = f"ws-{clean_uid}-{default_ws_id[-6:]}"
                 ws_payload = {
                     "id": default_ws_id,
                     "name": f"{display_name}'s Workspace",
@@ -192,14 +206,33 @@ async def bootstrap_user(
 
 @router.get("/auth/me")
 async def get_my_identity(user: UserRecord = Depends(get_current_user)):
-    """Return active authenticated user identity and role."""
-    return {
+    """Return active authenticated user profile, status, and active workspace."""
+    sb = get_client()
+    profile_data = {
         "user_id": user.user_id,
         "email": user.email,
         "display_name": user.display_name,
+        "status": "ACTIVE" if user.email_verified or user.is_admin else "PENDING_EMAIL_VERIFICATION",
         "is_admin": user.is_admin,
         "active_workspace_id": user.active_workspace_id
     }
+
+    if sb:
+        try:
+            res = sb.table("profiles").select("*").eq("id", user.user_id).execute()
+            if res.data and len(res.data) > 0:
+                p = res.data[0]
+                profile_data.update({
+                    "email": p.get("email", user.email),
+                    "display_name": p.get("display_name", user.display_name),
+                    "avatar_url": p.get("avatar_url"),
+                    "status": p.get("status", "ACTIVE"),
+                    "email_verified_at": p.get("email_verified_at")
+                })
+        except Exception as e:
+            logger.debug(f"Could not load profile from Supabase: {e}")
+
+    return profile_data
 
 
 @router.get("/workspaces", response_model=List[WorkspaceSummary])
@@ -273,3 +306,80 @@ async def create_workspace(
     _in_memory_members[user.user_id].append(payload)
 
     return WorkspaceSummary(**payload)
+
+
+@router.delete("/auth/me")
+async def delete_my_account(user: UserRecord = Depends(get_current_user)):
+    """
+    Permanently deletes user account, all owned workspaces, and all associated
+    agents, scenarios, executions, evaluations, findings, and repairs.
+    """
+    user_id = user.user_id
+    sb = get_client()
+
+    # 1. Supabase Cascading Delete
+    if sb:
+        try:
+            # Deleting the user_profiles record cascades down through Postgres foreign keys
+            # to delete all workspaces, members, agents, versions, scenarios, traces, evaluations, and repairs
+            sb.table("user_profiles").delete().eq("id", user_id).execute()
+            logger.info(f"Deleted user_profile & cascaded all tenant data in Supabase for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error cascading delete for user {user_id} in Supabase: {e}")
+            raise HTTPException(status_code=500, detail=f"Database error deleting account: {e}")
+
+    # 2. In-memory / Fallback cleanup
+    if user_id in _in_memory_profiles:
+        del _in_memory_profiles[user_id]
+    if user_id in _in_memory_members:
+        owned_ws = _in_memory_members.pop(user_id, [])
+        for ws in owned_ws:
+            ws_id = ws.get("id")
+            if ws_id in _in_memory_workspaces:
+                del _in_memory_workspaces[ws_id]
+
+    return {
+        "status": "success",
+        "message": "User account and all associated workspace data permanently deleted."
+    }
+
+
+@router.delete("/workspaces/{workspace_id}")
+async def delete_workspace(
+    workspace_id: str,
+    user: UserRecord = Depends(get_current_user)
+):
+    """
+    Permanently deletes a workspace and all agents, scenarios, runs, and findings within it.
+    Requires OWNER or ADMIN role.
+    """
+    sb = get_client()
+    if sb:
+        try:
+            # Check ownership / membership
+            res_m = sb.table("workspace_members").select("role").eq("workspace_id", workspace_id).eq("user_id", user.user_id).execute()
+            if not res_m.data and not user.is_admin:
+                raise HTTPException(status_code=403, detail="Not authorized to delete this workspace")
+            role = res_m.data[0].get("role") if res_m.data else "OWNER"
+            if role not in ("OWNER", "ADMIN") and not user.is_admin:
+                raise HTTPException(status_code=403, detail="Only workspace Owners/Admins can delete this workspace")
+
+            # Delete workspace (Postgres CASCADE deletes all agents, executions, evaluations, repairs in this workspace)
+            sb.table("workspaces").delete().eq("id", workspace_id).execute()
+            logger.info(f"Deleted workspace {workspace_id} in Supabase")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting workspace {workspace_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Error deleting workspace: {e}")
+
+    if workspace_id in _in_memory_workspaces:
+        del _in_memory_workspaces[workspace_id]
+    if user.user_id in _in_memory_members:
+        _in_memory_members[user.user_id] = [w for w in _in_memory_members[user.user_id] if w.get("id") != workspace_id]
+
+    return {
+        "status": "success",
+        "message": f"Workspace '{workspace_id}' and all associated data permanently deleted."
+    }
+

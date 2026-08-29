@@ -348,6 +348,42 @@ async def register_normalized_spec(
     goals_str = f" designed to {goals_list[0].lower()}" if goals_list else ""
     domain_name = spec.identity.get("domain", "general").replace("_", " ").title()
     inferred_desc = f"Autonomous {domain_name} agent{goals_str}."
+    ws_id = current_user.active_workspace_id
+    user_id = current_user.user_id if current_user.user_id != "anonymous" else None
+    
+    from app.db.supabase_client import get_client
+    sb = get_client()
+    if sb:
+        if not user_id:
+            try:
+                res_u = sb.table("user_profiles").select("id").limit(1).execute()
+                if res_u.data and len(res_u.data) > 0:
+                    user_id = res_u.data[0]["id"]
+            except Exception:
+                pass
+        if not ws_id and user_id:
+            try:
+                res_m = sb.table("workspace_members").select("workspace_id").eq("user_id", user_id).limit(1).execute()
+                if res_m.data and len(res_m.data) > 0:
+                    ws_id = res_m.data[0].get("workspace_id")
+            except Exception:
+                pass
+            if not ws_id:
+                try:
+                    res_w = sb.table("workspaces").select("id").eq("owner_id", user_id).limit(1).execute()
+                    if res_w.data and len(res_w.data) > 0:
+                        ws_id = res_w.data[0].get("id")
+                except Exception:
+                    pass
+        if not ws_id:
+            try:
+                res_all_w = sb.table("workspaces").select("id, owner_id").limit(1).execute()
+                if res_all_w.data and len(res_all_w.data) > 0:
+                    ws_id = res_all_w.data[0]["id"]
+                    if not user_id:
+                        user_id = res_all_w.data[0].get("owner_id")
+            except Exception:
+                pass
 
     rec = AgentRecord(
         id=agent_id,
@@ -368,9 +404,9 @@ async def register_normalized_spec(
         runtime_manifest=spec.runtime_manifest,
         execution_status=spec.execution_status,
         input_type=payload.artifact.input_type if payload.artifact else "package",
-        user_id=current_user.user_id,
-        owner_id=current_user.user_id,
-        workspace_id=current_user.active_workspace_id,
+        user_id=user_id or "default_user",
+        owner_id=user_id,
+        workspace_id=ws_id,
         created_at=_now()
     )
     agent_status = "SUCCESS"

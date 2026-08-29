@@ -13,15 +13,17 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- 0. IDENTITY, MULTI-TENANCY & WORKSPACE ACCESS CONTROL
 -- =============================================================================
 
--- 1. profiles — authenticated users synchronized with Firebase Auth UID
-CREATE TABLE IF NOT EXISTS profiles (
+-- 1. user_profiles — authenticated users synchronized with Firebase Auth UID
+CREATE TABLE IF NOT EXISTS user_profiles (
     id                 TEXT PRIMARY KEY,  -- Firebase UID
     email              TEXT NOT NULL,
     display_name       TEXT,
     avatar_url         TEXT,
-    status             TEXT NOT NULL DEFAULT 'ACTIVE', -- PENDING_EMAIL_VERIFICATION, ACTIVE, SUSPENDED, DELETED
+    role               TEXT NOT NULL DEFAULT 'USER', -- Platform Role: 'USER', 'PLATFORM_ADMIN'
+    status             TEXT NOT NULL DEFAULT 'PENDING_EMAIL_VERIFICATION', -- 'PENDING_EMAIL_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DELETED'
     email_verified_at  TIMESTAMPTZ,
     is_platform_admin  BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata           JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -31,7 +33,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
     id                 TEXT PRIMARY KEY,
     name               TEXT NOT NULL,
     slug               TEXT UNIQUE NOT NULL,
-    owner_id           TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    owner_id           TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
     tier               TEXT NOT NULL DEFAULT 'free',
     settings           JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -42,7 +44,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
 CREATE TABLE IF NOT EXISTS workspace_members (
     id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id            TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    user_id            TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
     role               TEXT NOT NULL DEFAULT 'DEVELOPER',
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -53,7 +55,7 @@ CREATE TABLE IF NOT EXISTS workspace_members (
 CREATE TABLE IF NOT EXISTS audit_logs (
     id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id            TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    user_id            TEXT REFERENCES user_profiles(id) ON DELETE CASCADE,
     action             TEXT NOT NULL,
     resource_type      TEXT NOT NULL,
     resource_id        TEXT,
@@ -72,8 +74,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_ws ON audit_logs(workspace_id, created
 -- 5. agents — logical identity of an agent project
 CREATE TABLE IF NOT EXISTS agents (
     id                 TEXT PRIMARY KEY,
-    workspace_id       TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
-    owner_id           TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    owner_id           TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
     name               TEXT NOT NULL,
     description        TEXT,
     status             TEXT NOT NULL DEFAULT 'active',
@@ -904,84 +906,25 @@ CREATE INDEX IF NOT EXISTS idx_canonical_tests_agent ON canonical_test_cases(age
 CREATE INDEX IF NOT EXISTS idx_evidence_graphs_scenario ON evidence_graphs(scenario_id);
 
 -- =============================================================================
--- 6. MULTI-TENANCY & ADMIN TELEMETRY TABLES
+-- 6. ADMIN TELEMETRY & WORKSPACE PERFORMANCE INDEXES
 -- =============================================================================
 
--- 38. user_profiles — tenant identity and roles
-CREATE TABLE IF NOT EXISTS user_profiles (
-    id           TEXT PRIMARY KEY, -- Firebase UID
-    email        TEXT NOT NULL,
-    display_name TEXT,
-    role         TEXT NOT NULL DEFAULT 'member', -- member, admin
-    metadata     JSONB DEFAULT '{}'::jsonb,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- 39. admin_telemetry_submissions — user-shared evaluation & training telemetry
+-- 38. admin_telemetry_submissions — user-shared evaluation & training telemetry
 CREATE TABLE IF NOT EXISTS admin_telemetry_submissions (
     id           TEXT PRIMARY KEY,
-    user_id      TEXT NOT NULL,
+    workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+    user_id      TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
     user_email   TEXT,
-    agent_id     TEXT,
+    agent_id     TEXT REFERENCES agents(id) ON DELETE SET NULL,
     eval_job_id  TEXT,
     status       TEXT NOT NULL DEFAULT 'submitted', -- submitted, approved_for_training, archived
     payload      JSONB NOT NULL DEFAULT '{}'::jsonb,
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Multi-Tenant user_id columns on all tenant-scoped tables
-ALTER TABLE agents ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE agent_versions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE agent_components ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE agent_artifacts ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE agent_files ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE agent_test_specifications ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE tools ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE agent_dependencies ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE dependency_bindings ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE sandbox_specifications ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE agent_behavior_profiles ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE ai_generation_runs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE execution_sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE execution_jobs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE execution_runs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE execution_steps ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE execution_actions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE execution_artifacts ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE execution_metrics ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE execution_preflights ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE evaluation_runs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE evaluation_verdicts ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE evaluation_traces ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE failure_clusters ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE scorecards ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE diagnosis_reports ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE repair_sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE patch_artifacts ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE regression_tests ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE canonical_test_cases ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE findings ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE model_connections ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE model_versions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE training_datasets ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE stage_judge_audits ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-ALTER TABLE multi_agent_stage_audits ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system';
-
--- User indexes for ultra-fast multi-tenant querying
-CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id);
-CREATE INDEX IF NOT EXISTS idx_scenarios_user_id ON scenarios(user_id);
-CREATE INDEX IF NOT EXISTS idx_evaluation_runs_user_id ON evaluation_runs(user_id);
-CREATE INDEX IF NOT EXISTS idx_execution_jobs_user_id ON execution_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_scorecards_user_id ON scorecards(user_id);
-CREATE INDEX IF NOT EXISTS idx_diagnosis_user_id ON diagnosis_reports(user_id);
-CREATE INDEX IF NOT EXISTS idx_repairs_user_id ON repair_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_model_conn_user_id ON model_connections(user_id);
-CREATE INDEX IF NOT EXISTS idx_datasets_user_id ON training_datasets(user_id);
-CREATE INDEX IF NOT EXISTS idx_pipeline_user_id ON pipeline_runs(user_id);
+-- Primary multi-tenant workspace indexes
+CREATE INDEX IF NOT EXISTS idx_agents_workspace_id ON agents(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_agents_owner_id ON agents(owner_id);
 CREATE INDEX IF NOT EXISTS idx_admin_telemetry_user ON admin_telemetry_submissions(user_id);
 CREATE INDEX IF NOT EXISTS idx_admin_telemetry_status ON admin_telemetry_submissions(status);
 

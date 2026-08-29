@@ -57,4 +57,10 @@ api_router.include_router(platform_ai_router)
 api_router.include_router(admin_telemetry_router)
 
 
+@api_router.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "ForgeX Platform API"}
+
+
+
 
