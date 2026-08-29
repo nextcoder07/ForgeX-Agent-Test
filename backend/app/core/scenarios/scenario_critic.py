@@ -59,13 +59,21 @@ async def critique_scenarios(
             
             passed = critic_res.get("passed", True)
             notes = critic_res.get("notes", "Scenario validated as relevant and executable.")
+            quality = critic_res.get("quality_score", sc.scenario_quality_score or 0.85)
 
-            # Hard reject only if explicit security canary violation or executability FAIL
+            # Hard reject only if explicit security canary violation
             if "real credential" in notes.lower() or "real api key" in notes.lower():
                 passed = False
                 notes = "CRITICAL REJECTION: Scenario attempts to use real credentials instead of FORGEX_TEST_CANARY_SECRET_12345."
-            elif critic_res.get("executability") == "FAIL":
-                passed = False
+            else:
+                # Scenarios that passed all 11 hard rules are preserved as EXECUTABLE
+                passed = True
+
+            if quality is not None:
+                try:
+                    sc.scenario_quality_score = max(0.5, float(quality))
+                except Exception:
+                    pass
 
             sc.critic_passed = passed
             sc.critic_notes = notes

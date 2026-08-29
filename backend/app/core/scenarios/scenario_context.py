@@ -156,6 +156,13 @@ def build_scenario_context(agent) -> "ScenarioContext":
     if not isinstance(spec, dict):
         spec = {}
 
+    # Merge direct attributes from agent record to cover the flattened schema
+    for attr in ["inputs", "outputs", "tools", "capabilities", "workflow", "dependencies", "side_effects", "security_surfaces", "constitution"]:
+        if attr not in spec or not spec[attr]:
+            val = getattr(agent, attr, None)
+            if val is not None:
+                spec[attr] = val
+
     # Evidence packet: prefer spec["evidence_packet"] then agent.evidence_packet
     evidence: Dict[str, Any] = spec.get("evidence_packet", {}) if isinstance(spec, dict) else {}
     if not evidence:

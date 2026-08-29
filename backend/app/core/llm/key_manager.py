@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +51,7 @@ class UnifiedKeyManager:
 
     def load_keys(self) -> None:
         """Loads all AI API keys dynamically from environment variables in strict priority order."""
+        load_dotenv(override=True)
         self.keys.clear()
         self.meta_keys.clear()
         
@@ -136,6 +137,9 @@ class UnifiedKeyManager:
         ))
         logger.info(f"Registered Ollama Local Server ({ollama_endpoint} - {ollama_model})")
 
+        # Maintain strict priority order (Key 1 -> Key 2 -> Key 3 ...)
+        self.keys.sort(key=lambda k: k.priority)
+
         # 5. Independent Meta-Evaluator Keys (Rotation Pool + Dedicated Ollama Fallback)
         for idx in range(1, 20):
             meta_val = os.getenv(f"META_EVALUATOR_API_KEY_{idx}", "").strip()
@@ -213,6 +217,7 @@ class UnifiedKeyManager:
             k for k in pool 
             if k.api_name not in ("ollama", "local") and (api_name is None or k.api_name.lower() == api_name.lower())
         ]
+        # Strict user-defined priority: Key 1 is always evaluated before Key 2, Key 3, etc.
         cloud_keys.sort(key=lambda k: k.priority)
 
         for k in cloud_keys:
@@ -233,6 +238,19 @@ class UnifiedKeyManager:
                 return k
 
         return None
+
+    def reset_rotation(self) -> None:
+        """Resets cooldowns for active keys so each new user action (intake, scenarios, eval) starts freshly from API Key 1."""
+        self.load_keys()
+        for k in self.keys:
+            if k.is_active:
+                k.cooldown_until = 0.0
+                k.failure_count = 0
+        for k in self.meta_keys:
+            if k.is_active:
+                k.cooldown_until = 0.0
+                k.failure_count = 0
+        logger.info("AI Key Manager: Started fresh from Priority 1 (AI_API_KEY_1)")
 
     def report_success(self, key_id: str, tokens: int = 0) -> None:
         for k in self.keys:
@@ -256,6 +274,9 @@ class UnifiedKeyManager:
                     k.is_active = False
                     k.cooldown_until = now + 86400.0  # Deactivate invalid key for 24h
                     logger.warning(f"Key '{key_id}' permanently deactivated due to authentication failure (401/Invalid Key). Rotating to next available key.")
+                elif err_type == "QUOTA_EXHAUSTED":
+                    k.cooldown_until = now + 3600.0  # Put exhausted keys on 1h cooldown
+                    logger.warning(f"Key '{key_id}' placed on extended cooldown (1 hour) due to credit/quota exhaustion. Rotating to next available key.")
                 else:
                     cooldown_secs = 60.0 if err_type == "RATE_LIMITED" else 30.0
                     k.cooldown_until = now + cooldown_secs

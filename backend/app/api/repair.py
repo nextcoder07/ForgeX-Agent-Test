@@ -143,6 +143,9 @@ def get_agent_repair_status(agent_id: str):
 @router.post("/sessions/start", response_model=RepairSession)
 def start_repair_session(payload: StartRepairRequest, background_tasks: BackgroundTasks):
     """Explicitly start the repair loop after user clicks 'Fix Agent' and approves Repair Plan."""
+    from app.core.llm.key_manager import UnifiedKeyManager
+    UnifiedKeyManager().reset_rotation()
+
     session = store.repair_sessions.get(payload.session_id)
     if not session:
         session = RepairOrchestrator.get_or_create_session(payload.session_id)

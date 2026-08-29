@@ -18,16 +18,16 @@ router = APIRouter(prefix="/agents", tags=["Agents"])
 def list_agents(current_user: UserRecord = Depends(get_current_user)):
     """List all agents belonging to the current active workspace / user."""
     all_agents = store.list_agents()
-    if current_user.is_admin:
-        return all_agents
-
     active_ws = current_user.active_workspace_id
+    user_id = current_user.user_id
+
+    # Strict multi-tenant isolation: only show agents belonging to this workspace or user
     filtered = []
     for a in all_agents:
         a_ws = getattr(a, 'workspace_id', None)
         a_user = getattr(a, 'user_id', None)
-        # Match by workspace, user, or unassigned default agent
-        if (active_ws and a_ws == active_ws) or (a_user == current_user.user_id) or (not a_user and not a_ws):
+        a_owner = getattr(a, 'owner_id', None)
+        if (active_ws and a_ws == active_ws) or (user_id and (a_user == user_id or a_owner == user_id)):
             filtered.append(a)
     return filtered
 

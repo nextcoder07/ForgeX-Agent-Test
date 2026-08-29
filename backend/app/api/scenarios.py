@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.models.scenario import (
     Scenario,
     ScenarioCategory,
+    TargetSubsystem,
     StrategyPlan,
     CoverageGapReport,
     ScenarioGenerationRequest,
@@ -73,6 +74,9 @@ def get_scenario_plan(agent_id: str, target_count: int = 20):
 @router.post("/generation-run", response_model=ScenarioGenerationRun)
 async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
     """Executes deterministic-first batch scenario generation, validation, and critic."""
+    from app.core.llm.key_manager import UnifiedKeyManager
+    UnifiedKeyManager().reset_rotation()
+
     agent = store.get_agent(payload.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")

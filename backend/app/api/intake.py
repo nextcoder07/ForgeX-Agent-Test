@@ -259,6 +259,9 @@ def purge_all_agents_endpoint():
 @router.post("/analyze", response_model=AgentUnderstandingResult)
 async def analyze_agent(payload: AgentIntakePayload):
     """Executes the complete Agent Intake & Understanding pipeline."""
+    from app.core.llm.key_manager import UnifiedKeyManager
+    UnifiedKeyManager().reset_rotation()
+
     activity_log.emit(
         category="INTAKE",
         action="ANALYZE_START",

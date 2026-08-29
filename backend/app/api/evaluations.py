@@ -271,7 +271,7 @@ async def evaluate_execution_job(payload: EvaluateExecutionRequest, background_t
     if not traces:
         # Fall back to creating traces if execution traces were transient
         from app.models.scenario import Scenario, ScenarioCategory
-        scenarios = store.list_scenarios()[:execution_job.total_scenarios]
+        scenarios = store.list_scenarios(agent.id)[:execution_job.total_scenarios]
         for sc in scenarios:
             t = run_scenario_in_sandbox(agent, sc)
             traces.append(t)
@@ -317,16 +317,18 @@ async def evaluate_execution_job(payload: EvaluateExecutionRequest, background_t
 
 @router.post("/run", response_model=EvaluationJob)
 async def start_evaluation_run(payload: EvaluationRequest, background_tasks: BackgroundTasks):
+    from app.core.llm.key_manager import UnifiedKeyManager
+    UnifiedKeyManager().reset_rotation()
+
     agent = store.get_agent(payload.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
     job_id = f"eval-{uuid.uuid4().hex[:8]}"
 
-    all_scenarios = store.list_scenarios()
-    agent_scenarios = [s for s in all_scenarios if s.agent_id == payload.agent_id]
+    agent_scenarios = [s for s in store.list_scenarios(payload.agent_id) if getattr(s, 'validation_status', '') != 'FAILED_GENERATION']
     if not agent_scenarios:
-        agent_scenarios = all_scenarios[:payload.scenario_batch_size]
+        raise HTTPException(status_code=400, detail=f"No executable scenarios found for agent '{agent.name}'. Please generate scenarios first.")
 
     scenarios = agent_scenarios[:payload.scenario_batch_size]
     

@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Optional
 
 from app.core.llm.base import LLMProvider
 from app.core.llm.fallback_mock import FallbackMockEngine
-from app.core.llm.gemini_provider import MASTER_AGENT_ANALYZER_SYSTEM_PROMPT, safe_json_loads
+from app.core.llm.gemini_provider import (
+    MASTER_AGENT_ANALYZER_SYSTEM_PROMPT,
+    safe_json_loads,
+    LLMGenerationError,
+    LLMQuotaExhaustedError,
+)
 from app.models.pipeline import AIGenerationRun
 from app.services.store import store
 
@@ -63,7 +68,7 @@ class OpenRouterProvider(LLMProvider):
                     if f_model == model_name:
                         continue
                     payload["model"] = f_model
-                    payload["max_tokens"] = 4096
+                    payload["max_tokens"] = 2048
                     payload.pop("response_format", None)
                     resp = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
                     if resp.status_code < 400:
@@ -71,7 +76,9 @@ class OpenRouterProvider(LLMProvider):
                         break
 
         if response.status_code >= 400:
-            raise RuntimeError(f"OpenRouter {key_id} returned HTTP {response.status_code}: {response.text[:500]}")
+            if response.status_code == 402 or "credits" in response.text.lower() or "budget" in response.text.lower():
+                raise LLMQuotaExhaustedError(f"OpenRouter credit limit reached: {response.text[:250]}")
+            raise LLMGenerationError(f"OpenRouter {key_id} returned HTTP {response.status_code}: {response.text[:250]}")
         body = response.json()
         usage = body.get("usage") or {}
         input_tokens = int(usage.get("prompt_tokens") or 0)

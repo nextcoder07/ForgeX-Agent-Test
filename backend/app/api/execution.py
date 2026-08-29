@@ -27,8 +27,7 @@ async def get_agent_execution_preflight(agent_id: str):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    all_scenarios = store.list_scenarios()
-    agent_scenarios = [s for s in all_scenarios if s.agent_id == agent_id and getattr(s, 'validation_status', '') != 'FAILED_GENERATION']
+    agent_scenarios = [s for s in store.list_scenarios(agent_id) if getattr(s, 'validation_status', '') != 'FAILED_GENERATION']
 
     sandbox_specs = store.list_sandbox_specs()
     sandbox_spec = next((spec for spec in sandbox_specs if spec.agent_id == agent_id), None)
@@ -65,12 +64,14 @@ class StartExecutionRequest(BaseModel):
 @router.post("/sessions/start")
 async def start_execution_session(payload: StartExecutionRequest):
     """Launches a sandboxed execution session for an agent and scenario after verifying API key credential demands."""
+    from app.core.llm.key_manager import UnifiedKeyManager
+    UnifiedKeyManager().reset_rotation()
+
     agent = store.get_agent(payload.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
-    scenarios = store.list_scenarios()
-    scenario = next((s for s in scenarios if s.id == payload.scenario_id), None)
+    scenario = store.get_scenario(payload.scenario_id) or next((s for s in store.list_scenarios(payload.agent_id) if s.id == payload.scenario_id), None)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Scenario '{payload.scenario_id}' not found")
 

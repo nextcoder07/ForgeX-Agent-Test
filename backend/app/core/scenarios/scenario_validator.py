@@ -311,6 +311,31 @@ def _hard_validate_scenario(
                 f"{sorted(valid_services)}"
             )
 
+    # Rule 12: Path argument file check
+    if is_cli and context.inputs:
+        path_names = {inp["name"] for inp in context.inputs if inp.get("type") == "path"}
+        used_args = sc.invocation.get("args", []) if isinstance(sc.invocation, dict) else []
+        for idx, arg in enumerate(used_args):
+            clean_arg = str(arg).lstrip("-").replace("-", "_")
+            if clean_arg in path_names and idx + 1 < len(used_args):
+                path_val = str(used_args[idx + 1])
+                if path_val and not any(special in path_val for special in ("#", "{", " ", "NaN", "None")):
+                    artifact_paths = {art.path if hasattr(art, "path") else (art.get("path") if isinstance(art, dict) else str(art)) for art in sc.input_artifacts}
+                    if path_val not in artifact_paths:
+                        violations.append(
+                            f"RULE12_MISSING_INPUT_ARTIFACT: path argument '{path_val}' for parameter '{clean_arg}' "
+                            f"does not have a corresponding file defined in input_artifacts."
+                        )
+
+    # Rule 13: Assertions target verification
+    for assertion in sc.assertions:
+        if not context.tools and assertion.assertion_type in ("TOOL_CALLED_WITH", "TOOL_NOT_CALLED"):
+            if assertion.target not in context.workflow_nodes and assertion.target not in context.framework_tools:
+                violations.append(
+                    f"RULE13_INVALID_ASSERTION_TARGET: target '{assertion.target}' for {assertion.assertion_type} "
+                    f"does not exist in workflow nodes {sorted(context.workflow_nodes)}."
+                )
+
     # Rule 9: Duplicate invocation within same category
     cat_val = sc.category.value if isinstance(sc.category, ScenarioCategory) else str(sc.category)
     sig = (cat_val, str(sorted(sc.invocation.get("args", []) if isinstance(sc.invocation, dict) else [])))

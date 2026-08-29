@@ -155,68 +155,39 @@ class SyncedDict:
                 pass
         return False
 
-    def values(self) -> List[Any]:
-        # Fast path: Return cached items in memory
-        if self._local_data:
-            return list(self._local_data.values())
-
-        # Cold fallback: fetch and warm cache
-        if self._sb:
+    def _ensure_loaded(self):
+        if not getattr(self, "_is_fully_loaded", False) and self._sb:
             try:
                 res = self._sb.table(self.table_name).select("*").execute()
                 if res.data:
                     for r in res.data:
                         try:
                             k = r.get(self.key_col) or r.get("id")
-                            if k:
+                            if k and k not in self._local_data:
                                 self._local_data[k] = self.deserialize_fn(r)
                         except Exception:
                             pass
-                    return list(self._local_data.values())
+                self._is_fully_loaded = True
             except Exception as e:
-                logger.debug(f"Supabase error listing values from {self.table_name}: {e}")
+                logger.debug(f"Supabase warm error for {self.table_name}: {e}")
+
+    def values(self) -> List[Any]:
+        self._ensure_loaded()
         return list(self._local_data.values())
 
     def keys(self) -> List[str]:
-        # Fast path: return memory keys (<0.01ms)
-        if self._local_data:
-            return list(self._local_data.keys())
-        if self._sb:
-            try:
-                res = self._sb.table(self.table_name).select(self.key_col).execute()
-                if res.data:
-                    return [str(row[self.key_col]) for row in res.data if self.key_col in row]
-            except Exception as e:
-                logger.debug(f"Supabase error listing keys from {self.table_name}: {e}")
+        self._ensure_loaded()
         return list(self._local_data.keys())
 
     def items(self) -> List[tuple[str, Any]]:
-        # Fast path: return memory items (<0.01ms)
-        if self._local_data:
-            return list(self._local_data.items())
-        if self._sb:
-            try:
-                res = self._sb.table(self.table_name).select("*").execute()
-                if res.data:
-                    for row in res.data:
-                        k = str(row.get(self.key_col) or row.get("id"))
-                        self._local_data[k] = self.deserialize_fn(row)
-                    return list(self._local_data.items())
-            except Exception as e:
-                logger.debug(f"Supabase error listing items from {self.table_name}: {e}")
+        self._ensure_loaded()
         return list(self._local_data.items())
 
     def __iter__(self):
         return iter(self.keys())
 
     def __len__(self) -> int:
-        if self._sb:
-            try:
-                res = self._sb.table(self.table_name).select(self.key_col, count="exact").execute()
-                if res.count is not None:
-                    return res.count
-            except Exception:
-                pass
+        self._ensure_loaded()
         return len(self._local_data)
         return len(self._local_data)
 
