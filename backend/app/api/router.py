@@ -5,6 +5,7 @@ Central API Router Aggregator.
 from __future__ import annotations
 
 from fastapi import APIRouter
+from app.api.auth import router as auth_router
 from app.api.agents import router as agents_router
 from app.api.intake import router as intake_router
 from app.api.capabilities import router as capabilities_router
@@ -30,6 +31,7 @@ from app.core.meta_eval.router import router as platform_ai_router
 from app.api.admin_telemetry import router as admin_telemetry_router
 
 api_router = APIRouter(prefix="/api")
+api_router.include_router(auth_router)
 api_router.include_router(agents_router)
 api_router.include_router(intake_router)
 api_router.include_router(capabilities_router)

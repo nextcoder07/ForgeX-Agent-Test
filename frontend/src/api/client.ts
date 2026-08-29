@@ -7,10 +7,30 @@ export const API_BASE_URL = configuredApiUrl
   ? (configuredApiUrl.endsWith('/api') ? configuredApiUrl : `${configuredApiUrl}/api`)
   : '/api';
 
-// Intercept native fetch in browser to automatically inject active Firebase user token and X-User-ID headers
+// Intercept native fetch in browser to automatically inject active Firebase user token and X-User-ID headers ONLY for ForgeX backend requests
 if (typeof window !== 'undefined' && window.fetch) {
   const originalFetch = window.fetch;
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    let urlStr = '';
+    if (typeof input === 'string') {
+      urlStr = input;
+    } else if (input instanceof URL) {
+      urlStr = input.toString();
+    } else if (input && typeof (input as any).url === 'string') {
+      urlStr = (input as any).url;
+    }
+
+    // Only inject custom ForgeX headers for backend API requests to avoid CORS preflight rejection by Firebase/Google
+    const isBackendCall = 
+      urlStr.startsWith('/api') || 
+      (API_BASE_URL && urlStr.startsWith(API_BASE_URL)) || 
+      urlStr.includes(':8000') || 
+      urlStr.startsWith(window.location.origin + '/api');
+
+    if (!isBackendCall) {
+      return originalFetch(input, init);
+    }
+
     const token = localStorage.getItem('forgex_active_user_token');
     const userJson = localStorage.getItem('forgex_active_user_session');
     let uid = 'anonymous';
@@ -26,6 +46,11 @@ if (typeof window !== 'undefined' && window.fetch) {
     }
     if (uid && !headers.has('X-User-ID')) {
       headers.set('X-User-ID', uid);
+    }
+
+    const activeWsId = localStorage.getItem('forgex_active_workspace_id');
+    if (activeWsId && !headers.has('X-Workspace-ID')) {
+      headers.set('X-Workspace-ID', activeWsId);
     }
 
     return originalFetch(input, {

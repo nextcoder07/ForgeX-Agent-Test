@@ -6,10 +6,7 @@ import {
   Lock,
   Mail,
   ArrowRight,
-  AlertCircle,
-  CheckCircle2,
-  Sparkles,
-  ShieldCheck
+  AlertCircle
 } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
@@ -62,11 +59,6 @@ export const LoginPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleDemoFill = () => {
-    setEmail('developer@forgex.ai');
-    setPassword('ForgeX@Reliability2026');
   };
 
   return (
@@ -181,20 +173,6 @@ export const LoginPage: React.FC = () => {
             </svg>
             <span>Continue with Google</span>
           </button>
-
-          {/* Quick Sandbox Demo Fill */}
-          <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
-            <span className="flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Demo Sandbox Mode
-            </span>
-            <button
-              type="button"
-              onClick={handleDemoFill}
-              className="text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer underline decoration-cyan-500/40"
-            >
-              Fill Sample Credentials
-            </button>
-          </div>
         </div>
       </div>
     </div>

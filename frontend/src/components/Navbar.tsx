@@ -31,9 +31,10 @@ export type PageId =
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [sentNotice, setSentNotice] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, sendVerificationEmail, reloadUser } = useAuth();
 
   // Determine active page from current pathname
   const currentPath = location.pathname.split('/')[1] || 'dashboard';
@@ -64,8 +65,39 @@ export const Navbar: React.FC = () => {
     navigate('/login');
   };
 
+  const handleResend = async () => {
+    await sendVerificationEmail();
+    setSentNotice(true);
+    setTimeout(() => setSentNotice(false), 5000);
+  };
+
   return (
     <header className="sticky top-0 z-50 border-b border-slate-800 bg-[#030712]/98 backdrop-blur-2xl">
+      {user && user.emailVerified === false && (
+        <div className="bg-gradient-to-r from-amber-500/15 via-indigo-500/15 to-cyan-500/15 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-200 flex items-center justify-between">
+          <span className="flex items-center gap-1.5 font-medium">
+            <span>✉️</span> Please check your inbox and verify your email (<strong className="font-mono text-white">{user.email}</strong>).
+          </span>
+          <div className="flex items-center gap-2">
+            {sentNotice ? (
+              <span className="text-emerald-300 font-semibold">Link sent!</span>
+            ) : (
+              <button
+                onClick={handleResend}
+                className="underline hover:text-white font-semibold cursor-pointer"
+              >
+                Resend Link
+              </button>
+            )}
+            <button
+              onClick={() => reloadUser()}
+              className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-200 text-[10px] cursor-pointer"
+            >
+              I've Verified
+            </button>
+          </div>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
           {/* Logo */}
@@ -123,9 +155,13 @@ export const Navbar: React.FC = () => {
                   onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
                   className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 transition-all cursor-pointer"
                 >
-                  <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-500 flex items-center justify-center text-[10px] font-bold text-slate-950 font-mono">
-                    {user.displayName ? user.displayName.charAt(0).toUpperCase() : (user.email ? user.email.charAt(0).toUpperCase() : 'U')}
-                  </div>
+                  {user.photoURL ? (
+                    <img src={user.photoURL} alt="Avatar" className="w-5 h-5 rounded-full object-cover border border-cyan-500/40" />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-500 flex items-center justify-center text-[10px] font-bold text-slate-950 font-mono">
+                      {user.displayName ? user.displayName.charAt(0).toUpperCase() : (user.email ? user.email.charAt(0).toUpperCase() : 'U')}
+                    </div>
+                  )}
                   <span className="hidden sm:inline max-w-[120px] truncate text-[11px] font-medium text-slate-300">
                     {user.displayName || user.email?.split('@')[0]}
                   </span>

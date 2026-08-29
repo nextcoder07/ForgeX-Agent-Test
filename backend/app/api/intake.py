@@ -9,8 +9,9 @@ import uuid
 import datetime as dt
 from typing import Dict, List
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from app.core.auth import get_current_user, UserRecord
 from app.models.intake import (
     AgentIntakePayload,
     AgentUnderstandingResult,
@@ -331,7 +332,10 @@ async def analyze_agent(payload: AgentIntakePayload):
 
 
 @router.post("/register-spec", response_model=AgentRecord)
-async def register_normalized_spec(payload: RegisterSpecRequest):
+async def register_normalized_spec(
+    payload: RegisterSpecRequest,
+    current_user: UserRecord = Depends(get_current_user)
+):
     """Converts confirmed Normalized Spec into active agent record."""
     spec = payload.normalized_spec
     registered_name = spec.identity.get("name", "Custom Discovered Agent")
@@ -364,6 +368,9 @@ async def register_normalized_spec(payload: RegisterSpecRequest):
         runtime_manifest=spec.runtime_manifest,
         execution_status=spec.execution_status,
         input_type=payload.artifact.input_type if payload.artifact else "package",
+        user_id=current_user.user_id,
+        owner_id=current_user.user_id,
+        workspace_id=current_user.active_workspace_id,
         created_at=_now()
     )
     agent_status = "SUCCESS"

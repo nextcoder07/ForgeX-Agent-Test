@@ -10,12 +10,70 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =============================================================================
+-- 0. IDENTITY, MULTI-TENANCY & WORKSPACE ACCESS CONTROL
+-- =============================================================================
+
+-- 1. profiles — authenticated users synchronized with Firebase Auth UID
+CREATE TABLE IF NOT EXISTS profiles (
+    id                 TEXT PRIMARY KEY,  -- Firebase UID
+    email              TEXT NOT NULL,
+    display_name       TEXT,
+    avatar_url         TEXT,
+    status             TEXT NOT NULL DEFAULT 'ACTIVE', -- PENDING_EMAIL_VERIFICATION, ACTIVE, SUSPENDED, DELETED
+    email_verified_at  TIMESTAMPTZ,
+    is_platform_admin  BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 2. workspaces — tenant isolation boundary
+CREATE TABLE IF NOT EXISTS workspaces (
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    slug               TEXT UNIQUE NOT NULL,
+    owner_id           TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    tier               TEXT NOT NULL DEFAULT 'free',
+    settings           JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 3. workspace_members — RBAC mapping (OWNER, ADMIN, DEVELOPER, VIEWER)
+CREATE TABLE IF NOT EXISTS workspace_members (
+    id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id            TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    role               TEXT NOT NULL DEFAULT 'DEVELOPER',
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(workspace_id, user_id)
+);
+
+-- 4. audit_logs — security and operational audit trail
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id            TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+    action             TEXT NOT NULL,
+    resource_type      TEXT NOT NULL,
+    resource_id        TEXT,
+    metadata           JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_members_ws ON workspace_members(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_ws ON audit_logs(workspace_id, created_at DESC);
+
+-- =============================================================================
 -- 1. STAGE 1: AGENT INTAKE & SPECIFICATION TABLES
 -- =============================================================================
 
--- 1. agents — logical identity of an agent project
+-- 5. agents — logical identity of an agent project
 CREATE TABLE IF NOT EXISTS agents (
     id                 TEXT PRIMARY KEY,
+    workspace_id       TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+    owner_id           TEXT REFERENCES profiles(id) ON DELETE SET NULL,
     name               TEXT NOT NULL,
     description        TEXT,
     status             TEXT NOT NULL DEFAULT 'active',

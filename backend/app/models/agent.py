@@ -95,4 +95,6 @@ class AgentRecord(BaseModel):
     execution_status: str = "EXECUTION_BLOCKED"
     input_type: str = "package"
     user_id: Optional[str] = "default_user"
+    owner_id: Optional[str] = None
+    workspace_id: Optional[str] = None
     created_at: str = Field(default_factory=_now)

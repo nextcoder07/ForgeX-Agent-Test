@@ -5,6 +5,7 @@ import { Navbar } from './components/Navbar';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { DashboardPage } from './pages/DashboardPage';
 import { AgentsPage } from './pages/AgentsPage';
@@ -37,8 +38,9 @@ function AppContent() {
           {/* Public Landing & Authentication */}
           <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <HomePage />} />
           <Route path="/home" element={<HomePage />} />
-          <Route path="/login" element={user ? <Navigate to="/agents" replace /> : <LoginPage />} />
-          <Route path="/signup" element={user ? <Navigate to="/agents" replace /> : <SignupPage />} />
+          <Route path="/login" element={user?.emailVerified ? <Navigate to="/agents" replace /> : <LoginPage />} />
+          <Route path="/signup" element={user?.emailVerified ? <Navigate to="/agents" replace /> : <SignupPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           {/* Protected Workspace Routes */}
           <Route
