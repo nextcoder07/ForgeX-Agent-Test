@@ -483,10 +483,28 @@ def evaluate_trace_suite(
             )
 
         try:
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            v = new_loop.run_until_complete(evaluate_trace(agent, sc, t, llm))
-            new_loop.close()
+            import threading
+            from queue import Queue
+            q = Queue()
+            
+            def worker():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    res = loop.run_until_complete(evaluate_trace(agent, sc, t, llm))
+                    loop.close()
+                    q.put((True, res))
+                except Exception as e:
+                    q.put((False, e))
+            
+            thr = threading.Thread(target=worker)
+            thr.start()
+            thr.join()
+            
+            success, v = q.get()
+            if not success:
+                raise v
+            
             verdicts.append(v)
         except Exception as eval_exc:
             logger.warning(

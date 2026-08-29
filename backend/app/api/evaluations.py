@@ -118,12 +118,30 @@ def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List
                     rationale="Evaluated during batch execution"
                 )
 
-            # Evaluate single trace with dedicated event loop
+            # Evaluate single trace with dedicated event loop in a safe thread to prevent loop conflicts
             try:
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                v = new_loop.run_until_complete(evaluate_trace(agent, sc, tr, llm))
-                new_loop.close()
+                import threading
+                from queue import Queue
+                q = Queue()
+                
+                def worker():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        res = loop.run_until_complete(evaluate_trace(agent, sc, tr, llm))
+                        loop.close()
+                        q.put((True, res))
+                    except Exception as e:
+                        q.put((False, e))
+                
+                t = threading.Thread(target=worker)
+                t.start()
+                t.join()
+                
+                success, v = q.get()
+                if not success:
+                    raise v
+                
                 verdicts.append(v)
                 logger.debug("[EVAL TRACE] job_id=%s verdict=%d/%d passed=%s findings=%d",
                              job_id, idx + 1, len(traces), v.passed, len(v.findings))
