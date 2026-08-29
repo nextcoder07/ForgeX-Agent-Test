@@ -56,8 +56,21 @@ def deduplicate_scenarios(scenarios: List[Scenario], threshold: float = 0.88) ->
         if key not in seen_fingerprints:
             seen_fingerprints.add(key)
             unique_scenarios.append(sc)
-    return unique_scenarios
-
+def _compute_risk_level(category: ScenarioCategory, raw_risk: Optional[str] = None) -> str:
+    """Computes realistic operational risk distribution based on target impact and category."""
+    if raw_risk and str(raw_risk).lower() in ("low", "medium", "high", "critical"):
+        return str(raw_risk).lower()
+    if category == ScenarioCategory.NORMAL:
+        return "low"
+    elif category == ScenarioCategory.EDGE:
+        return "low"
+    elif category in (ScenarioCategory.RECOVERY, ScenarioCategory.STRESS):
+        return "medium"
+    elif category in (ScenarioCategory.ADVERSARIAL, ScenarioCategory.CHAOS):
+        return "high"
+    elif category in (ScenarioCategory.SECURITY, ScenarioCategory.SAFETY):
+        return "critical"
+    return "medium"
 
 
 async def generate_scenarios_for_agent(
@@ -353,14 +366,31 @@ def generate_scenarios_deterministically(agent: AgentRecord, plan: ScenarioPlan)
 
     manifest = agent.runtime_manifest or {}
     entrypoint = manifest.get("entrypoint", "agent.py")
-    is_cli = entrypoint.endswith(".py") and not agent.tools
+    is_cli = (manifest.get("detected_interface") == "CLI" or manifest.get("interface_type") == "CLI") or (entrypoint.endswith(".py") and not agent.tools)
+
+    # Check for specific arguments in manifest or code
+    args_info = manifest.get("interface", {}).get("arguments", []) if isinstance(manifest.get("interface"), dict) else []
+    all_flags = [f for a in args_info for f in a.get("flags", [])]
+    is_pdf_qa = any("pdf" in f.lower() for f in all_flags) or "pdf" in agent.name.lower() or "pdf" in agent.description.lower()
 
     valid_vals = {}
     edge_vals = {}
     invalid_vals = {}
     stress_vals = {}
+    default_input_artifacts = []
 
-    if bp_inputs:
+    if is_pdf_qa:
+        valid_vals = {"--pdf": "sample.pdf", "--question": "What architecture is proposed in the document?"}
+        edge_vals = {"--pdf": "empty.pdf", "--question": "What is the summary?"}
+        invalid_vals = {"--pdf": "corrupted.pdf", "--question": "Extract key findings"}
+        stress_vals = {"--pdf": "large_corpus.pdf", "--question": "Provide a comprehensive cross-section analysis"}
+        default_input_artifacts = [
+            {"path": "sample.pdf", "content": "%PDF-1.4 Mock Document discussing Transformer attention mechanisms."},
+            {"path": "empty.pdf", "content": "%PDF-1.4"},
+            {"path": "corrupted.pdf", "content": "NOT_A_VALID_PDF_HEADER_MALFORMED_BYTES"},
+            {"path": "large_corpus.pdf", "content": "%PDF-1.4 Extended corpus content with multiple sections."}
+        ]
+    elif bp_inputs:
         for inp in bp_inputs:
             name = inp.get("name", "")
             itype = inp.get("type", "string")
@@ -561,7 +591,7 @@ def generate_scenarios_deterministically(agent: AgentRecord, plan: ScenarioPlan)
             rationale=f"Validates {category.value} resilience for {agent.name} deterministically.",
             interface_type="CLI" if is_cli else "HTTP",
             invocation=invocation,
-            input_artifacts=[],
+            input_artifacts=default_input_artifacts,
             input_values=inputs,
             initial_state={},
             context_preconditions={},
@@ -574,7 +604,7 @@ def generate_scenarios_deterministically(agent: AgentRecord, plan: ScenarioPlan)
             expected_behavior={"summary": f"Graceful {category.value} output complying with safety rules and invariants"},
             expected_subsystem_transitions=[],
             failure_conditions=[f"Failure to handle {category.value} scenario: {purpose}"],
-            risk_level="high" if category in [ScenarioCategory.SECURITY, ScenarioCategory.SAFETY, ScenarioCategory.ADVERSARIAL] else "medium",
+            risk_level=_compute_risk_level(category),
             assertions=assertions,
             provenance={
                 "generated_by": "deterministic_builder",

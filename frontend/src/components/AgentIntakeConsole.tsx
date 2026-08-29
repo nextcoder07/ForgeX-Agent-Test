@@ -84,6 +84,8 @@ export const AgentIntakeConsole: React.FC<AgentIntakeConsoleProps> = ({ onAnalys
 
   const handleSelectLocalAgent = async (agentId: string) => {
     setSelectedLocalAgent(agentId);
+    setPastedCode('');
+    setPastedPrompt('');
     if (!agentId) {
       setFilesPayload({});
       setAgentMetadata({});
@@ -92,7 +94,7 @@ export const AgentIntakeConsole: React.FC<AgentIntakeConsoleProps> = ({ onAnalys
     try {
       const data = await fetchDemoAgentFiles(agentId);
       if (data.files) {
-        setFilesPayload(data.files);
+        setFilesPayload(data.files); // Clean replacement, no stale file merging
       }
       if (data.metadata) {
         setAgentMetadata(data.metadata);
@@ -106,7 +108,11 @@ export const AgentIntakeConsole: React.FC<AgentIntakeConsoleProps> = ({ onAnalys
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files) return;
+    if (!files || files.length === 0) return;
+
+    setSelectedLocalAgent('');
+    setPastedCode('');
+    setPastedPrompt('');
 
     const selectedFiles = Array.from(files);
     const hasZip = selectedFiles.some((file) => file.name.toLowerCase().endsWith('.zip'));
@@ -121,25 +127,46 @@ export const AgentIntakeConsole: React.FC<AgentIntakeConsoleProps> = ({ onAnalys
       }
       return { [file.webkitRelativePath || file.name]: await file.text() };
     })).then((fileGroups) => {
-      setFilesPayload(Object.assign({}, filesPayload, ...fileGroups));
+      // Clean isolated file replacement - never merge with previous agent's files
+      const newFiles = Object.assign({}, ...fileGroups);
+      setFilesPayload(newFiles);
+      setAgentMetadata({});
     }).catch((error) => console.error('Unable to read uploaded files', error));
   };
 
   const handleAnalyze = async () => {
     setLoading(true);
     try {
+      let finalFiles: Record<string, string> = {};
+      let finalCode: string | undefined = undefined;
+      let finalPrompt: string | undefined = undefined;
+      let finalEndpoint: string | undefined = undefined;
+      let finalInputType = inputType;
+
+      if (activeTab === 'files') {
+        finalFiles = { ...filesPayload };
+      } else if (activeTab === 'code') {
+        finalFiles = { 'agent.py': pastedCode };
+        finalCode = pastedCode;
+        finalInputType = 'pasted_code';
+      } else if (activeTab === 'prompt') {
+        finalFiles = { 'system_prompt.txt': pastedPrompt };
+        finalPrompt = pastedPrompt;
+        finalInputType = 'pasted_prompt';
+      } else if (activeTab === 'endpoint') {
+        finalEndpoint = endpointUrl;
+        finalInputType = 'endpoint';
+      }
+
       const result = await analyzeAgentIntake({
-        files: filesPayload,
-        input_type: inputType,
-        pasted_code: pastedCode || undefined,
-        pasted_prompt: pastedPrompt || undefined,
-        endpoint_url: endpointUrl || undefined,
+        files: finalFiles,
+        input_type: finalInputType,
+        pasted_code: finalCode,
+        pasted_prompt: finalPrompt,
+        endpoint_url: finalEndpoint,
         agent_name_hint: agentMetadata.title || selectedLocalAgent || 'Discovered Agent',
       });
-      const sourceFiles = { ...filesPayload };
-      if (pastedCode) sourceFiles['pasted_source.py'] = pastedCode;
-      if (pastedPrompt) sourceFiles['system_prompt.txt'] = pastedPrompt;
-      onAnalysisComplete(result, sourceFiles, endpointUrl || undefined, inputType);
+      onAnalysisComplete(result, finalFiles, finalEndpoint, finalInputType);
     } catch (e) {
       console.error(e);
     } finally {

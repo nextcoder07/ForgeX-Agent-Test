@@ -602,9 +602,31 @@ async def process_agent_intake(
                 nodes.append(GraphNode(id=tid, label=f"{tool.name}()", type="tool", risk=str(tool.risk), details=tool.description or ""))
                 edges.append(GraphEdge(source=main_agent_id, target=tid, label="invokes"))
 
+    # 7. Authoritative Hard Intake Gate Validation & Secret Scrubbing
+    from app.core.intake.intake_validator import IntakeValidator
+    validation_gate = IntakeValidator.validate_and_remediate(
+        spec=norm_spec,
+        source_files=analysis_files,
+        agent_name_hint=payload.agent_name_hint or ""
+    )
+    norm_spec = validation_gate.remediated_spec
+
+    # Synchronize purged tools with canonical subsystems
+    if validation_gate.purged_tools:
+        canonical_subsystems.tools = [t for t in canonical_subsystems.tools if t.name not in validation_gate.purged_tools]
+        nodes = [n for n in nodes if not any(f"node-tool-{pt}" == n.id for pt in validation_gate.purged_tools)]
+        edges = [e for e in edges if not any(f"node-tool-{pt}" in (e.source, e.target) for pt in validation_gate.purged_tools)]
+
     t4_dur = (time.time() - t4_start) * 1000.0
     if tracker:
         tracker.complete_stage(4, duration_ms=round(t4_dur, 2), input_tokens=0, output_tokens=0)
+
+    ambiguities = [
+        "Exact managerial authorization workflow for sensitive actions is unstated in source code.",
+        "Session isolation parameters across concurrent invocations require runtime verification."
+    ]
+    if validation_gate.validation_errors:
+        ambiguities = validation_gate.validation_errors + ambiguities
 
     return AgentUnderstandingResult(
         artifact=artifact_record,
@@ -613,11 +635,8 @@ async def process_agent_intake(
         behavior_profile=behavior_profile,
         canonical_subsystems=canonical_subsystems,
         conflicts=conflicts,
-        confidence_score=96.4 if analysis_status == "COMPLETE" else 75.0,
-        ambiguities=[
-            "Exact managerial authorization workflow for refunds above threshold is unstated in source code.",
-            "Session isolation parameters across concurrent invocations require runtime verification."
-        ],
+        confidence_score=98.0 if validation_gate.is_valid and analysis_status == "COMPLETE" else 82.0,
+        ambiguities=ambiguities,
         graph_nodes=nodes,
         graph_edges=edges,
         semantic_status=semantic_status,
