@@ -283,7 +283,12 @@ class FallbackMockEngine:
                     assertions = [
                         {"assertion_type": "PROCESS_EXIT_CODE", "target": "exit_code", "expected_value": 0, "description": "Resilient exit code"}
                     ]
-                    faults = [{"target_tool": primary_tool, "fault_type": "timeout", "occurrence": 1, "parameters": {}}]
+                    # Fault target must be a service/dependency, not a workflow function
+                    valid_fault_targets = [d.get("name") if isinstance(d, dict) else str(d) for d in (agent_spec.get("dependencies", []) or [])]
+                    valid_fault_targets += [s for s in agent_spec.get("external_services", [])]
+                    valid_fault_targets = [s for s in valid_fault_targets if s]
+                    fault_svc = valid_fault_targets[0] if valid_fault_targets else "OpenAI"
+                    faults = [{"target_tool": fault_svc, "fault_type": "timeout", "occurrence": 1, "parameters": {}}]
                 elif cat == "adversarial":
                     risk_level = "high"
                     # Indirect prompt injection: place the injection into the input artifact content

@@ -152,6 +152,7 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
 
     for sc in final_scenarios:
         sc.agent_id = agent.id
+        sc.agent_version_id = agent.current_version_id
         
         # Metrics
         if sc.scenario_quality_score:

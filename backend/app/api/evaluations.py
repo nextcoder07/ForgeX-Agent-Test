@@ -326,9 +326,18 @@ async def start_evaluation_run(payload: EvaluationRequest, background_tasks: Bac
 
     job_id = f"eval-{uuid.uuid4().hex[:8]}"
 
-    agent_scenarios = [s for s in store.list_scenarios(payload.agent_id) if getattr(s, 'validation_status', '') != 'FAILED_GENERATION']
+    agent_scenarios = [
+        s for s in store.list_scenarios(payload.agent_id)
+        if getattr(s, 'validation_status', '') == 'EXECUTABLE'
+        and getattr(s, 'critic_status', '') == 'CRITIC_APPROVED'
+        and getattr(s, 'agent_id', '') == payload.agent_id
+        and getattr(s, 'agent_version_id', None) == getattr(agent, 'current_version_id', None)
+    ]
     if not agent_scenarios:
-        raise HTTPException(status_code=400, detail=f"No executable scenarios found for agent '{agent.name}'. Please generate scenarios first.")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"No executable and critic-approved scenarios found for agent version '{getattr(agent, 'current_version_id', 'None')}'. Please generate scenarios first."
+        )
 
     scenarios = agent_scenarios[:payload.scenario_batch_size]
     

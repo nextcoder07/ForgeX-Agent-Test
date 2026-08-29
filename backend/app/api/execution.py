@@ -75,6 +75,15 @@ async def start_execution_session(payload: StartExecutionRequest):
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Scenario '{payload.scenario_id}' not found")
 
+    if (getattr(scenario, 'validation_status', '') != 'EXECUTABLE' 
+        or getattr(scenario, 'critic_status', '') != 'CRITIC_APPROVED'
+        or getattr(scenario, 'agent_id', '') != payload.agent_id
+        or getattr(scenario, 'agent_version_id', None) != getattr(agent, 'current_version_id', None)):
+        raise HTTPException(
+            status_code=400,
+            detail="Only executable and critic-approved scenarios matching the current agent version can enter the execution queue."
+        )
+
     # Gatekeeper Check 0: Sandbox Status Check
     sandbox_specs = store.list_sandbox_specs()
     sandbox_spec = next((spec for spec in sandbox_specs if spec.agent_id == agent.id), None)
