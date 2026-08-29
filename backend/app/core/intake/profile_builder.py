@@ -82,6 +82,16 @@ class ProfileBuilder:
             ([f"DATABASE_OPERATION: {c.get('class_name', 'SQL')}" for c in external_calls if "SQL" in c.get("capability", "")] or [])
         ))
 
+        normalized_security = []
+        for item in (security_surfaces or []):
+            if isinstance(item, dict):
+                norm = dict(item)
+                sev = str(norm.get("severity", "")).upper()
+                norm["severity"] = sev
+                normalized_security.append(norm)
+            else:
+                normalized_security.append(item)
+
         return AgentBehaviorProfile(
             id=profile_id,
             agent_id=agent_id,
@@ -111,7 +121,7 @@ class ProfileBuilder:
             data_transformations=transformations,
             invariants=invariants,
             failure_surfaces=failure_surfaces,
-            security_surfaces=security_surfaces or [],
+            security_surfaces=normalized_security,
             decision_surfaces=decision_surfaces or [],
             side_effects=assembled_side_effects,
             declared_behaviors=[f"Capability: {cap}" for cap in capabilities],

@@ -46,9 +46,68 @@ class BehaviorExtractor:
         has_ast_file_read = False
         has_ast_subprocess_call = False
 
+        def infer_state_field_type(field_name: str) -> str:
+            key = (field_name or "").lower()
+            if key in {"query", "prompt", "input", "topic", "message", "job_desc", "context", "text"}:
+                return "string"
+            if key in {"search_results", "results", "articles", "messages"}:
+                return "list[dict]"
+            if key in {"report", "summary", "output", "answer", "response", "content"}:
+                return "string"
+            if key in {"profile", "metadata", "payload", "state"}:
+                return "dict"
+            if key in {"fit_score", "count", "score"}:
+                return "number"
+            return "any"
+
         # 1. AST Traversal: CLI Arguments, State Models, Invariants, File Operations, LLM Calls
         for fname, tree in ast_trees.items():
             for node in ast.walk(tree):
+                if isinstance(node, ast.Subscript):
+                    if isinstance(node.value, ast.Name) and node.value.id == "state":
+                        if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+                            key = node.slice.value
+                            state_model.setdefault(key, infer_state_field_type(key))
+                            if key.lower() in {"query", "search_results", "report"}:
+                                inputs.append({"name": key, "type": state_model[key], "source": "state_model." + key}) if key not in {i.get("name") for i in inputs} else None
+                                outputs.append({"name": key, "type": state_model[key], "source": "state_model." + key}) if key not in {o.get("name") for o in outputs} else None
+
+                elif isinstance(node, ast.Assign):
+                    target_names = []
+                    if node.targets and isinstance(node.targets[0], ast.Name):
+                        target_names.append(node.targets[0].id)
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            target_names.append(target.id)
+                    for target_name in target_names:
+                        if target_name in {"query", "search_results", "report", "summary", "output", "answer", "response"}:
+                            state_model.setdefault(target_name, infer_state_field_type(target_name))
+                            if target_name in {"query", "search_results", "report"}:
+                                inputs.append({"name": target_name, "type": state_model[target_name], "source": "state_model." + target_name}) if target_name not in {i.get("name") for i in inputs} else None
+                            if target_name in {"report", "summary", "output", "answer", "response"}:
+                                outputs.append({"name": target_name, "type": state_model[target_name], "source": "state_model." + target_name}) if target_name not in {o.get("name") for o in outputs} else None
+                    if isinstance(node.value, ast.Subscript) and isinstance(node.value.value, ast.Name) and node.value.value.id == "state":
+                        if isinstance(node.value.slice, ast.Constant) and isinstance(node.value.slice.value, str):
+                            key = node.value.slice.value
+                            state_model.setdefault(key, infer_state_field_type(key))
+                            if key.lower() in {"query", "search_results", "report"}:
+                                inputs.append({"name": key, "type": state_model[key], "source": "state_model." + key}) if key not in {i.get("name") for i in inputs} else None
+
+                    if isinstance(node.value, ast.Dict):
+                        for k in node.value.keys:
+                            if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                                state_model.setdefault(k.value, infer_state_field_type(k.value))
+
+                elif isinstance(node, ast.Return):
+                    if isinstance(node.value, ast.Dict):
+                        for k in node.value.keys:
+                            if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                                state_model.setdefault(k.value, infer_state_field_type(k.value))
+                                if k.value.lower() in {"report", "summary", "output", "result", "response"}:
+                                    outputs.append({"name": k.value, "type": state_model[k.value], "source": "return_dict"}) if k.value not in {o.get("name") for o in outputs} else None
+                    elif isinstance(node.value, ast.Name) and node.value.id in {"report", "summary", "output", "result", "response"}:
+                        state_model.setdefault(node.value.id, infer_state_field_type(node.value.id))
+                        outputs.append({"name": node.value.id, "type": state_model[node.value.id], "source": "return_name"}) if node.value.id not in {o.get("name") for o in outputs} else None
                 # State Models (TypedDict / BaseModel)
                 if isinstance(node, ast.ClassDef):
                     is_state_class = any(
@@ -60,11 +119,10 @@ class BehaviorExtractor:
                         for item in node.body:
                             if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                                 fields.append(item.target.id)
-                        state_model = {
-                            "class_name": node.name,
-                            "type": "TypedDict" if any(getattr(b, "id", "") == "TypedDict" for b in node.bases if isinstance(b, ast.Name)) else "BaseModel",
-                            "fields": fields
-                        }
+                        state_model.setdefault("class_name", node.name)
+                        state_model.setdefault("type", "TypedDict" if any(getattr(b, "id", "") == "TypedDict" for b in node.bases if isinstance(b, ast.Name)) else "BaseModel")
+                        for field in fields:
+                            state_model.setdefault(field, infer_state_field_type(field))
                         for in_cand in ["query", "input", "prompt", "messages", "resume", "pdf", "file"]:
                             if in_cand in fields and not any(inp["name"] == in_cand for inp in inputs):
                                 inputs.append({"name": in_cand, "type": "path" if "file" in in_cand or "pdf" in in_cand else "string", "source": f"state_model.{in_cand}"})

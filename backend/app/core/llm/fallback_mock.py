@@ -205,16 +205,25 @@ class FallbackMockEngine:
         is_cli = agent_spec.get("interface_type") == "CLI" or agent_spec.get("agent_spec", {}).get("interface_type") == "CLI"
         entrypoint = agent_spec.get("entrypoint", agent_spec.get("agent_spec", {}).get("entrypoint", "agent.py"))
 
-        categories = strategy_plan.get("category_distribution", [
-            {"category": "normal", "target_count": 2, "focus_risk": "Basic Goal Fulfillment", "rationale": "Happy path test."},
-            {"category": "edge", "target_count": 2, "focus_risk": "Boundary condition test", "rationale": "Edge case test."},
-            {"category": "recovery", "target_count": 2, "focus_risk": "Fault injection recovery", "rationale": "Recovery test."},
-            {"category": "adversarial", "target_count": 2, "focus_risk": "Social engineering", "rationale": "Adversarial test."},
-            {"category": "safety", "target_count": 2, "focus_risk": "Policy compliance", "rationale": "Safety test."},
-            {"category": "security", "target_count": 2, "focus_risk": "Prompt injection resistance", "rationale": "Security test."},
-            {"category": "stress", "target_count": 1, "focus_risk": "Multi-turn context", "rationale": "Stress test."},
-            {"category": "chaos", "target_count": 1, "focus_risk": "Malformed data injection", "rationale": "Chaos test."}
-        ])
+        plan_items = strategy_plan.get("plan_items", [])
+        if plan_items:
+            cat_counts: Dict[str, int] = {}
+            for item in plan_items:
+                cat_val = item.get("category", "normal") if isinstance(item, dict) else getattr(item, "category", "normal")
+                cat_val = str(cat_val).lower().replace("scenariocategory.", "")
+                cat_counts[cat_val] = cat_counts.get(cat_val, 0) + 1
+            categories = [{"category": c, "target_count": cnt, "focus_risk": f"{c.title()} evaluation", "rationale": f"{c.title()} test case."} for c, cnt in cat_counts.items()]
+        else:
+            categories = strategy_plan.get("category_distribution", [
+                {"category": "normal", "target_count": 2, "focus_risk": "Basic Goal Fulfillment", "rationale": "Happy path test."},
+                {"category": "edge", "target_count": 2, "focus_risk": "Boundary condition test", "rationale": "Edge case test."},
+                {"category": "recovery", "target_count": 2, "focus_risk": "Fault injection recovery", "rationale": "Recovery test."},
+                {"category": "adversarial", "target_count": 2, "focus_risk": "Social engineering", "rationale": "Adversarial test."},
+                {"category": "safety", "target_count": 2, "focus_risk": "Policy compliance", "rationale": "Safety test."},
+                {"category": "security", "target_count": 2, "focus_risk": "Prompt injection resistance", "rationale": "Security test."},
+                {"category": "stress", "target_count": 1, "focus_risk": "Multi-turn context", "rationale": "Stress test."},
+                {"category": "chaos", "target_count": 1, "focus_risk": "Malformed data injection", "rationale": "Chaos test."}
+            ])
 
         for cat_info in categories:
             cat = cat_info.get("category", "normal")

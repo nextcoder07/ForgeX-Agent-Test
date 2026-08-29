@@ -376,6 +376,79 @@ async def test_news_agent_golden_intake():
     assert "framework" in discrepancy_types
 
 
+WEB_SEARCH_AGENT_CODE = '''
+import argparse
+from langchain_core.messages import HumanMessage
+from langchain_community.tools.tavily_search import TavilySearch
+from langchain_openai import ChatOpenAI
+
+
+def search_web(state: dict) -> dict:
+    query = state["query"]
+    tool = TavilySearch()
+    results = tool.invoke(query)
+    return {"search_results": results}
+
+
+def synthesize_report(state: dict) -> str:
+    query = state["query"]
+    search_results = state["search_results"]
+    llm = ChatOpenAI(model="gpt-4o-mini")
+    message = HumanMessage(content=f"Query: {query}\\n\\nResults:\\n{search_results}")
+    report = llm.invoke([message]).content
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--query", default="latest AI news")
+    args = parser.parse_args()
+    state = {"query": args.query}
+    state.update(search_web(state))
+    print(synthesize_report(state))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+@pytest.mark.asyncio
+async def test_web_search_agent_behavior_profile_dataflow_and_security():
+    files = {
+        "agent.py": WEB_SEARCH_AGENT_CODE,
+        "requirements.txt": "langchain-community\nlangchain-core\nlangchain-openai"
+    }
+    payload = AgentIntakePayload(files=files, agent_name_hint="Web Search Agent")
+    result = await process_agent_intake(payload, MockLLM())
+
+    bp = result.behavior_profile
+    assert bp is not None
+    assert bp.state_model
+    assert "query" in bp.state_model
+    assert "search_results" in bp.state_model
+    assert "report" in bp.state_model
+
+    node_ids = {n.id for n in bp.workflow_graph.nodes}
+    assert "search_web" in node_ids
+    assert "synthesize_report" in node_ids
+
+    search_node = next(n for n in bp.workflow_graph.nodes if n.id == "search_web")
+    synth_node = next(n for n in bp.workflow_graph.nodes if n.id == "synthesize_report")
+
+    assert "query" in search_node.state_dependencies
+    assert "query" in synth_node.state_dependencies
+    assert "search_results" in synth_node.state_dependencies
+    assert "report" in synth_node.outputs
+
+    sec_surface_types = {s.get("surface_type") if isinstance(s, dict) else getattr(s, "surface_type", "") for s in result.normalized_spec.security_surfaces}
+    assert "EXTERNAL_CONTENT_INJECTION" in sec_surface_types
+    assert any((s.get("severity") if isinstance(s, dict) else getattr(s, "severity", "")) == "HIGH" for s in result.normalized_spec.security_surfaces if isinstance(s, dict))
+
+    assert any(call.get("capability") == "WEB_SEARCH" for call in bp.external_calls)
+    assert any(call.get("capability") == "LLM_INFERENCE" for call in bp.external_calls)
+
+
 EMAIL_AGENT_CODE = """\"\"\"
 Email Drafting Agent using CrewAI.
 

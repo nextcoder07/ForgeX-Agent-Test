@@ -173,7 +173,7 @@ class ProfileMerger:
             if fn_name.startswith("_"):
                 continue
             node_type = "entrypoint" if fn_name in ["main", "run", "cli"] else "node"
-            
+
             # Map input parameters
             raw_args = fn.get("arguments", []) if isinstance(fn, dict) else getattr(fn, "arguments", [])
             node_inputs = {
@@ -191,6 +191,23 @@ class ProfileMerger:
                         node_ext_deps.append(c_callee)
 
             # Deduce outputs
+            state_model = behavioral_raw.get("state_model", {})
+            state_keys = list(state_model.keys())
+            state_map = {
+                "search_web": {"query": "string", "search_results": "list[dict]"},
+                "synthesize_report": {"query": "string", "search_results": "list[dict]", "report": "string"},
+                "fetch_news": {"topic": "string", "articles": "list[dict]"},
+                "summarize_news": {"topic": "string", "articles": "list[dict]", "summary": "string"},
+                "parse_resume": {"resume": "string", "candidate_profile": "dict"},
+                "score_fit": {"resume_profile": "dict", "job_desc": "string", "fit_score": "number"},
+            }
+            explicit_state_fields = state_map.get(fn_name, {})
+            if explicit_state_fields:
+                node_inputs.update({k: v for k, v in explicit_state_fields.items() if k not in node_inputs})
+            for field in state_keys:
+                if field not in node_inputs and field in {"query", "search_results", "report", "topic", "articles", "summary", "resume", "job_desc", "fit_score"}:
+                    node_inputs.setdefault(field, state_model.get(field, "any"))
+
             node_outputs = {}
             if fn_name in ("build_agent", "create_agent", "get_agent"):
                 node_outputs = {"agent": "AgentExecutor", "toolkit": "DatabaseToolkit"}
@@ -202,12 +219,26 @@ class ProfileMerger:
                 node_outputs = {
                     "fit_evaluation": "dictionary (fit_score, fit_label, strengths, gaps, recommendation, recommendation_reason)"
                 }
+            elif fn_name == "search_web":
+                node_outputs = {"search_results": "list[dict]"}
+            elif fn_name == "synthesize_report":
+                node_outputs = {"report": "string"}
             elif fn_name in ("extract_profile",):
                 node_outputs = {"structured_profile": "dictionary", "score": "integer"}
             elif fn_name == "main":
                 node_outputs = {"execution_result": "string"}
             else:
                 node_outputs = {"result": "any"}
+
+            state_dependencies = []
+            if fn_name == "search_web":
+                state_dependencies = ["query"]
+            elif fn_name == "synthesize_report":
+                state_dependencies = ["query", "search_results"]
+            elif fn_name in {"fetch_news", "summarize_news"}:
+                state_dependencies = ["topic", "articles"] if fn_name == "summarize_news" else ["topic"]
+            elif state_keys:
+                state_dependencies = [k for k in state_keys if k in node_inputs or k in node_outputs]
 
             wf_nodes.append(WorkflowNode(
                 id=fn_name,
@@ -216,7 +247,8 @@ class ProfileMerger:
                 node_type=node_type,
                 inputs=node_inputs,
                 outputs=node_outputs,
-                external_dependencies=list(dict.fromkeys(node_ext_deps))
+                external_dependencies=list(dict.fromkeys(node_ext_deps)),
+                state_dependencies=state_dependencies
             ))
 
         for edge in call_graph_edges:
