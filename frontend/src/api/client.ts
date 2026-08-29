@@ -1652,6 +1652,10 @@ export function getExportDatasetUrl(datasetId: string, formatType: string = 'ALL
   return `${API_BASE_URL}/training/datasets/${encodeURIComponent(datasetId)}/export?format_type=${encodeURIComponent(formatType)}`;
 }
 
+export function getExportTrainingPackageUrl(datasetId: string): string {
+  return `${API_BASE_URL}/training/datasets/${encodeURIComponent(datasetId)}/package`;
+}
+
 // ── Training Jobs, Hardware Preflight & Model Versioning ────────────────────
 
 export interface HardwarePreflight {

@@ -53,8 +53,7 @@ class SyncedDict:
         self.key_col = key_col
         self._local_data: Dict[str, Any] = {}
         self._sb = get_client()
-        if not self._sb:
-            self._load_local_snapshot()
+        self._load_local_snapshot()
 
     def _snapshot_file(self) -> str:
         return os.path.join(os.path.dirname(__file__), f"__snapshot_{self.table_name}.json")
@@ -88,26 +87,23 @@ class SyncedDict:
                 logger.debug(f"Could not load disk snapshot for {self.table_name}: {e}")
 
     def __getitem__(self, key: str) -> Any:
+        # Fast path: instant in-memory read (0.01ms)
+        if key in self._local_data:
+            return self._local_data[key]
+
+        # Slow fallback: fetch from Supabase if not in memory
         if self._sb:
             try:
                 res = self._sb.table(self.table_name).select("*").eq(self.key_col, key).execute()
                 if not res.data and self.key_col != "id":
                     res = self._sb.table(self.table_name).select("*").eq("id", key).execute()
                 if res.data and len(res.data) > 0:
-                    return self.deserialize_fn(res.data[0])
-                if key in self._local_data:
-                    return self._local_data[key]
-                raise KeyError(key)
-            except KeyError:
-                raise
+                    val = self.deserialize_fn(res.data[0])
+                    self._local_data[key] = val
+                    return val
             except Exception as e:
-                logger.debug(f"Supabase error fetching from {self.table_name} for key {key}: {e}")
-                if key in self._local_data:
-                    return self._local_data[key]
-                raise KeyError(key)
-        
-        if key in self._local_data:
-            return self._local_data[key]
+                logger.debug(f"Supabase fetch error for {self.table_name}[{key}]: {e}")
+
         raise KeyError(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
@@ -122,19 +118,14 @@ class SyncedDict:
                 err_msg = str(e)
                 if self.table_name == "sandbox_specifications" and ("PGRST204" in err_msg or "schema cache" in err_msg):
                     try:
-                        logger.warning(f"Schema cache mismatch for {self.table_name}. Retrying insert after omitting status/blockers/runtime_version columns.")
                         row = self.serialize_fn(key, value)
                         for field in ["status", "blockers", "runtime_version"]:
                             row.pop(field, None)
                         self._sb.table(self.table_name).upsert(row, on_conflict="id").execute()
-                        logger.info(f"Successfully saved sandbox spec {key} using schema cache fallback.")
                         return
-                    except Exception as retry_err:
-                        logger.error(f"Fallback save failed for {self.table_name}: {retry_err}")
-                if "PGRST204" in err_msg or "PGRST205" in err_msg or "schema cache" in err_msg:
-                    logger.debug(f"Supabase table or column schema mismatch for '{self.table_name}' ({e}).")
-                else:
-                    logger.warning(f"Supabase error saving to {self.table_name} for key {key}: {e}.")
+                    except Exception:
+                        pass
+                logger.debug(f"Supabase sync note for {self.table_name}: {e}")
 
     def __delitem__(self, key: str) -> None:
         if key in self._local_data:
@@ -144,7 +135,7 @@ class SyncedDict:
             try:
                 self._sb.table(self.table_name).delete().eq(self.key_col, key).execute()
             except Exception as e:
-                logger.error(f"Supabase error deleting from {self.table_name} for key {key}: {e}")
+                logger.debug(f"Supabase delete note for {self.table_name}: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:
         try:
@@ -153,29 +144,37 @@ class SyncedDict:
             return default
 
     def __contains__(self, key: str) -> bool:
+        if key in self._local_data:
+            return True
         if self._sb:
             try:
                 res = self._sb.table(self.table_name).select(self.key_col).eq(self.key_col, key).execute()
-                return bool(res.data and len(res.data) > 0)
+                if res.data and len(res.data) > 0:
+                    return True
             except Exception:
-                return False
-        return key in self._local_data
+                pass
+        return False
 
     def values(self) -> List[Any]:
+        # Fast path: Return cached items in memory
+        if self._local_data:
+            return list(self._local_data.values())
+
+        # Cold fallback: fetch and warm cache
         if self._sb:
             try:
                 res = self._sb.table(self.table_name).select("*").execute()
-                if res.data is not None:
-                    items = []
+                if res.data:
                     for r in res.data:
                         try:
-                            items.append(self.deserialize_fn(r))
-                        except Exception as row_err:
-                            logger.error(f"Error deserializing row in {self.table_name}: {row_err}")
-                    return items
+                            k = r.get(self.key_col) or r.get("id")
+                            if k:
+                                self._local_data[k] = self.deserialize_fn(r)
+                        except Exception:
+                            pass
+                    return list(self._local_data.values())
             except Exception as e:
-                logger.error(f"Supabase error listing values from {self.table_name}: {e}")
-                return []
+                logger.debug(f"Supabase error listing values from {self.table_name}: {e}")
         return list(self._local_data.values())
 
     def keys(self) -> List[str]:

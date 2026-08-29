@@ -25,6 +25,7 @@ router = APIRouter(tags=["Authentication & Workspaces"])
 _in_memory_profiles: Dict[str, Dict[str, Any]] = {}
 _in_memory_workspaces: Dict[str, Dict[str, Any]] = {}
 _in_memory_members: Dict[str, List[Dict[str, Any]]] = {}
+_bootstrap_cache: Dict[str, tuple[float, Any]] = {}
 
 
 class BootstrapRequest(BaseModel):
@@ -56,8 +57,16 @@ async def bootstrap_user(
     3. Ensure OWNER membership exists for that workspace.
     4. Return profile and workspace summary.
     """
-    sb = get_client()
+    import time
     user_id = user.user_id
+
+    # Fast in-memory cache (5 min TTL) to avoid redundant Supabase network roundtrips on every page refresh
+    if user_id in _bootstrap_cache:
+        cached_ts, cached_resp = _bootstrap_cache[user_id]
+        if time.time() - cached_ts < 300:
+            return cached_resp
+
+    sb = get_client()
     email = user.email or f"{user_id}@forgex.ai"
     display_name = (body and body.display_name) or user.display_name or email.split("@")[0]
     avatar_url = body.avatar_url if body else None
@@ -156,12 +165,14 @@ async def bootstrap_user(
                 ))
 
             active_ws = workspaces_list[0]
-            return BootstrapResponse(
+            resp = BootstrapResponse(
                 user=UserProfile(**profile_data),
                 workspaces=workspaces_list,
                 active_workspace=active_ws,
                 is_new_user=is_new
             )
+            _bootstrap_cache[user_id] = (time.time(), resp)
+            return resp
         except Exception as e:
             logger.warning(f"Supabase bootstrap encountered error: {e}; using fallback store")
 
@@ -196,12 +207,14 @@ async def bootstrap_user(
         _in_memory_members[user_id] = [default_ws]
         workspaces = [WorkspaceSummary(**default_ws)]
 
-    return BootstrapResponse(
+    fallback_resp = BootstrapResponse(
         user=UserProfile(**_in_memory_profiles[user_id]),
         workspaces=workspaces,
         active_workspace=workspaces[0],
         is_new_user=is_new
     )
+    _bootstrap_cache[user_id] = (time.time(), fallback_resp)
+    return fallback_resp
 
 
 @router.get("/auth/me")

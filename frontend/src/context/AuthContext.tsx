@@ -32,12 +32,16 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const LOCAL_STORAGE_USER_KEY = 'forgex_active_user_session';
 const LOCAL_STORAGE_TOKEN_KEY = 'forgex_active_user_token';
 
-// Server-side profile & workspace bootstrap synchronizer
+// Server-side profile & workspace bootstrap synchronizer with timeout protection
 const syncProfileToBackend = async (firebaseUser: User, idToken: string) => {
   try {
     const url = `${API_BASE_URL}/auth/bootstrap`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500); // 2.5s max timeout
+
     const res = await fetch(url, {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${idToken}`,
@@ -50,6 +54,7 @@ const syncProfileToBackend = async (firebaseUser: User, idToken: string) => {
         avatar_url: firebaseUser.photoURL || undefined
       })
     });
+    clearTimeout(timer);
 
     if (res.ok) {
       const data = await res.json();
@@ -57,36 +62,43 @@ const syncProfileToBackend = async (firebaseUser: User, idToken: string) => {
         localStorage.setItem('forgex_active_workspace_id', data.active_workspace.id);
         localStorage.setItem('forgex_active_workspace', JSON.stringify(data.active_workspace));
       }
-      console.log('✅ Supabase user profile & workspace synced:', data);
-    } else {
-      const errText = await res.text();
-      console.warn('⚠️ Supabase bootstrap response:', res.status, errText);
     }
   } catch (err) {
-    console.warn('⚠️ Could not connect to ForgeX backend for profile sync:', err);
+    // Non-blocking background sync warning
+    console.debug('Background profile sync note:', err);
   }
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(() => auth.currentUser);
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY));
+  const [loading, setLoading] = useState<boolean>(!auth.currentUser && !localStorage.getItem(LOCAL_STORAGE_USER_KEY));
 
   // Synchronize Firebase Auth state
   useEffect(() => {
     let isMounted = true;
 
+    // Safety timeout: Never keep loading spinner stuck for more than 1 second
+    const fallbackTimer = setTimeout(() => {
+      if (isMounted) setLoading(false);
+    }, 1000);
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      clearTimeout(fallbackTimer);
       if (!isMounted) return;
+
       if (firebaseUser) {
-        // Enforce email verification strictly for non-OAuth password logins
         const isGoogle = firebaseUser.providerData.some(p => p.providerId === 'google.com');
         const isVerified = isGoogle || firebaseUser.emailVerified;
 
         if (isVerified) {
           try {
-            const idToken = await firebaseUser.getIdToken();
             setUser(firebaseUser);
+            setLoading(false); // Unblock UI immediately!
+
+            const idToken = await firebaseUser.getIdToken();
+            if (!isMounted) return;
+
             setToken(idToken);
             localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify({
               uid: firebaseUser.uid,
@@ -96,13 +108,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }));
             localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, idToken);
 
-            // Synchronize user profile & workspace into Supabase backend
-            await syncProfileToBackend(firebaseUser, idToken);
+            // Sync user profile & workspace into Supabase in background without blocking UI
+            syncProfileToBackend(firebaseUser, idToken);
+            return;
           } catch (err) {
             console.warn('Could not fetch Firebase ID token:', err);
           }
         } else {
-          // Unverified user is not granted active authenticated token
           setUser(firebaseUser);
           setToken(null);
           localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
@@ -113,11 +125,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
         localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
       }
-      setLoading(false);
+      if (isMounted) {
+        setLoading(false);
+      }
     });
 
     return () => {
       isMounted = false;
+      clearTimeout(fallbackTimer);
       unsubscribe();
     };
   }, []);

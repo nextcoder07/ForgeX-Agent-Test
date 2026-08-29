@@ -99,6 +99,21 @@ async def export_dataset_jsonl(dataset_id: str, format_type: str = Query("ALL", 
     )
 
 
+@router.get("/datasets/{dataset_id}/package")
+async def export_training_package_zip(dataset_id: str):
+    """Export a complete, downloadable training package with train/val/test splits, configs, and scripts."""
+    ds = store.get_training_dataset(dataset_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    zip_bytes = builder.export_training_package(ds)
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={ds.name.lower().replace(' ', '_')}_training_package.zip"}
+    )
+
+
 # ── Training Jobs & Model Lifecycle Endpoints ───────────────────────────────
 
 from app.models.model_training_job import TrainingJob, ModelVersionRecord, HardwarePreflight

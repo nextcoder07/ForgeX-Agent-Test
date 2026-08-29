@@ -18,6 +18,7 @@ import {
   listTrainingDatasets,
   generateTrainingDataset,
   getExportDatasetUrl,
+  getExportTrainingPackageUrl,
   fetchAgents,
 } from '../api/client';
 import type { TrainingDataset, AgentRecord } from '../api/client';
@@ -267,14 +268,27 @@ export const TrainingDatasetPage: React.FC = () => {
                   </div>
                   <h2 className="text-xl font-bold text-white mt-1 font-mono">{selectedDataset.name}</h2>
                   <p className="text-xs text-slate-400 mt-0.5">{selectedDataset.description}</p>
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-950/80 text-cyan-300 border border-cyan-500/30">70% Train</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950/80 text-amber-300 border border-amber-500/30">15% Validation</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-950/80 text-indigo-300 border border-indigo-500/30">15% Held-Out Benchmark</span>
+                  </div>
                 </div>
 
                 {/* Export Format Buttons */}
                 <div className="flex items-center flex-wrap gap-2">
                   <a
+                    href={getExportTrainingPackageUrl(selectedDataset.id)}
+                    download
+                    className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-slate-950 font-extrabold text-xs font-mono flex items-center space-x-1.5 shadow-md shadow-cyan-500/20 transition cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Training Package (ZIP)</span>
+                  </a>
+                  <a
                     href={getExportDatasetUrl(selectedDataset.id, 'ALL')}
                     download
-                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs font-mono flex items-center space-x-1 shadow-md shadow-emerald-500/20 transition cursor-pointer"
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-bold text-xs font-mono flex items-center space-x-1 transition cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>JSONL</span>
@@ -292,13 +306,6 @@ export const TrainingDatasetPage: React.FC = () => {
                     className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono font-bold flex items-center space-x-1 transition cursor-pointer"
                   >
                     <span>Alpaca</span>
-                  </a>
-                  <a
-                    href={`/api/datasets/export?format=csv`}
-                    download
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono font-bold flex items-center space-x-1 transition cursor-pointer"
-                  >
-                    <span>CSV</span>
                   </a>
                 </div>
               </div>
