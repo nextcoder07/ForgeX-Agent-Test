@@ -123,7 +123,7 @@ def _build_expected_outcome(category: ScenarioCategory, context: ScenarioContext
         return {
             "success": True,
             "format": fmt,
-            "expected_keys": [out.name for out in context.outputs] if context.outputs else []
+            "expected_keys": [(out.get("name") if isinstance(out, dict) else getattr(out, "name", str(out))) for out in context.outputs] if context.outputs else []
         }
     if cat == "security":
         return {
@@ -322,6 +322,14 @@ async def generate_scenarios_for_agent(
                     atype = str(a.get("assertion_type") or a.get("type"))
                     target_name = str(a.get("target", a.get("expected", "")))
                     
+                    # Auto-sanitize Rule A: Non-JSON agents cannot have STDOUT_JSON_VALID assertion
+                    if not context.produces_json and atype.upper() == "STDOUT_JSON_VALID":
+                        atype = "PROCESS_EXIT_CODE"
+                        target_name = "exit_code"
+                        exp_val = 0
+                    else:
+                        exp_val = a.get("expected_value", a.get("expected"))
+
                     # Grounding check: if tools are empty, replace nonexistent tools with workflow nodes
                     if not context.tools and target_name in ("process_task", "fetch_data", ""):
                         active_wf_nodes = [w for w in context.workflow_nodes if w != "main"]
@@ -333,7 +341,7 @@ async def generate_scenarios_for_agent(
                     assertions.append(ScenarioAssertion(
                         assertion_type=atype,
                         target=target_name,
-                        expected_value=a.get("expected_value", a.get("expected")),
+                        expected_value=exp_val,
                         description=str(a.get("description", f"Verifies {atype}"))
                     ))
 
@@ -521,6 +529,11 @@ async def generate_scenarios_for_agent(
                 req_caps = plan_item.assigned_capabilities
             elif not req_caps and context.capabilities:
                 req_caps = [context.primary_capability] if context.primary_capability else context.capabilities[:2]
+                
+            if context.capabilities and req_caps:
+                req_caps = [c for c in req_caps if c in context.capabilities]
+                if not req_caps:
+                    req_caps = [context.primary_capability] if context.primary_capability else context.capabilities[:2]
                 
             req_srv = raw.get("required_services", [])
             if plan_item and plan_item.assigned_services:

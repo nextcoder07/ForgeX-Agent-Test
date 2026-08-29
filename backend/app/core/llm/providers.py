@@ -176,7 +176,7 @@ class OllamaProvider(LLMProvider):
                     "num_ctx": 8192
                 }
             }
-            async with httpx.AsyncClient(trust_env=False, timeout=30.0) as client:
+            async with httpx.AsyncClient(trust_env=False, timeout=120.0) as client:
                 res = await client.post(
 
                     f"{self.endpoint}/api/generate",
@@ -255,8 +255,12 @@ class OllamaProvider(LLMProvider):
         )
         raw = await self.generate(system_prompt, prompt, stage="SCENARIO_GENERATION")
         res = _clean_and_parse_json(raw)
-        if isinstance(res, dict) and "scenarios" in res:
-            return res["scenarios"]
+        if isinstance(res, dict):
+            for k in ("scenarios", "test_scenarios", "scenarios_list", "items", "data", "test_cases", "results"):
+                if k in res and isinstance(res[k], list):
+                    return res[k]
+            if "title" in res or "category" in res or "user_messages" in res:
+                return [res]
         return res if isinstance(res, list) else []
 
     async def judge_trace(self, trace_json: Dict[str, Any], constraints: List[str]) -> Dict[str, Any]:
