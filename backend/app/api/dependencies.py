@@ -30,10 +30,32 @@ _USER_SYSTEM_CREDENTIALS: Dict[str, Dict[str, str]] = {}
 
 
 def _get_effective_user_credentials(user_id: Optional[str] = None) -> Dict[str, str]:
-    """Retrieves user-scoped credentials from user memory, Supabase store, and environment fallback."""
+    """Retrieves user-scoped credentials from user memory, Supabase store, agent credentials, and environment fallback."""
     import os
     uid = user_id or "default_user"
     creds: Dict[str, str] = dict(_USER_SYSTEM_CREDENTIALS.get(uid, {}))
+
+    # Hydrate from Supabase agent_credentials scoped to user
+    try:
+        ag_creds = store.list_agent_credentials(user_id=uid)
+        for ac in ag_creds:
+            cname = getattr(ac, "credential_name", "") or ""
+            raw_v = getattr(ac, "encrypted_value", "") or getattr(ac, "masked_value", "") or ""
+            if cname and raw_v and cname.upper() not in creds:
+                creds[cname.upper()] = raw_v
+    except Exception:
+        pass
+
+    # Hydrate from Supabase user_credentials
+    try:
+        u_creds = store.list_user_credentials(user_id=uid)
+        for uc in u_creds:
+            kname = getattr(uc, "key_name", "") or ""
+            raw_v = getattr(uc, "raw_value", "") or ""
+            if kname and raw_v and kname.upper() not in creds:
+                creds[kname.upper()] = raw_v
+    except Exception:
+        pass
 
     # Hydrate from Supabase model_connections scoped to user
     try:
@@ -60,19 +82,20 @@ def _get_effective_user_credentials(user_id: Optional[str] = None) -> Dict[str, 
     except Exception:
         pass
 
-    # Hydrate from Supabase dependency_bindings for agents belonging to user
-    try:
-        bindings = store.list_dependency_bindings()
-        user_agent_ids = {a.id for a in store.list_agents() if getattr(a, "owner_id", None) in (None, uid)}
-        for b in bindings:
-            agent_id = getattr(b, "agent_id", "") or (b.get("agent_id") if isinstance(b, dict) else "")
-            if agent_id in user_agent_ids:
-                dep_name = getattr(b, "dependency_name", None) or (b.get("dependency_name") if isinstance(b, dict) else None)
-                user_val = getattr(b, "user_value", None) or (b.get("user_value") if isinstance(b, dict) else None)
-                if dep_name and user_val and user_val.strip() and dep_name.upper() not in creds:
-                    creds[dep_name.upper()] = user_val.strip()
-    except Exception:
-        pass
+    # Hydrate from TEST_AI_API_KEY_1..N execution sandbox pool in .env
+    for idx in range(1, 10):
+        test_k = os.getenv(f"TEST_AI_API_KEY_{idx}", "").strip()
+        test_prov = os.getenv(f"TEST_AI_API_NAME_{idx}", "").strip().lower()
+        if test_k and test_prov:
+            std_name = f"{test_prov.upper()}_API_KEY"
+            if std_name not in creds:
+                creds[std_name] = test_k
+
+    # Hydrate from direct environment variables
+    for env_k in ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY"]:
+        val = os.getenv(env_k, "").strip()
+        if val and env_k not in creds:
+            creds[env_k] = val
 
     return creds
 

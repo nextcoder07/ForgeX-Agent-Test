@@ -61,13 +61,18 @@ def check_execution_preflight(payload: PreflightExecutionRequest):
     if not scenarios:
         raise HTTPException(status_code=404, detail="No valid scenarios found for preflight check")
 
+    from app.api.dependencies import _get_effective_user_credentials
+    effective_secrets = _get_effective_user_credentials()
+    if payload.secrets:
+        effective_secrets.update(payload.secrets)
+
     preflight_results = []
     
     # 1. Dependency Mode Check
     res_result = DependencyResolver.resolve_mode(
         agent=agent,
         requested_mode=None, # Will auto-select best mode
-        provided_secrets=payload.secrets
+        provided_secrets=effective_secrets
     )
     overall_ready = res_result.execution_dependency_binding.all_fulfilled
     missing = [s.credential_bound or s.capability for s in res_result.execution_dependency_binding.service_bindings if s.status == "MISSING"]
@@ -87,7 +92,7 @@ def check_execution_preflight(payload: PreflightExecutionRequest):
             scenario=sc,
             agent=agent,
             execution_run_id="",
-            provided_variables=payload.secrets
+            provided_variables=effective_secrets
         )
         if not pf_res.is_ready:
             overall_ready = False
@@ -118,18 +123,12 @@ def _run_sandbox_scenarios_task(
     if not agent or not job:
         return
 
-    # Automatically hydrate user-saved encrypted credentials for this agent
-    try:
-        from app.core.security.crypto import decrypt_credential
-        owner_id = getattr(agent, "owner_id", None) or "default_user"
-        saved_creds = store.list_agent_credentials(user_id=owner_id, agent_id=agent_id)
-        for c in saved_creds:
-            if c.is_active and c.credential_name.upper() not in secrets:
-                decrypted = decrypt_credential(c.encrypted_value)
-                if decrypted:
-                    secrets[c.credential_name.upper()] = decrypted
-    except Exception as e:
-        logger.debug(f"Could not hydrate agent_credentials: {e}")
+    # Automatically hydrate user-saved credentials & sandbox environment keys
+    from app.api.dependencies import _get_effective_user_credentials
+    effective_creds = _get_effective_user_credentials(user_id=getattr(agent, "owner_id", None))
+    for k, v in effective_creds.items():
+        if k not in secrets and v:
+            secrets[k] = v
 
     # Automatically resolve user-selected AI model connections from Setup screen
     if agent.runtime_manifest and "model_bindings" in agent.runtime_manifest:

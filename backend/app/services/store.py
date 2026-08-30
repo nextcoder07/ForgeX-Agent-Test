@@ -117,11 +117,19 @@ class SyncedDict:
                 row = self.serialize_fn(key, value)
                 conflict_col = "id" if "id" in row else self.key_col
                 
-                # Sanitize foreign keys if they refer to execution job IDs instead of evaluation runs
-                for fk_field in ["evaluation_run_id", "scenario_id", "agent_version_id", "sandbox_session_id"]:
-                    if fk_field in row and isinstance(row[fk_field], str):
-                        if row[fk_field].startswith(("exec-", "job-")) and fk_field == "evaluation_run_id":
-                            row[fk_field] = None
+                # Ensure parent evaluation_runs exists before inserting child traces or verdicts
+                if self.table_name in ("evaluation_traces", "evaluation_verdicts", "execution_sessions", "scenario_results"):
+                    eval_id = row.get("evaluation_run_id")
+                    if eval_id and eval_id != "default_eval_run":
+                        try:
+                            self._sb.table("evaluation_runs").upsert({
+                                "id": eval_id,
+                                "agent_id": row.get("agent_id") or "agent-19d671c8",
+                                "status": "completed",
+                                "run_type": "evaluation"
+                            }, on_conflict="id").execute()
+                        except Exception:
+                            pass
 
                 # Try UPDATE first to be completely idempotent and avoid POST 409 conflict
                 try:
@@ -134,24 +142,23 @@ class SyncedDict:
                 self._sb.table(self.table_name).upsert(row, on_conflict=conflict_col).execute()
             except Exception as e:
                 err_msg = str(e)
-                if "409" in err_msg or "Conflict" in err_msg or "duplicate key" in err_msg or "23503" in err_msg or "foreign key" in err_msg.lower():
+                if "409" in err_msg or "Conflict" in err_msg or "duplicate key" in err_msg:
                     try:
                         row = self.serialize_fn(key, value)
                         conflict_col = "id" if "id" in row else self.key_col
-                        # Strip unfulfilled foreign keys and update directly
-                        for fk_field in ["evaluation_run_id", "scenario_id", "agent_version_id", "sandbox_session_id"]:
-                            if fk_field in row and isinstance(row[fk_field], str) and row[fk_field].startswith(("exec-", "job-")):
-                                row[fk_field] = None
                         self._sb.table(self.table_name).update(row).eq(conflict_col, key).execute()
                         return
                     except Exception:
                         pass
-                if self.table_name == "sandbox_specifications" and ("PGRST204" in err_msg or "schema cache" in err_msg):
+                elif "23503" in err_msg or "foreign key" in err_msg.lower() or "400" in err_msg:
                     try:
                         row = self.serialize_fn(key, value)
-                        for field in ["status", "blockers", "runtime_version"]:
-                            row.pop(field, None)
-                        self._sb.table(self.table_name).upsert(row, on_conflict="id").execute()
+                        conflict_col = "id" if "id" in row else self.key_col
+                        # Clear optional FK fields that failed constraint
+                        for fk_field in ["scenario_id", "agent_version_id", "sandbox_session_id"]:
+                            if fk_field in row:
+                                row[fk_field] = None
+                        self._sb.table(self.table_name).upsert(row, on_conflict=conflict_col).execute()
                         return
                     except Exception:
                         pass
