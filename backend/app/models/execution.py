@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class ExecutionLifecycleState(str, Enum):
+    QUEUED = "QUEUED"
     SCENARIO_SELECTED = "SCENARIO_SELECTED"
     PREFLIGHT = "PREFLIGHT"
     VARIABLE_RESOLUTION = "VARIABLE_RESOLUTION"
@@ -23,6 +24,20 @@ class ExecutionLifecycleState(str, Enum):
     EXECUTION_COMPLETED = "EXECUTION_COMPLETED"
     EVIDENCE_SEALED = "EVIDENCE_SEALED"
     READY_FOR_EVALUATION = "READY_FOR_EVALUATION"
+
+
+class EvaluationVerdict(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    NOT_EVALUATED = "NOT_EVALUATED"
+
+
+class EvaluationIntegrityStatus(str, Enum):
+    VALID = "VALID"
+    PARTIAL = "PARTIAL"
+    INCOMPLETE = "INCOMPLETE"
+    CORRUPTED = "CORRUPTED"
 
 
 class SetupState(str, Enum):

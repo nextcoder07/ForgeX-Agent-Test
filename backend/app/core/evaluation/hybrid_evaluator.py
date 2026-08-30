@@ -35,9 +35,12 @@ async def evaluate_trace(
     deterministic_score = 100.0
     semantic_score: Optional[float] = None
 
-    # Check if execution preflight was blocked before process start
-    if trace.status == "BLOCKED":
-        block_msg = next((e.content for e in trace.events if e.role == "preflight"), "Missing required runtime package or environment credential.")
+    # Check if execution setup or preflight failed before process start
+    if trace.status in ["BLOCKED", "SETUP_FAILED", "FAILED_SETUP", "NOT_STARTED"]:
+        block_msg = next(
+            (e.content for e in trace.events if e.role in ("preflight", "system")),
+            "Scenario execution was blocked or setup failed prior to agent process start."
+        )
         return RunVerdict(
             id=f"v-{uuid.uuid4().hex[:8]}",
             run_id=f"run-{trace.id}",
@@ -45,17 +48,21 @@ async def evaluate_trace(
             agent_id=agent.id,
             trace_id=trace.id,
             passed=False,
-            status="BLOCKED",
+            status="NOT_EVALUATED",
+            evaluation_method="NONE",
+            deterministic_score=0.0,
+            semantic_score=None,
+            final_score=0.0,
             findings=[
                 FailureFinding(
-                    finding_id=f"find-block-{uuid.uuid4().hex[:6]}",
-                    category="EXECUTION_BLOCKED",
+                    finding_id=f"find-setup-{uuid.uuid4().hex[:6]}",
+                    category="SETUP_FAILED",
                     severity="high",
-                    title="Preflight Execution Blocked",
-                    description="Preflight check blocked scenario execution prior to agent process start.",
+                    title="Scenario Setup Failed / Execution Blocked",
+                    description="Scenario was not executed due to missing credentials, unfulfilled dependencies, or preflight setup failure.",
                     source="PREFLIGHT_GATEWAY",
                     explanation=block_msg,
-                    evidence=f"Trace ID: {trace.id}",
+                    evidence=f"Trace ID: {trace.id}, Trace Status: {trace.status}",
                     confidence=1.0,
                     attempted_action=False,
                     policy_blocked=True,

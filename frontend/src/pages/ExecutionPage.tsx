@@ -469,16 +469,32 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                       </p>
                       
                       {(() => {
-                        const dynamicKeys = Array.from(new Set([
-                          ...(setupReadiness?.missing_credentials || []),
-                          ...((selectedAgent?.tools || []).map(t => `${t.name.toUpperCase()}_API_KEY`))
-                        ])).filter(k => k && k.trim() && !['OPENAI_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY'].includes(k));
+                        const detectedEnvKeys: string[] = [];
+                        const spec = (selectedAgent as any)?.agent_spec || (selectedAgent as any)?.spec;
+                        if (spec?.evidence_packet?.environment_variables) {
+                          detectedEnvKeys.push(...spec.evidence_packet.environment_variables);
+                        }
+                        if (spec?.dependencies) {
+                          spec.dependencies.forEach((d: any) => {
+                            if (d.name && d.name.endsWith('_KEY')) detectedEnvKeys.push(d.name);
+                          });
+                        }
+                        if (spec?.runtime_manifest?.detected_model_dependencies) {
+                          spec.runtime_manifest.detected_model_dependencies.forEach((d: any) => {
+                            if (d.provider === 'openai') detectedEnvKeys.push('OPENAI_API_KEY');
+                            if (d.provider === 'tavily') detectedEnvKeys.push('TAVILY_API_KEY');
+                            if (d.provider === 'openrouter') detectedEnvKeys.push('OPENROUTER_API_KEY');
+                            if (d.provider === 'gemini') detectedEnvKeys.push('GEMINI_API_KEY');
+                          });
+                        }
 
-                        const allKeys = Array.from(new Set(['OPENROUTER_API_KEY', 'GEMINI_API_KEY', ...dynamicKeys]));
+                        const missing = setupReadiness?.missing_credentials || [];
+                        const allKeys = Array.from(new Set([...missing, ...detectedEnvKeys])).filter(k => k && k.trim());
+                        const finalKeys = allKeys.length > 0 ? allKeys : ['OPENAI_API_KEY'];
 
                         return (
                           <div className="space-y-2.5 font-mono text-xs">
-                            {allKeys.map(keyName => (
+                            {finalKeys.map(keyName => (
                               <div key={keyName} className="p-2 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
                                 <div className="flex items-center justify-between text-[10px]">
                                   <label className="text-cyan-300 font-bold">{keyName}</label>

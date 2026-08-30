@@ -107,6 +107,8 @@ export interface AgentRecord {
   artifact_hash?: string | null;
   source_files?: Record<string, string>;
   runtime_manifest?: Record<string, any>;
+  agent_spec?: Record<string, any>;
+  spec?: Record<string, any>;
   execution_status?: string;
   input_type?: string;
   created_at: string;
