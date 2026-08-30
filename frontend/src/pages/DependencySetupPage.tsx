@@ -737,8 +737,7 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
             <thead>
               <tr className="border-b border-slate-800 text-[10px] uppercase font-bold text-slate-400 bg-slate-900/60">
                 <th className="py-2.5 px-3">Requirement Type</th>
-                <th className="py-2.5 px-3">Needed in Agent Code</th>
-                <th className="py-2.5 px-3">Target Key / Slot</th>
+                <th className="py-2.5 px-3">Required API Key / Variable</th>
                 <th className="py-2.5 px-3">ForgeX Provided Match</th>
                 <th className="py-2.5 px-3 text-right">Match Status</th>
               </tr>
@@ -748,23 +747,23 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
               {agentModelSlots.map(slot => {
                 const config = slotConfigs[slot.slot_id];
                 const isDefault = !config || config.mode === 'system_default';
+                const envVar = slot.env_var_name || (
+                  (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('openai') || (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('gpt')
+                    ? 'OPENAI_API_KEY'
+                    : (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('anthropic') || (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('claude')
+                    ? 'ANTHROPIC_API_KEY'
+                    : (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('gemini')
+                    ? 'GOOGLE_API_KEY'
+                    : 'OPENAI_API_KEY'
+                );
                 return (
                   <tr key={slot.slot_id} className="hover:bg-slate-900/40 transition">
                     <td className="py-2.5 px-3 font-semibold text-purple-300">AI Model / SDK</td>
                     <td className="py-2.5 px-3 font-mono text-slate-200">
-                      <code className="text-cyan-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{slot.code_variable || slot.slot_id}</code>
-                      <span className="text-[10px] text-slate-400 block mt-0.5">{slot.detected_from_source}</span>
-                    </td>
-                    <td className="py-2.5 px-3 font-mono text-slate-300">
-                      {slot.env_var_name || (
-                        (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('openai') || (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('gpt')
-                          ? 'OPENAI_API_KEY'
-                          : (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('anthropic') || (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('claude')
-                          ? 'ANTHROPIC_API_KEY'
-                          : (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('gemini')
-                          ? 'GOOGLE_API_KEY'
-                          : 'OPENAI_API_KEY'
-                      )}
+                      <div className="flex items-center space-x-1.5">
+                        <code className="text-cyan-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-bold">{envVar}</code>
+                        <span className="text-[10px] text-slate-400">({slot.code_variable || slot.slot_id})</span>
+                      </div>
                     </td>
                     <td className="py-2.5 px-3 font-mono text-slate-200">
                       <span className="text-emerald-300 font-bold">
@@ -785,10 +784,11 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                 <tr key={p.key_name} className="hover:bg-slate-900/40 transition">
                   <td className="py-2.5 px-3 font-semibold text-amber-300">API Credential</td>
                   <td className="py-2.5 px-3 font-mono text-slate-200">
-                    <code className="text-amber-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{p.key_name}</code>
-                    <span className="text-[10px] text-slate-400 block mt-0.5">{p.description || p.provider}</span>
+                    <div className="flex items-center space-x-1.5">
+                      <code className="text-amber-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-bold">{p.key_name}</code>
+                      {p.description && <span className="text-[10px] text-slate-400 truncate max-w-xs">{p.description}</span>}
+                    </div>
                   </td>
-                  <td className="py-2.5 px-3 font-mono text-slate-300">{p.key_name}</td>
                   <td className="py-2.5 px-3 font-mono text-slate-200">
                     {p.is_fulfilled ? (
                       <span className="text-emerald-300 font-bold">{p.provided_by_system ? 'Platform Free Mock / Key' : 'User Key Set'}</span>
@@ -1514,9 +1514,9 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-100 flex items-center gap-1">
+                      <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5 font-mono">
                         <Key className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Env Var: <code className="text-cyan-300">{req.key_name}</code></span>
+                        <code className="text-cyan-300">{req.key_name}</code>
                       </span>
                       <span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${
                         req.is_fulfilled
@@ -1525,21 +1525,17 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                           ? 'bg-rose-950 text-rose-300 border border-rose-500/40'
                           : 'bg-amber-950 text-amber-300 border-amber-500/30'
                       }`}>
-                        {req.is_fulfilled ? '✓ PLATFORM DEFAULT' : isNoDefault ? '⚠️ REQUIRED (NO DEFAULT)' : 'CUSTOM OVERRIDE'}
+                        {req.is_fulfilled ? '✓ PLATFORM DEFAULT' : isNoDefault ? '⚠️ REQUIRED' : 'CUSTOM OVERRIDE'}
                       </span>
                     </div>
 
-                    <p className="text-[11px] text-slate-400 leading-tight">{req.description}</p>
-                    
-                    <div className="text-[10px] text-slate-400 bg-slate-950 p-2 rounded border border-slate-800">
-                      <b>Code Reference:</b> Read via <code>os.getenv("{req.key_name}")</code> in agent source.
-                    </div>
+                    <p className="text-[11px] text-slate-400 leading-tight">{req.description || `Read via os.getenv("${req.key_name}") in agent code`}</p>
 
-                    <div className="relative mt-2">
+                    <div className="relative mt-1">
                       <Lock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
                       <input
                         type="password"
-                        placeholder={isNoDefault ? `Enter required ${req.key_name}...` : `Enter custom ${req.key_name}...`}
+                        placeholder={`Enter key for ${req.key_name}...`}
                         value={systemCredInputs[req.key_name] || ''}
                         onChange={e => handleSystemCredInput(req.key_name, e.target.value)}
                         className={`w-full pl-7 pr-3 py-1.5 rounded-lg bg-slate-950 border text-xs font-mono text-emerald-400 focus:ring-1 focus:outline-none ${

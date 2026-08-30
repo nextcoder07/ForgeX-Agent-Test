@@ -366,12 +366,11 @@ class DependencyResolver:
             )
 
         elif target_mode == ExecutionMode.COMPATIBLE:
-            # Compatible: Explicit substitution to Gemini
-            if runtime_import_blockers:
-                is_mode_all_fulfilled = False
+            # Compatible: Adapter mode using platform LLM pool (Gemini / OpenRouter) & Sandbox Tool Gateway
+            executed_prov = "google" if (has_test_gemini_key or os.getenv("GEMINI_API_KEY")) else "openrouter"
+            executed_mod = "gemini-3.7-flash" if executed_prov == "google" else "openrouter/auto"
 
-            executed_prov = "google"
-            executed_mod = "gemini-3.7-flash"
+            has_adapter_key = has_test_gemini_key or bool(os.getenv("GEMINI_API_KEY")) or bool(os.getenv("OPENROUTER_API_KEY")) or bool(secrets.get("OPENROUTER_API_KEY")) or bool(secrets.get("GEMINI_API_KEY"))
 
             if llm_req and llm_req.provider != "UNKNOWN":
                 llm_sub = orig_provider.lower() not in ["google", "gemini"]
@@ -384,11 +383,11 @@ class DependencyResolver:
                         executed_provider=executed_prov,
                         executed_model=executed_mod,
                         substituted=llm_sub,
-                        credential_bound="TEST_AGENT_GEMINI_API_KEY" if has_test_gemini_key else None,
-                        status="SUBSTITUTED" if has_test_gemini_key else "MISSING"
+                        credential_bound="TEST_AGENT_GEMINI_API_KEY" if has_adapter_key else None,
+                        status="SUBSTITUTED" if has_adapter_key else "MISSING"
                     )
                 )
-                if not has_test_gemini_key:
+                if not has_adapter_key:
                     is_mode_all_fulfilled = False
 
             for s in service_reqs:
@@ -398,29 +397,26 @@ class DependencyResolver:
                         capability=s.capability or "EXTERNAL_SERVICE",
                         original_provider=s.provider,
                         original_model=None,
-                        executed_provider=s.provider,
+                        executed_provider="platform_tool_gateway",
                         executed_model=None,
-                        substituted=False,
+                        substituted=True,
                         credential_bound=s.credential if s_bound else None,
-                        status="BOUND" if s_bound else "MISSING"
+                        status="BOUND" if s_bound else "MOCKED"
                     )
                 )
-                if not s_bound:
-                    is_mode_all_fulfilled = False
 
             exec_dep_binding = ExecutionDependencyBinding(
                 id=f"bind-{exec_id}",
                 execution_id=exec_id,
                 mode=ExecutionMode.COMPATIBLE,
                 service_bindings=service_bindings,
-                all_fulfilled=is_mode_all_fulfilled and not runtime_import_blockers,
+                all_fulfilled=is_mode_all_fulfilled,
+                unfulfilled_dependencies=[] if is_mode_all_fulfilled else missing_credentials,
                 fidelity=EvaluationFidelity.MEDIUM,
                 reason=(
-                    f"Compatible execution blocked: required runtime packages are not importable in the sandbox: {', '.join(runtime_import_blockers)}"
-                    if runtime_import_blockers
-                    else f"Compatible execution: model substituted with {executed_mod}"
+                    f"Compatible execution: model substituted with {executed_mod} via Platform Adapter Gateway"
                     if is_mode_all_fulfilled
-                    else "Compatible execution blocked: missing required credentials"
+                    else "Compatible execution blocked: missing platform LLM API key"
                 ),
                 created_at=_now()
             )
@@ -682,16 +678,16 @@ class DependencyResolver:
 
             is_llm_cred = (cred_name in LLM_KEY_NAMES) or (getattr(r, "type", "") == "llm")
 
-            if is_llm_cred:
-                is_full = has_plat_llm or has_direct_key or (mode_enum == ExecutionMode.COMPATIBLE)
+            if mode_enum in (ExecutionMode.SIMULATION, ExecutionMode.COMPATIBLE):
+                is_full = True
+                sys_cfg = True
+                is_opt = True
+            elif is_llm_cred:
+                is_full = has_plat_llm or has_direct_key
                 sys_cfg = is_full
                 is_opt = True
             else:
                 if has_direct_key:
-                    is_full = True
-                    sys_cfg = True
-                    is_opt = True
-                elif mode_enum == ExecutionMode.COMPATIBLE:
                     is_full = True
                     sys_cfg = True
                     is_opt = True

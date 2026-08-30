@@ -154,7 +154,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
             </div>
             <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 text-center">
               <p className="text-xl sm:text-2xl font-extrabold text-amber-300 font-mono">
-                {loading || !calibration ? '–' : `${(calibration.agreement_rate > 1 ? calibration.agreement_rate : calibration.agreement_rate * 100).toFixed(1)}%`}
+                {loading
+                  ? '–'
+                  : agents.length === 0 || scenarios.length === 0 || !calibration
+                  ? '0.0%'
+                  : `${(calibration.agreement_rate > 1 ? calibration.agreement_rate : calibration.agreement_rate * 100).toFixed(1)}%`}
               </p>
               <p className="text-[9px] sm:text-[10px] font-mono uppercase text-slate-300 mt-0.5">Judge Agreement</p>
             </div>

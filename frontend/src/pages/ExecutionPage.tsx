@@ -463,49 +463,52 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                   </button>
 
                   {showInlineKeys && (
-                    <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 space-y-2.5 animate-fadeIn">
+                    <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 space-y-3 animate-fadeIn">
                       <p className="text-[10px] text-slate-400 leading-snug">
-                        Provide custom API keys for this execution run without leaving the page. Provided keys take priority.
+                        Dynamically detected API keys for target agent <strong>{selectedAgent?.display_name || selectedAgent?.name}</strong>. Provided keys take priority.
                       </p>
                       
-                      <div className="space-y-2 font-mono text-xs">
-                        <div>
-                          <label className="text-[10px] text-slate-400 block mb-1">TAVILY_API_KEY (Web Search Tool)</label>
-                          <input
-                            type="password"
-                            placeholder="tvly-..."
-                            value={providedSecrets['TAVILY_API_KEY'] || ''}
-                            onChange={e => setProvidedSecrets({ ...providedSecrets, TAVILY_API_KEY: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-amber-500/60"
-                          />
-                        </div>
+                      {(() => {
+                        const dynamicKeys = Array.from(new Set([
+                          ...(setupReadiness?.missing_credentials || []),
+                          ...((selectedAgent?.tools || []).map(t => `${t.name.toUpperCase()}_API_KEY`))
+                        ])).filter(k => k && k.trim() && !['OPENAI_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY'].includes(k));
 
-                        <div>
-                          <label className="text-[10px] text-slate-400 block mb-1">OPENROUTER_API_KEY (Primary LLM Engine)</label>
-                          <input
-                            type="password"
-                            placeholder="sk-or-v1-..."
-                            value={providedSecrets['OPENROUTER_API_KEY'] || ''}
-                            onChange={e => setProvidedSecrets({ ...providedSecrets, OPENROUTER_API_KEY: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-cyan-500/60"
-                          />
-                        </div>
+                        const allKeys = Array.from(new Set(['OPENROUTER_API_KEY', 'GEMINI_API_KEY', ...dynamicKeys]));
 
-                        <div>
-                          <label className="text-[10px] text-slate-400 block mb-1">GEMINI_API_KEY (Google Gemini Engine)</label>
-                          <input
-                            type="password"
-                            placeholder="AIzaSy..."
-                            value={providedSecrets['GEMINI_API_KEY'] || ''}
-                            onChange={e => setProvidedSecrets({ ...providedSecrets, GEMINI_API_KEY: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500/60"
-                          />
-                        </div>
-                      </div>
+                        return (
+                          <div className="space-y-2.5 font-mono text-xs">
+                            {allKeys.map(keyName => (
+                              <div key={keyName} className="p-2 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <label className="text-cyan-300 font-bold">{keyName}</label>
+                                  <span className="text-slate-500 text-[9px]">
+                                    {providedSecrets[keyName] ? '✓ Key Injected' : 'Default Pool Active'}
+                                  </span>
+                                </div>
+                                <input
+                                  type="password"
+                                  placeholder={`Enter custom ${keyName}...`}
+                                  value={providedSecrets[keyName] || ''}
+                                  onChange={e => setProvidedSecrets({ ...providedSecrets, [keyName]: e.target.value })}
+                                  className="w-full bg-slate-900 border border-slate-700/80 rounded-md px-2.5 py-1 text-slate-200 focus:outline-none focus:border-cyan-500/60 text-xs font-mono"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
 
-                      <div className="flex items-center justify-end pt-1">
-                        <span className="text-[10px] text-emerald-400 font-mono">
-                          {Object.keys(providedSecrets).filter(k => providedSecrets[k]?.trim()).length} keys injected
+                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setProvidedSecrets({})}
+                          className="text-[10px] text-slate-400 hover:text-rose-400 underline font-mono cursor-pointer"
+                        >
+                          Clear Injected Keys
+                        </button>
+                        <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                          {Object.keys(providedSecrets).filter(k => providedSecrets[k]?.trim()).length} keys active
                         </span>
                       </div>
                     </div>
@@ -588,6 +591,13 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
                     <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Execution Mode & Capability Binding</span>
+                  </h3>
+                  <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded">
+                    Active Mode: {executionMode.toUpperCase()}
+                  </span>
+                </div>
+
                 {/* Preflight Mode Recommendation Banner */}
                 {setupReadiness && setupReadiness.missing_credentials && setupReadiness.missing_credentials.length > 0 && (
                   <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-2 animate-fadeIn">

@@ -264,8 +264,8 @@ export const ScenarioGeneratorPage: React.FC<{}> = () => {
         <ScenarioStrategyView strategy={strategy} isGenerating={loadingGenerate} />
       )}
 
-      {/* Coverage Gap Widget */}
-      {coverage && (
+      {/* Coverage Gap Widget — Only rendered AFTER scenarios are generated for the agent */}
+      {coverage && scenarios.length > 0 && (
         <CoverageGapWidget report={coverage} onGenerateTargeted={handleGenerate} />
       )}
 

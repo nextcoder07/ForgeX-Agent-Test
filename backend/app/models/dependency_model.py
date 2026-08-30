@@ -82,6 +82,7 @@ class ExecutionDependencyBinding(BaseModel):
     mode: ExecutionMode
     service_bindings: List[ServiceBindingItem] = Field(default_factory=list)
     all_fulfilled: bool = True
+    unfulfilled_dependencies: List[str] = Field(default_factory=list)
     fidelity: EvaluationFidelity
     reason: str
     created_at: str

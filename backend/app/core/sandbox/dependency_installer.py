@@ -49,6 +49,8 @@ IMPORT_TO_PACKAGE_MAP: Dict[str, str] = {
     "aiohttp": "aiohttp",
     "numpy": "numpy",
     "pandas": "pandas",
+    "pkg_resources": "setuptools",
+    "pkg-resources": "setuptools",
     "faker": "faker",
 }
 
@@ -60,7 +62,8 @@ STANDARD_LIBS: Set[str] = {
     "urllib", "http", "shutil", "traceback", "copy", "hashlib",
     "dataclasses", "enum", "asyncio", "socket", "threading", "multiprocessing",
     "base64", "csv", "sqlite3", "unittest", "contextlib", "glob", "heapq",
-    "operator", "secrets", "string", "struct", "warnings", "xml", "zipfile"
+    "operator", "secrets", "string", "struct", "warnings", "xml", "zipfile",
+    "pkg_resources", "setuptools", "pkg-resources", "distutils", "site"
 }
 
 
@@ -153,13 +156,13 @@ def install_package_sync(package_spec: str) -> bool:
             logger.warning(f"[DEPENDENCY_INSTALLER] Pip installation aborted by user (Ctrl+C).")
             _FAILED_PACKAGES_CACHE.add(spec_key)
             raise KeyboardInterrupt("Pip installation cancelled by user.")
-        if result.returncode == 0:
+        if res.returncode == 0:
             logger.info(f"[DEPENDENCY_INSTALLER] Successfully installed {clean_spec}.")
             _SUCCESS_PACKAGES_CACHE.add(spec_key)
             return True
         else:
             logger.warning(
-                f"[DEPENDENCY_INSTALLER] Pip install returned code {result.returncode} for {clean_spec}: {result.stderr[:200]}"
+                f"[DEPENDENCY_INSTALLER] Pip install returned code {res.returncode} for {clean_spec}: {res.stderr[:200]}"
             )
             # Try without version specifier if failed (e.g. langchain==0.3.0 -> langchain)
             if "==" in clean_spec or ">=" in clean_spec:

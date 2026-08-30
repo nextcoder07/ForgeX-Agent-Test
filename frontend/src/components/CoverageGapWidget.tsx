@@ -80,8 +80,8 @@ export const CoverageGapWidget: React.FC<CoverageGapWidgetProps> = ({ report, on
               <span>Coverage Gaps Detected ({report.gaps_detected.length})</span>
             </span>
             <p className="text-xs text-slate-300">
-              {report.exercised_tools === 0
-                ? `${report.gaps_detected.length} un-tested behavioral surfaces identified by static analysis (untested tools + 9 category gaps). Click "Generate +20 Scenarios" to build tests.`
+              {report.overall_coverage_pct === 0 || report.exercised_tools === 0
+                ? `⚡ Static AST Insight: Identified ${report.gaps_detected.length} un-tested behavioral surfaces (${report.total_tools} untested tool(s) + 9 zero-coverage reliability categories + safety invariants). Click "Generate +20 Scenarios" to automatically build test suites closing these gaps.`
                 : report.gaps_detected[0]}
             </p>
           </div>
