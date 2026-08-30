@@ -136,6 +136,12 @@ def create_sanitized_environment(
                             env["OPENAI_API_KEY"] = conn.api_key
                             env["OPENAI_API_BASE"] = conn.base_url or "https://openrouter.ai/api/v1"
                             env["OPENAI_BASE_URL"] = conn.base_url or "https://openrouter.ai/api/v1"
+                            if conn.model_identifier:
+                                target_mod = conn.model_identifier
+                                if "/" not in target_mod:
+                                    target_mod = f"openai/{target_mod}"
+                                env["OPENAI_MODEL_NAME"] = target_mod
+                                env["OPENAI_MODEL"] = target_mod
                         elif provider == "anthropic":
                             env["ANTHROPIC_API_KEY"] = conn.api_key
                         elif provider in ("gemini", "google"):

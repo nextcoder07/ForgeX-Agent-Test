@@ -562,7 +562,7 @@ def _deserialize_scorecard(row: Dict[str, Any]) -> ReliabilityScorecard:
 def _serialize_verdicts(key: str, verdicts: List[RunVerdict]) -> Dict[str, Any]:
     safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
     return {
-        "id": f"verd-list-{key}",
+        "id": key,
         "evaluation_run_id": safe_eval_id,
         "record_type": "verdicts",
         "status": "completed",
@@ -577,7 +577,7 @@ def _deserialize_verdicts(row: Dict[str, Any]) -> List[RunVerdict]:
 def _serialize_traces(key: str, traces: List[ExecutionTrace]) -> Dict[str, Any]:
     safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
     return {
-        "id": f"trace-list-{key}",
+        "id": key,
         "evaluation_run_id": safe_eval_id,
         "record_type": "traces",
         "status": "completed",
@@ -598,7 +598,7 @@ def _serialize_clusters(key: str, clusters: List[FailureCluster]) -> Dict[str, A
     safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
 
     return {
-        "id": f"cluster-{key}",
+        "id": key,
         "evaluation_run_id": safe_eval_id,
         "title": title,
         "category": cat_str,
