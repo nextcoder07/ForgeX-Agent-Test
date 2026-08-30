@@ -234,9 +234,9 @@ export const DiagnosisPage: React.FC = () => {
             <Info className="w-6 h-6" />
           </div>
           <div className="max-w-md mx-auto space-y-2">
-            <h3 className="text-base font-extrabold text-slate-100 font-mono">No Failures to Diagnose</h3>
+            <h3 className="text-base font-extrabold text-slate-100 font-mono">No Evaluation Runs Recorded</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Run an evaluation first. Once failures are detected in the sandbox, ForgeX will show the evidence, root cause, affected component, and recommended remediation.
+              Run test scenarios in the Execution Sandbox to generate evaluation runs and evidence.
             </p>
           </div>
           <button

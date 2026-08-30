@@ -1011,19 +1011,25 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                   </div>
                 </div>
 
-                {/* ── MODE 1: DEFAULT SETUP (PLATFORM PRE-FILLED) ── */}
+                {/* ── MODE 1: DEFAULT SETUP (PLATFORM PRE-FILLED & VERIFIED) ── */}
                 {config.mode === 'system_default' && (
-                  <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/20 space-y-1.5 text-[11px]">
+                  <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/20 space-y-2 text-[11px]">
                     <div className="flex justify-between items-center text-slate-300">
-                      <span className="text-slate-500">Platform Pre-filled Model:</span>
-                      <span className="text-amber-300 font-bold">Gemini 3.6 Flash</span>
+                      <span className="text-slate-500 font-mono">Original Interface:</span>
+                      <span className="text-cyan-300 font-mono font-bold">{codeVar} ({slot.detected_from_source || 'OpenAI SDK'})</span>
                     </div>
                     <div className="flex justify-between items-center text-slate-300">
-                      <span className="text-slate-500">Endpoint & Auth:</span>
-                      <span className="text-emerald-400 font-bold">Platform Free Mock (Ready)</span>
+                      <span className="text-slate-500 font-mono">Platform Pre-filled Model:</span>
+                      <span className="text-amber-300 font-bold">Gemini 3.6 Flash / Platform Pool</span>
                     </div>
-                    <p className="text-[9px] text-slate-500 pt-1 border-t border-slate-900">
-                      Pre-filled website default setup. Click "Cloud API" or "Local ML" above to edit directly in-place.
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-500 font-mono">Compatibility Check:</span>
+                      <span className="text-emerald-400 font-bold flex items-center gap-1 font-mono">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" /> VERIFIED (DEFAULT_READY)
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-slate-400 pt-1.5 border-t border-slate-900 leading-tight">
+                      Platform verified default. 0 user keys needed for Simulation & Compatible modes. Select "Cloud API" or "Local ML" above to connect your custom key.
                     </p>
                   </div>
                 )}

@@ -38,13 +38,19 @@ def compute_coverage_gaps(
     for sc in scenarios:
         category_counts[sc.category.value] = category_counts.get(sc.category.value, 0) + 1
         
-        # Tools & Capabilities
-        for cap in sc.required_capabilities:
+        # Tools & Capabilities matching
+        for cap in (sc.required_capabilities or []):
             tested_capabilities.add(cap.upper())
-            for t in (agent.tools or []):
-                if t.canonical_capability == cap or t.name.lower() == cap.lower():
-                    exercised_tools.add(t.name)
-                    
+
+        for t in (agent.tools or []):
+            t_name_lower = t.name.lower()
+            if any(rt.lower() == t_name_lower or t.name in rt for rt in (sc.required_tools or [])):
+                exercised_tools.add(t.name)
+            elif any((t.canonical_capability and t.canonical_capability.lower() == cap.lower()) or t_name_lower in cap.lower() for cap in (sc.required_capabilities or [])):
+                exercised_tools.add(t.name)
+            elif (sc.input and t_name_lower in sc.input.lower()) or (sc.command and t_name_lower in sc.command.lower()) or (sc.title and t_name_lower in sc.title.lower()):
+                exercised_tools.add(t.name)
+
         # Explicit Fault Injections & Assertions matching actual user tools
         for fi in sc.fault_injections:
             t_name = getattr(fi, "target_tool", None) or (fi.get("target_tool") if isinstance(fi, dict) else None)
