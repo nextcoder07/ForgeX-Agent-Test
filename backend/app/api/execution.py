@@ -198,10 +198,18 @@ async def start_execution_session(payload: StartExecutionRequest):
             detail=f"Sandbox specification unavailable. Blockers: {blockers_str}"
         )
 
+    req_mode_enum = ExecutionMode.FAITHFUL
+    if getattr(payload, "requested_mode", None):
+        try:
+            req_mode_enum = ExecutionMode(payload.requested_mode.lower())
+        except Exception:
+            pass
+
     # 1. Gatekeeper Check: Evaluate Credential Demands
     prompt = DependencyResolver.evaluate_execution_credential_demands(
         agent=agent,
-        provided_secrets=payload.provided_secrets
+        provided_secrets=payload.provided_secrets,
+        mode=req_mode_enum
     )
 
     if not prompt.all_fulfilled:

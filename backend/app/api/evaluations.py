@@ -663,7 +663,9 @@ def cancel_evaluation_job(job_id: str):
 def get_evaluation_scorecard(job_id: str):
     scorecard = store.get_scorecard(job_id)
     if not scorecard:
-        agent = store.list_agents()[0] if store.list_agents() else None
+        job = store.jobs.get(job_id)
+        agent_id = getattr(job, "agent_id", None) if job else None
+        agent = store.get_agent(agent_id) if agent_id else (store.list_agents()[0] if store.list_agents() else None)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Scorecard for '{job_id}' not found")
         scorecard = compute_reliability_scorecard(job_id, agent, [])
@@ -675,7 +677,9 @@ def get_evaluation_report(job_id: str):
     """Retrieve detailed explainable evaluation report with 10 dimension scores and evidence."""
     report = store.get_evaluation_report(job_id)
     if not report:
-        agent = store.get_agent("agent-cust-v1") or (store.list_agents()[0] if store.list_agents() else None)
+        job = store.jobs.get(job_id)
+        agent_id = getattr(job, "agent_id", None) if job else None
+        agent = store.get_agent(agent_id) if agent_id else (store.list_agents()[0] if store.list_agents() else None)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Report for '{job_id}' not found")
         report = generate_explainable_evaluation_report(job_id, agent, [])
@@ -706,11 +710,11 @@ def get_agent_reliability_metrics(agent_id: str):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    matching_scorecards = [sc for sc in store.scorecards.values() if getattr(sc, "agent_id", None) == agent_id]
     scorecard = None
-    for sc in store.scorecards.values():
-        if sc.agent_id == agent_id:
-            scorecard = sc
-            break
+    if matching_scorecards:
+        sorted_sc = sorted(matching_scorecards, key=lambda s: getattr(s, "created_at", "") or "")
+        scorecard = sorted_sc[-1]
 
     if not scorecard:
         scorecard = compute_reliability_scorecard("eval-default", agent, [])

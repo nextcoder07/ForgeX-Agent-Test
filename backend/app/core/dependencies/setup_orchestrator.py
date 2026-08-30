@@ -57,7 +57,12 @@ class SetupOrchestrator:
         return record
 
     @staticmethod
-    def run_automatic_setup(agent_id: str, execution_id: Optional[str] = None, provided_secrets: Optional[Dict[str, str]] = None) -> SetupReadinessRecord:
+    def run_automatic_setup(
+        agent_id: str, 
+        execution_id: Optional[str] = None, 
+        provided_secrets: Optional[Dict[str, str]] = None,
+        requested_mode: Optional[ExecutionMode] = None
+    ) -> SetupReadinessRecord:
         """Runs complete 12-step automatic setup pipeline for an agent."""
         if provided_secrets is None:
             provided_secrets = {}
@@ -96,7 +101,8 @@ class SetupOrchestrator:
         record.progress_pct = 30
         record.status = SetupState.PREPARING
         
-        res = DependencyResolver.resolve_mode(agent=agent, provided_secrets=provided_secrets)
+        res = DependencyResolver.resolve_mode(agent=agent, requested_mode=requested_mode, provided_secrets=provided_secrets)
+        effective_mode = res.recommended_mode if requested_mode is None else requested_mode
         
         missing_pkgs = []
         for dep in agent.dependencies:
@@ -144,7 +150,8 @@ class SetupOrchestrator:
 
         cred_demands = DependencyResolver.evaluate_execution_credential_demands(
             agent=agent,
-            provided_secrets=provided_secrets
+            provided_secrets=provided_secrets,
+            mode=effective_mode
         )
 
         missing_creds = []

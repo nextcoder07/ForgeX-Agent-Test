@@ -132,11 +132,26 @@ def _run_sandbox_scenarios_task(
                     if conn.model_identifier:
                         secrets[f"{provider_prefix}_MODEL"] = conn.model_identifier
 
-    # Enforce Setup Readiness Invariant: SETUP MUST COMPLETE BEFORE EXECUTION
     from app.core.dependencies.setup_orchestrator import SetupOrchestrator
     from app.models.execution import SetupState
 
-    setup_record = SetupOrchestrator.run_automatic_setup(agent_id=agent_id, execution_id=job_id, provided_secrets=secrets)
+    req_mode_enum = None
+    if binding and hasattr(binding, "mode"):
+        mode_val = getattr(binding, "mode", None)
+        if isinstance(mode_val, ExecutionMode):
+            req_mode_enum = mode_val
+        elif isinstance(mode_val, str):
+            try:
+                req_mode_enum = ExecutionMode(mode_val.lower())
+            except Exception:
+                pass
+
+    setup_record = SetupOrchestrator.run_automatic_setup(
+        agent_id=agent_id, 
+        execution_id=job_id, 
+        provided_secrets=secrets,
+        requested_mode=req_mode_enum
+    )
 
     if setup_record.status in (SetupState.BLOCKED, SetupState.FAILED):
         job.status = "blocked" if setup_record.status == SetupState.BLOCKED else "failed"

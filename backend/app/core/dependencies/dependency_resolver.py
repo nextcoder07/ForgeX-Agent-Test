@@ -633,10 +633,26 @@ class DependencyResolver:
         LLM_KEY_NAMES = {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "PLATFORM_SAFETY_LLM", "TEST_AGENT_GEMINI_API_KEY"}
 
         if mode in (ExecutionMode.FAITHFUL, ExecutionMode.COMPATIBLE):
+            has_plat_llm = bool(
+                os.getenv("OPENROUTER_API_KEY") or
+                os.getenv("TEST_AGENT_GEMINI_API_KEY") or
+                os.getenv("GEMINI_API_KEY") or
+                os.getenv("OPENAI_API_KEY") or
+                ("OPENAI_API_KEY" in test_creds) or
+                ("OPENROUTER_API_KEY" in test_creds) or
+                ("GEMINI_API_KEY" in test_creds) or
+                (agent.runtime_manifest and agent.runtime_manifest.get("model_bindings")) or
+                (store.list_model_connections())
+            )
+
             for r in agent_reqs:
                 if r.credential:
                     sys_item = system_items.get(r.credential)
                     sys_cfg = getattr(sys_item, "is_configured", False) if sys_item else bool(os.getenv(r.credential) or test_creds.get(r.credential))
+
+                    if r.credential in LLM_KEY_NAMES and has_plat_llm:
+                        sys_cfg = True
+
                     user_provided = bool(secrets.get(r.credential))
 
                     is_full = bool(user_provided or sys_cfg)

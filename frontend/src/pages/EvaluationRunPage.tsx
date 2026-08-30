@@ -208,18 +208,22 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
   const loadResults = async (jobId: string) => {
     try {
       setResultsError('');
-      const [sc, rep, verd, trc, clus] = await Promise.all([
+      const [scRes, repRes, verdRes, trcRes, clusRes] = await Promise.allSettled([
         fetchScorecard(jobId),
         fetchEvaluationReport(jobId),
         fetchEvaluationVerdicts(jobId),
         fetchEvaluationTracesDetails(jobId),
         fetchFailureClusters(jobId),
       ]);
-      setScorecard(sc);
-      setReport(rep);
-      setVerdicts(verd);
-      setTraces(trc);
-      setClusters(clus);
+      if (scRes.status === 'fulfilled') setScorecard(scRes.value);
+      if (repRes.status === 'fulfilled') setReport(repRes.value);
+      if (verdRes.status === 'fulfilled') setVerdicts(verdRes.value);
+      if (trcRes.status === 'fulfilled') setTraces(trcRes.value);
+      if (clusRes.status === 'fulfilled') setClusters(clusRes.value);
+
+      if (scRes.status === 'rejected' && verdRes.status === 'rejected') {
+        setResultsError('Evaluation completed, but its result report could not be loaded. Retry the result request.');
+      }
     } catch (e) {
       console.error('Failed loading evaluation results:', e);
       setResultsError('Evaluation completed, but its result report could not be loaded. Retry the result request.');
