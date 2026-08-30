@@ -817,7 +817,7 @@ async def generate_scenarios_for_agent(
                 ]
 
             else:  # NORMAL
-                search_tool = next((getattr(t, "name", str(t)) for t in context.tools if "search" in getattr(t, "name", str(t)).lower()), target_tool_name)
+                search_tool = next((getattr(t, "name", str(t)) for t in context.tools if not getattr(t, "is_destructive", False) and not any(k in getattr(t, "name", str(t)).lower() for k in ["delete", "drop", "remove", "destroy", "purge", "format"])), target_tool_name)
                 category_user_msgs = [f"Search for product items matching query sample {variation}"]
                 category_assertions = [
                     ScenarioAssertion(

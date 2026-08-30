@@ -237,11 +237,31 @@ class DependencyResolver:
             has_orig_llm_key = True
 
         has_all_service_keys = True
+        missing_credentials: List[str] = []
         for s in service_reqs:
             if s.credential:
-                # Sandbox adapters and mock generators auto-fulfill missing service keys
-                s.binding_status = "FULFILLED"
-                
+                s_bound = bool(secrets.get(s.credential) or os.getenv(s.credential) or test_creds.get(s.credential))
+                if s_bound:
+                    s.binding_status = "FULFILLED"
+                else:
+                    # Check if this secret was explicitly demanded in detected_secrets
+                    explicit_secret = any(
+                        (sec.get("name") if isinstance(sec, dict) else getattr(sec, "name", "")) == s.credential
+                        for sec in raw_manifest.get("detected_secrets", [])
+                    )
+                    if explicit_secret:
+                        s.binding_status = "MISSING"
+                        has_all_service_keys = False
+                        if s.credential not in missing_credentials:
+                            missing_credentials.append(s.credential)
+                    else:
+                        # Generic tool capability without explicit user secret uses platform default mock
+                        s.binding_status = "PLATFORM_MOCK"
+
+        if llm_req and llm_req.credential and not has_orig_llm_key:
+            if llm_req.credential not in missing_credentials:
+                missing_credentials.append(llm_req.credential)
+
         faithful_available = has_orig_llm_key and has_all_service_keys and not runtime_import_blockers
 
         # Check Compatible Provider availability
@@ -252,7 +272,7 @@ class DependencyResolver:
             test_creds.get("GEMINI_API_KEY") or 
             has_any_platform_ai
         )
-        compatible_available = (has_test_gemini_key or has_bound_connection or (agent_category == AgentCategory.RULE_BASED) or True) and not runtime_import_blockers
+        compatible_available = (has_test_gemini_key or has_bound_connection or (agent_category == AgentCategory.RULE_BASED)) and has_all_service_keys and not runtime_import_blockers
         simulation_available = not runtime_import_blockers  # Prefer real runtime execution; simulation only after import verification is clear.
 
         # Default recommended mode based on availability
@@ -272,7 +292,7 @@ class DependencyResolver:
 
         if target_mode == ExecutionMode.FAITHFUL:
             # Faithful: Original provider and models
-            if runtime_import_blockers:
+            if runtime_import_blockers or missing_credentials:
                 is_mode_all_fulfilled = False
             if llm_req and llm_req.provider != "UNKNOWN":
                 llm_bound = bool(
@@ -293,14 +313,12 @@ class DependencyResolver:
                         executed_model=orig_model,
                         substituted=False,
                         credential_bound=llm_req.credential if llm_bound else "platform_test_pool",
-                        status="BOUND"
+                        status="BOUND" if llm_bound else "MISSING"
                     )
                 )
-                # Auto-bind platform defaults if no direct key
-                is_mode_all_fulfilled = True
 
             for s in service_reqs:
-                s_bound = True  # Sandbox tool mocks auto-bind
+                s_bound = bool(secrets.get(s.credential) or os.getenv(s.credential) or test_creds.get(s.credential)) if s.credential else True
                 service_bindings.append(
                     ServiceBindingItem(
                         capability=s.capability or "EXTERNAL_SERVICE",
@@ -309,22 +327,25 @@ class DependencyResolver:
                         executed_provider=s.provider,
                         executed_model=None,
                         substituted=False,
-                        credential_bound=s.credential or "sandbox_mock_adapter",
-                        status="BOUND"
+                        credential_bound=s.credential if s_bound else None,
+                        status="BOUND" if s_bound else "MISSING"
                     )
                 )
+
+            all_unfulfilled = list(set(runtime_import_blockers + missing_credentials))
 
             exec_dep_binding = ExecutionDependencyBinding(
                 id=f"bind-{exec_id}",
                 execution_id=exec_id,
                 mode=ExecutionMode.FAITHFUL,
                 service_bindings=service_bindings,
-                all_fulfilled=not runtime_import_blockers,
+                all_fulfilled=is_mode_all_fulfilled and not all_unfulfilled,
+                unfulfilled_dependencies=all_unfulfilled,
                 fidelity=EvaluationFidelity.HIGH,
                 reason=(
-                    "Faithful execution blocked: required runtime packages are not importable in the active Python environment: "
-                    + ", ".join(runtime_import_blockers)
-                    if runtime_import_blockers else
+                    "Faithful execution blocked: missing required user credentials or packages: "
+                    + ", ".join(all_unfulfilled)
+                    if all_unfulfilled else
                     "Faithful execution with platform-managed model bindings and sandbox adapters"
                 ),
                 created_at=_now()

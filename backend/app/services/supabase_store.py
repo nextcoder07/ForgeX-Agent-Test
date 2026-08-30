@@ -34,7 +34,7 @@ def _exec(query) -> List[Dict]:
         res = query.execute()
         return res.data or []
     except Exception as exc:
-        logger.error(f"Supabase query error: {exc}")
+        logger.debug(f"Supabase query note: {exc}")
         return []
 
 
@@ -431,6 +431,39 @@ class SupabaseStore:
             .select("*")
             .eq("scenario_instance_id", scenario_instance_id)
         )
+
+
+    # -------------------------------------------------------------------------
+    # MODEL CONNECTIONS — User connected LLM endpoints and API keys
+    # -------------------------------------------------------------------------
+    def upsert_model_connection(self, conn_data: Dict) -> Optional[Dict]:
+        if not self._sb:
+            return None
+        try:
+            clean_row = {
+                "id": conn_data.get("id"),
+                "name": conn_data.get("name", "Connected Model"),
+                "provider": conn_data.get("provider", "ollama"),
+                "base_url": conn_data.get("base_url", "http://localhost:11434"),
+                "api_key": conn_data.get("api_key", ""),
+                "model_identifier": conn_data.get("model_identifier", "qwen2.5-coder:7b"),
+            }
+            res = self._sb.table("model_connections").upsert(clean_row).execute()
+            rows = res.data or []
+            return rows[0] if rows else None
+        except Exception as e:
+            logger.debug(f"Supabase model_connections write ignored: {e}")
+            return None
+
+    def list_model_connections(self) -> List[Dict]:
+        if not self._sb:
+            return []
+        return _exec(self._sb.table("model_connections").select("*").order("created_at"))
+
+    def delete_model_connection(self, conn_id: str) -> None:
+        if not self._sb:
+            return
+        _exec(self._sb.table("model_connections").delete().eq("id", conn_id))
 
 
 # Singleton — import this everywhere

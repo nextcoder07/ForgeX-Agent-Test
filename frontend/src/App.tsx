@@ -139,19 +139,11 @@ function AppContent() {
           />
           <Route
             path="/platform-ai"
-            element={
-              <ProtectedRoute>
-                <PlatformAIPerformancePage />
-              </ProtectedRoute>
-            }
+            element={<Navigate to="/dashboard" replace />}
           />
           <Route
             path="/quality-lab"
-            element={
-              <ProtectedRoute>
-                <PlatformAIPerformancePage />
-              </ProtectedRoute>
-            }
+            element={<Navigate to="/dashboard" replace />}
           />
 
           {/* ── Legacy redirects ── */}

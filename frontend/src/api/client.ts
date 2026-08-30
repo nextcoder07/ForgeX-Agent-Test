@@ -2258,5 +2258,133 @@ export async function approveTelemetryForTraining(submissionId: string): Promise
   return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// Improve Action Layer API Interfaces & Helper Functions
+// ---------------------------------------------------------------------------
+
+export interface ImproveSummary {
+  status: 'HAS_FAILURES' | 'NO_FAILURES_DETECTED' | 'NO_EVALUATION_AVAILABLE' | 'PARTIAL_EVALUATION';
+  message: string;
+  agent_id: string;
+  agent_name: string;
+  evaluation_run_id: string;
+  total_failures: number;
+  critical_failures: number;
+  repairable_issues: number;
+  evaluation_fidelity: number;
+  scenarios_evaluated: number;
+  passed: number;
+  failed: number;
+  inconclusive: number;
+  not_evaluable: number;
+}
+
+export interface RepairProposal {
+  agent_id: string;
+  old_version: string;
+  new_version: string;
+  affected_file: string;
+  reason: string;
+  source_failure_ids: string[];
+  original_code: string;
+  repaired_code: string;
+  patch_diff: string;
+}
+
+export interface RegressionResult {
+  status: 'PASS' | 'FAIL';
+  message: string;
+  agent_id: string;
+  baseline_version: string;
+  repaired_version: string;
+  scenarios_tested: number;
+  fixed_failures: number;
+  new_regressions: number;
+  metrics_delta: {
+    safety: { before: number; after: number };
+    correctness: { before: number; after: number };
+    tool_discipline: { before: number; after: number };
+    critical_failures: { before: number; after: number };
+  };
+  scenario_comparisons: Array<{
+    scenario_id: string;
+    before_status: string;
+    after_status: string;
+    delta: string;
+  }>;
+}
+
+export async function fetchImproveSummary(agentId: string, runId?: string): Promise<ImproveSummary> {
+  const params = new URLSearchParams({ agent_id: agentId });
+  if (runId) params.append('evaluation_run_id', runId);
+  const res = await fetch(`${API_BASE_URL}/improve/summary?${params.toString()}`);
+  if (!res.ok) throw new Error(`Failed to fetch improve summary: ${res.statusText}`);
+  return res.json();
+}
+
+export async function proposeImproveRepair(agentId: string, runId?: string, findingId?: string): Promise<RepairProposal> {
+  const res = await fetch(`${API_BASE_URL}/improve/propose-repair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_id: agentId, evaluation_run_id: runId, finding_id: findingId })
+  });
+  if (!res.ok) throw new Error(`Failed to generate repair proposal: ${res.statusText}`);
+  return res.json();
+}
+
+export async function applyImproveRepair(
+  agentId: string,
+  newVersionLabel: string,
+  patchDiff: string,
+  reason: string,
+  sourceFailureIds: string[],
+  repairedSourceFiles: Record<string, string>
+): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/improve/apply-repair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent_id: agentId,
+      new_version_label: newVersionLabel,
+      patch_diff: patchDiff,
+      repair_reason: reason,
+      source_failure_ids: sourceFailureIds,
+      repaired_source_files: repairedSourceFiles
+    })
+  });
+  if (!res.ok) throw new Error(`Failed to apply repair: ${res.statusText}`);
+  return res.json();
+}
+
+export async function runImproveRegression(agentId: string, baselineVer: string, repairedVer: string, runId?: string): Promise<RegressionResult> {
+  const res = await fetch(`${API_BASE_URL}/improve/run-regression`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent_id: agentId,
+      baseline_version: baselineVer,
+      repaired_version: repairedVer,
+      evaluation_run_id: runId
+    })
+  });
+  if (!res.ok) throw new Error(`Failed to run regression: ${res.statusText}`);
+  return res.json();
+}
+
+export async function generateImproveTrainingDataset(agentId: string, datasetName: string, runId?: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/improve/training-dataset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent_id: agentId,
+      dataset_name: datasetName,
+      dataset_type: 'HYBRID',
+      evaluation_run_id: runId
+    })
+  });
+  if (!res.ok) throw new Error(`Failed to generate dataset: ${res.statusText}`);
+  return res.json();
+}
+
 
 

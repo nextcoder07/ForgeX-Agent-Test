@@ -56,6 +56,27 @@ class AgentAnalysisResponse(BaseModel):
             return [v]
         return [str(v)]
 
+    @field_validator("invariants", "transformations", "conflicts", mode="before")
+    @classmethod
+    def _normalize_dict_list(cls, v: Any) -> List[Dict[str, Any]]:
+        if not v:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, dict):
+                    res.append(item)
+                elif isinstance(item, str):
+                    res.append({"description": item})
+                else:
+                    res.append({"value": str(item)})
+            return res
+        if isinstance(v, dict):
+            return [v]
+        if isinstance(v, str):
+            return [{"description": v}]
+        return [{"value": str(v)}]
+
 
 class CanonicalAgentInput(BaseModel):
     artifact_id: str

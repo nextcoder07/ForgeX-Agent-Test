@@ -48,7 +48,6 @@ export const Navbar: React.FC = () => {
     { id: 'executions', label: '4. Execute', icon: Radio },
     { id: 'results', label: '5. Results', icon: Zap },
     { id: 'improve', label: '6. Improve', icon: Wrench },
-    { id: 'platform-ai', label: 'ForgeX AI Lab', icon: Cpu },
   ];
 
   const handleNav = (page: PageId) => {

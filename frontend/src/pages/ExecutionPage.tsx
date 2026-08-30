@@ -65,6 +65,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
   const [executionTraces, setExecutionTraces] = useState<ExecutionTrace[]>([]);
   const [expandedTraceId, setExpandedTraceId] = useState<string | null>(null);
   const [traceFilter, setTraceFilter] = useState<'all' | 'tools' | 'security' | 'failed'>('all');
+  const [executionMode, setExecutionMode] = useState<'faithful' | 'compatible' | 'simulation'>('faithful');
   const [running, setRunning] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
   const [loadingScenarios, setLoadingScenarios] = useState(false);
@@ -122,9 +123,9 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     );
   };
 
-  const handleStartExecution = async (mode: string = 'faithful') => {
+  const handleStartExecution = async (overrideMode?: string) => {
     if (selectedScenarioIds.length === 0) return;
-    const safeMode = typeof mode === 'string' ? mode : 'faithful';
+    const safeMode = typeof overrideMode === 'string' ? overrideMode : executionMode;
     setRunning(true);
     setExecutionJob(null);
     setExecutionTraces([]);
@@ -290,21 +291,23 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
 
       {/* 🛑 Blocked Execution Warning Banner with Root-Cause Diagnostics & Setup Navigation */}
       {executionBlockedMsg && (
-        <div className="p-4 rounded-2xl glass-panel border border-rose-500/40 bg-rose-950/40 flex items-center justify-between flex-wrap gap-3 animate-fadeIn">
+        <div className="p-4 rounded-2xl glass-panel border border-rose-500/50 bg-rose-950/50 flex items-center justify-between flex-wrap gap-3 animate-fadeIn">
           <div className="flex items-center space-x-3 max-w-2xl">
-            <div className="p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/30 flex-shrink-0">
+            <div className="p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/40 flex-shrink-0">
               <AlertTriangle className="w-5 h-5 text-rose-400" />
             </div>
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <p className="text-xs font-extrabold text-rose-200 uppercase tracking-wider">Execution Blocked / Error</p>
+                <p className="text-xs font-extrabold text-rose-200 uppercase tracking-wider">
+                  BLOCKED — USER CREDENTIAL REQUIRED
+                </p>
                 <span className="px-2 py-0.5 text-[9px] font-mono font-bold rounded bg-rose-950 text-rose-300 border border-rose-500/30">
                   Target: {selectedAgent?.name || selectedAgentId}
                 </span>
               </div>
-              <p className="text-xs text-slate-200 font-medium leading-relaxed">{executionBlockedMsg}</p>
+              <p className="text-xs text-slate-100 font-semibold leading-relaxed">{executionBlockedMsg}</p>
               <p className="text-[10px] text-rose-300/80">
-                Source of issue: Invalid/missing API key, missing runtime package, or preflight authentication failure.
+                Simulation will never replace a missing credential silently. Please provide the required API key under Setup.
               </p>
             </div>
           </div>
@@ -315,13 +318,6 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
             >
               <Shield className="w-3.5 h-3.5" />
               <span>Configure Credentials & Keys →</span>
-            </button>
-            <button
-              onClick={() => handleStartExecution('compatible')}
-              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition cursor-pointer"
-            >
-              <Zap className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Try Simulation Mode</span>
             </button>
           </div>
         </div>
@@ -466,14 +462,106 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
               </div>
             )}
 
+            {/* Execution Mode Selector */}
+            {scenarios.length > 0 && (
+              <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Execution Mode</span>
+                  </h3>
+                  <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded">
+                    Demo Recommended: Faithful
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {/* Faithful */}
+                  <div
+                    onClick={() => !running && setExecutionMode('faithful')}
+                    className={`p-3.5 rounded-xl border transition-all cursor-pointer select-none ${
+                      executionMode === 'faithful'
+                        ? 'bg-emerald-950/30 border-emerald-400/90 ring-1 ring-emerald-400/60 shadow-lg shadow-emerald-950/50'
+                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center space-x-2">
+                        <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${
+                          executionMode === 'faithful' ? 'bg-emerald-400' : 'border border-slate-600'
+                        }`}>
+                          {executionMode === 'faithful' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                        </div>
+                        <span className="text-xs font-extrabold text-slate-100">Faithful</span>
+                      </div>
+                      <span className="text-[9px] font-mono font-bold text-emerald-400 uppercase bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-500/30">Primary</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-snug">
+                      Test the real agent with its configured runtime.
+                    </p>
+                  </div>
+
+                  {/* Compatible */}
+                  <div
+                    onClick={() => !running && setExecutionMode('compatible')}
+                    className={`p-3.5 rounded-xl border transition-all cursor-pointer select-none ${
+                      executionMode === 'compatible'
+                        ? 'bg-indigo-950/30 border-indigo-400/80 ring-1 ring-indigo-400/50 shadow-lg shadow-indigo-950/50'
+                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center space-x-2">
+                        <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${
+                          executionMode === 'compatible' ? 'bg-indigo-400' : 'border border-slate-600'
+                        }`}>
+                          {executionMode === 'compatible' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                        </div>
+                        <span className="text-xs font-extrabold text-slate-100">Compatible</span>
+                      </div>
+                      <span className="text-[9px] font-mono text-indigo-300 uppercase bg-indigo-950 px-1.5 py-0.5 rounded border border-indigo-500/30">Adapter</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-snug">
+                      Run the real agent with supported mocks/adapters.
+                    </p>
+                  </div>
+
+                  {/* Simulation */}
+                  <div
+                    onClick={() => !running && setExecutionMode('simulation')}
+                    className={`p-3.5 rounded-xl border transition-all cursor-pointer select-none ${
+                      executionMode === 'simulation'
+                        ? 'bg-amber-950/30 border-amber-500/80 ring-1 ring-amber-500/50 shadow-lg shadow-amber-950/50'
+                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center space-x-2">
+                        <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${
+                          executionMode === 'simulation' ? 'bg-amber-400' : 'border border-slate-600'
+                        }`}>
+                          {executionMode === 'simulation' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                        </div>
+                        <span className="text-xs font-extrabold text-slate-100">Simulation</span>
+                      </div>
+                      <span className="text-[9px] font-mono font-bold text-amber-400 uppercase bg-amber-950 px-1.5 py-0.5 rounded border border-amber-500/40">Lower Fidelity</span>
+                    </div>
+                    <p className="text-[11px] text-amber-200/90 leading-snug">
+                      Simulate unavailable external dependencies. Results have lower execution fidelity.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Launch controls */}
             {scenarios.length > 0 && (
               <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
                 <p className="text-[10px] text-slate-500 font-mono">
-                  Sandbox executions run with isolated filesystem & mock telemetry.
+                  Running under <span className="uppercase text-cyan-400 font-bold">{executionMode}</span> execution mode.
                 </p>
                 <button
-                  onClick={() => handleStartExecution('faithful')}
+                  onClick={() => handleStartExecution()}
                   disabled={running || selectedScenarioIds.length === 0}
                   className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/20 flex items-center space-x-2 transition disabled:opacity-50 disabled:scale-100 active:scale-95 cursor-pointer"
                 >

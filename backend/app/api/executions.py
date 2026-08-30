@@ -456,17 +456,17 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
         execution_id=job_id
     )
     
-    if not res_result.execution_dependency_binding.all_fulfilled and req_mode_enum == ExecutionMode.FAITHFUL:
-        missing_deps = ", ".join(res_result.execution_dependency_binding.unfulfilled_dependencies)
+    if not res_result.execution_dependency_binding.all_fulfilled and req_mode_enum != ExecutionMode.SIMULATION:
+        missing_deps = ", ".join(res_result.execution_dependency_binding.unfulfilled_dependencies) if res_result.execution_dependency_binding.unfulfilled_dependencies else "API key or runtime dependency"
         job = ExecutionJob(
             id=job_id,
             agent_id=payload.agent_id,
             agent_name=agent.name,
             status="BLOCKED",
-            error_message=f"Execution blocked: missing required credentials ({missing_deps})",
+            error_message=f"BLOCKED — USER CREDENTIAL REQUIRED: Missing required credential ({missing_deps}). Provide keys under Setup.",
             total_scenarios=len(payload.scenario_ids),
             completed_scenarios=0,
-            execution_mode=ExecutionMode.FAITHFUL.value,
+            execution_mode=(req_mode_enum.value if req_mode_enum else ExecutionMode.FAITHFUL.value),
             original_model="user_configured",
             executed_model="UNAVAILABLE",
             model_substitution=False,

@@ -107,19 +107,40 @@ class SyncedDict:
         raise KeyError(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
+        is_existing = key in self._local_data
         self._local_data[key] = value
         self._save_local_snapshot()
         if self._sb:
             try:
                 row = self.serialize_fn(key, value)
                 conflict_col = "id" if "id" in row else self.key_col
+                
+                # Sanitize foreign keys if they refer to execution job IDs instead of evaluation runs
+                for fk_field in ["evaluation_run_id", "scenario_id", "agent_version_id", "sandbox_session_id"]:
+                    if fk_field in row and isinstance(row[fk_field], str):
+                        if row[fk_field].startswith(("exec-", "job-")) and fk_field == "evaluation_run_id":
+                            row[fk_field] = None
+
+                if is_existing:
+                    # Record already exists locally, update directly to avoid POST 409 conflict
+                    try:
+                        res = self._sb.table(self.table_name).update(row).eq(conflict_col, key).execute()
+                        if res.data:
+                            return
+                    except Exception:
+                        pass
+
                 self._sb.table(self.table_name).upsert(row, on_conflict=conflict_col).execute()
             except Exception as e:
                 err_msg = str(e)
-                if "409" in err_msg or "Conflict" in err_msg or "duplicate key" in err_msg:
+                if "409" in err_msg or "Conflict" in err_msg or "duplicate key" in err_msg or "23503" in err_msg or "foreign key" in err_msg.lower():
                     try:
                         row = self.serialize_fn(key, value)
                         conflict_col = "id" if "id" in row else self.key_col
+                        # Strip unfulfilled foreign keys and update directly
+                        for fk_field in ["evaluation_run_id", "scenario_id", "agent_version_id", "sandbox_session_id"]:
+                            if fk_field in row and isinstance(row[fk_field], str) and row[fk_field].startswith(("exec-", "job-")):
+                                row[fk_field] = None
                         self._sb.table(self.table_name).update(row).eq(conflict_col, key).execute()
                         return
                     except Exception:
@@ -541,9 +562,10 @@ def _deserialize_scorecard(row: Dict[str, Any]) -> ReliabilityScorecard:
     )
 
 def _serialize_verdicts(key: str, verdicts: List[RunVerdict]) -> Dict[str, Any]:
+    safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
     return {
         "id": f"verd-list-{key}",
-        "evaluation_run_id": key,
+        "evaluation_run_id": safe_eval_id,
         "record_type": "verdicts",
         "status": "completed",
         "evidence": {"verdicts": [v.model_dump() if hasattr(v, "model_dump") else v.dict() for v in verdicts]}
@@ -555,9 +577,10 @@ def _deserialize_verdicts(row: Dict[str, Any]) -> List[RunVerdict]:
     return [RunVerdict(**v) for v in verdicts_data]
 
 def _serialize_traces(key: str, traces: List[ExecutionTrace]) -> Dict[str, Any]:
+    safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
     return {
         "id": f"trace-list-{key}",
-        "evaluation_run_id": key,
+        "evaluation_run_id": safe_eval_id,
         "record_type": "traces",
         "status": "completed",
         "evidence": {"traces": [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in traces]}
@@ -574,10 +597,11 @@ def _serialize_clusters(key: str, clusters: List[FailureCluster]) -> Dict[str, A
     cat = getattr(first_c, "category", None)
     cat_str = cat.value if hasattr(cat, "value") else (str(cat) if cat else "REASONING_FAILURE")
     sev = getattr(first_c, "severity", "medium")
+    safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
 
     return {
         "id": f"cluster-{key}",
-        "evaluation_run_id": key,
+        "evaluation_run_id": safe_eval_id,
         "title": title,
         "category": cat_str,
         "severity": sev,
@@ -809,10 +833,13 @@ def _deserialize_ai_generation_run(row: Dict[str, Any]) -> AIGenerationRun:
 
 
 def _serialize_execution_session(key: str, s: Any) -> Dict[str, Any]:
+    raw_eval = s.get("execution_run_id") or s.get("evaluation_run_id") if isinstance(s, dict) else getattr(s, "execution_run_id", getattr(s, "evaluation_run_id", None))
+    safe_eval_id = raw_eval if (raw_eval and isinstance(raw_eval, str) and not raw_eval.startswith(("exec-", "job-"))) else None
+
     if isinstance(s, dict):
         return {
             "id": s.get("id", key),
-            "evaluation_run_id": s.get("execution_run_id") or s.get("evaluation_run_id"),
+            "evaluation_run_id": safe_eval_id,
             "agent_version_id": s.get("agent_version_id"),
             "scenario_id": s.get("scenario_id"),
             "sandbox_session_id": s.get("sandbox_session_id"),
@@ -823,7 +850,7 @@ def _serialize_execution_session(key: str, s: Any) -> Dict[str, Any]:
 
     return {
         "id": getattr(s, "id", key),
-        "evaluation_run_id": getattr(s, "execution_run_id", getattr(s, "evaluation_run_id", None)),
+        "evaluation_run_id": safe_eval_id,
         "agent_version_id": getattr(s, "agent_version_id", None),
         "scenario_id": getattr(s, "scenario_id", None),
         "sandbox_session_id": getattr(s, "sandbox_session_id", None),
@@ -959,10 +986,12 @@ def _deserialize_benchmark_record(row: Dict[str, Any]) -> BenchmarkRecord:
 
 
 def _serialize_behavior_profile(key: str, bp: AgentBehaviorProfile) -> Dict[str, Any]:
+    raw_ver = bp.agent_version_id or bp.agent_id
+    safe_ver_id = raw_ver if (raw_ver and isinstance(raw_ver, str) and not raw_ver.startswith("agent-")) else None
     return {
         "id": bp.id,
         "agent_id": bp.agent_id,
-        "agent_version_id": bp.agent_version_id or bp.agent_id,
+        "agent_version_id": safe_ver_id,
         "schema_version": bp.schema_version,
         "profile_json": bp.model_dump() if hasattr(bp, "model_dump") else bp.dict(),
         "analysis_run_id": bp.analysis_run_id,
@@ -1367,15 +1396,17 @@ class Store:
         bp_id = bp_dict.get("id") or f"abp-{agent_id}"
         if self.agents._sb and agent_id:
             try:
+                raw_ver = bp_dict.get("agent_version_id")
+                safe_ver = raw_ver if (raw_ver and isinstance(raw_ver, str) and not raw_ver.startswith("agent-")) else None
                 row = {
                     "id": bp_id,
                     "agent_id": agent_id,
-                    "agent_version_id": bp_dict.get("agent_version_id") or f"{agent_id}-v1.0",
+                    "agent_version_id": safe_ver,
                     "profile_data": bp_dict
                 }
                 self.agents._sb.table("agent_behavior_profiles").upsert(row, on_conflict="id").execute()
             except Exception as e:
-                logger.warning(f"Could not persist agent_behavior_profile to Supabase: {e}")
+                logger.debug(f"Could not persist agent_behavior_profile to Supabase: {e}")
 
     def purge_all_agents(self) -> None:
         """Purges all agents, scenarios, jobs, scorecards, verdicts, traces, profiles, datasets, and deletes snapshot files for a clean reset."""
@@ -1747,10 +1778,11 @@ class Store:
         self.verdicts[job_id] = verdicts
         if self.verdicts._sb and verdicts:
             try:
+                safe_eval_id = job_id if (job_id and isinstance(job_id, str) and not job_id.startswith(("exec-", "job-"))) else None
                 rows = [
                     {
                         "id": v.id or f"verd-{uuid.uuid4().hex[:8]}",
-                        "evaluation_run_id": job_id,
+                        "evaluation_run_id": safe_eval_id,
                         "scenario_id": v.scenario_id,
                         "status": normalize_enum_value(v.status, default="PASS"),
                         "evidence": v.model_dump() if hasattr(v, "model_dump") else v.dict()
@@ -1923,6 +1955,12 @@ class Store:
     # --- Model Connections ---
     def save_model_connection(self, conn: ModelConnection) -> None:
         self.model_connections[conn.id] = conn
+        try:
+            from app.services.supabase_store import supabase_store
+            conn_data = conn.model_dump() if hasattr(conn, "model_dump") else conn.dict()
+            supabase_store.upsert_model_connection(conn_data)
+        except Exception as e:
+            logger.debug(f"Could not sync model_connection to Supabase: {e}")
 
     def get_model_connection(self, conn_id: str) -> Optional[ModelConnection]:
         return self.model_connections.get(conn_id)
@@ -1933,6 +1971,11 @@ class Store:
     def delete_model_connection(self, conn_id: str) -> None:
         if conn_id in self.model_connections:
             del self.model_connections[conn_id]
+        try:
+            from app.services.supabase_store import supabase_store
+            supabase_store.delete_model_connection(conn_id)
+        except Exception as e:
+            logger.debug(f"Could not delete model_connection from Supabase: {e}")
 
     # --- Training Datasets ---
     def save_training_dataset(self, dataset: TrainingDataset) -> None:

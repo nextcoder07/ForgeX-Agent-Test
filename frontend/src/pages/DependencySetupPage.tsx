@@ -756,7 +756,15 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
                       <span className="text-[10px] text-slate-400 block mt-0.5">{slot.detected_from_source}</span>
                     </td>
                     <td className="py-2.5 px-3 font-mono text-slate-300">
-                      {slot.env_var_name || 'GOOGLE_API_KEY'}
+                      {slot.env_var_name || (
+                        (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('openai') || (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('gpt')
+                          ? 'OPENAI_API_KEY'
+                          : (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('anthropic') || (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('claude')
+                          ? 'ANTHROPIC_API_KEY'
+                          : (slot.code_variable || slot.detected_from_source || '').toLowerCase().includes('gemini')
+                          ? 'GOOGLE_API_KEY'
+                          : 'OPENAI_API_KEY'
+                      )}
                     </td>
                     <td className="py-2.5 px-3 font-mono text-slate-200">
                       <span className="text-emerald-300 font-bold">
