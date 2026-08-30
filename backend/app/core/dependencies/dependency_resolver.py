@@ -346,28 +346,28 @@ class DependencyResolver:
 
         elif target_mode == ExecutionMode.COMPATIBLE:
             # Compatible: Explicit substitution to Gemini
-            executed_prov = "google"
-
             if runtime_import_blockers:
                 is_mode_all_fulfilled = False
 
-            executed_mod = "gemini-3.7-flash"
-            llm_sub = orig_provider.lower() not in ["google", "gemini"]
+            if llm_req and llm_req.provider != "UNKNOWN":
+                executed_prov = "google"
+                executed_mod = "gemini-3.7-flash"
+                llm_sub = orig_provider.lower() not in ["google", "gemini"]
 
-            service_bindings.append(
-                ServiceBindingItem(
-                    capability="LLM_INFERENCE",
-                    original_provider=orig_provider,
-                    original_model=orig_model,
-                    executed_provider=executed_prov,
-                    executed_model=executed_mod,
-                    substituted=llm_sub,
-                    credential_bound="TEST_AGENT_GEMINI_API_KEY" if has_test_gemini_key else None,
-                    status="SUBSTITUTED" if has_test_gemini_key else "MISSING"
+                service_bindings.append(
+                    ServiceBindingItem(
+                        capability="LLM_INFERENCE",
+                        original_provider=orig_provider,
+                        original_model=orig_model,
+                        executed_provider=executed_prov,
+                        executed_model=executed_mod,
+                        substituted=llm_sub,
+                        credential_bound="TEST_AGENT_GEMINI_API_KEY" if has_test_gemini_key else None,
+                        status="SUBSTITUTED" if has_test_gemini_key else "MISSING"
+                    )
                 )
-            )
-            if not has_test_gemini_key:
-                is_mode_all_fulfilled = False
+                if not has_test_gemini_key:
+                    is_mode_all_fulfilled = False
 
             for s in service_reqs:
                 s_bound = bool(secrets.get(s.credential) or os.getenv(s.credential)) if s.credential else True

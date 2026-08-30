@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navbar } from './components/Navbar';
 import { HomePage } from './pages/HomePage';
@@ -20,10 +20,24 @@ import type { AgentRecord } from './api/client';
 
 function AppContent() {
   const { user } = useAuth();
+  const location = useLocation();
   const [lastRegisteredAgent, setLastRegisteredAgent] = useState<AgentRecord | null>(() => {
     const saved = localStorage.getItem('lastRegisteredAgent');
     return saved ? JSON.parse(saved) : null;
   });
+
+  // Remember current active route so browser refreshes stay on the exact same page
+  React.useEffect(() => {
+    const publicPaths = ['/', '/home', '/login', '/signup', '/verify-email'];
+    if (!publicPaths.includes(location.pathname)) {
+      sessionStorage.setItem('forgex_last_visited_path', location.pathname + location.search);
+    }
+  }, [location]);
+
+  const getSavedPath = () => {
+    const saved = sessionStorage.getItem('forgex_last_visited_path');
+    return saved && saved !== '/' && saved !== '/login' ? saved : '/dashboard';
+  };
 
   const handleAgentRegistered = (agent: AgentRecord) => {
     setLastRegisteredAgent(agent);
@@ -36,10 +50,10 @@ function AppContent() {
       <main className="pb-32">
         <Routes>
           {/* Public Landing & Authentication */}
-          <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <HomePage />} />
+          <Route path="/" element={user ? <Navigate to={getSavedPath()} replace /> : <HomePage />} />
           <Route path="/home" element={<HomePage />} />
-          <Route path="/login" element={user?.emailVerified ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
-          <Route path="/signup" element={user?.emailVerified ? <Navigate to="/dashboard" replace /> : <SignupPage />} />
+          <Route path="/login" element={user?.emailVerified ? <Navigate to={getSavedPath()} replace /> : <LoginPage />} />
+          <Route path="/signup" element={user?.emailVerified ? <Navigate to={getSavedPath()} replace /> : <SignupPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           {/* Protected Workspace Routes */}

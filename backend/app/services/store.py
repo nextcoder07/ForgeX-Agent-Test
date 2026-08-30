@@ -569,13 +569,18 @@ def _deserialize_traces(row: Dict[str, Any]) -> List[ExecutionTrace]:
     return [ExecutionTrace(**t) for t in traces_data]
 
 def _serialize_clusters(key: str, clusters: List[FailureCluster]) -> Dict[str, Any]:
-    # We can write each cluster to failure_clusters table!
-    # But since it's a list, let's write the first one or upsert them.
-    # For bulk dictionary compatibility, we save as a single JSONB container or mapping.
-    # Let's save to failure_clusters table by upserting all.
+    first_c = clusters[0] if clusters else None
+    title = getattr(first_c, "title", None) or getattr(first_c, "label", "Failure Cluster")
+    cat = getattr(first_c, "category", None)
+    cat_str = cat.value if hasattr(cat, "value") else (str(cat) if cat else "REASONING_FAILURE")
+    sev = getattr(first_c, "severity", "medium")
+
     return {
-        "id": f"cluster-list-{key}",
-        "evaluation_id": key,
+        "id": f"cluster-{key}",
+        "evaluation_run_id": key,
+        "title": title,
+        "category": cat_str,
+        "severity": sev,
         "member_verdict_ids": {"clusters": [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in clusters]}
     }
 
@@ -1733,6 +1738,7 @@ class Store:
 
     def save_verdicts(self, job_id: str, verdicts: List[RunVerdict]):
         import uuid
+        from app.models.enums import normalize_enum_value
         self.verdicts[job_id] = verdicts
         if self.verdicts._sb and verdicts:
             try:
@@ -1741,7 +1747,7 @@ class Store:
                         "id": v.id or f"verd-{uuid.uuid4().hex[:8]}",
                         "evaluation_run_id": job_id,
                         "scenario_id": v.scenario_id,
-                        "status": v.status or "completed",
+                        "status": normalize_enum_value(v.status, default="PASS"),
                         "evidence": v.model_dump() if hasattr(v, "model_dump") else v.dict()
                     }
                     for v in verdicts

@@ -306,24 +306,31 @@ def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List
                             logger.info("[EVAL TRACE] job_id=%s created RegressionTest reg_id=%s scenario=%s category=%s",
                                         job_id, reg_test.id, v.scenario_id, f.category)
 
-        # Phase 4: COMPLETED — only after ALL persistence succeeds
-        job.status = "completed"
-        job.current_step = f"Evaluation complete. Evaluated {len(verdicts)} of {len(traces)} scenarios."
+        # Phase 4: STATE DETERMINATION — COMPLETED vs PARTIAL vs FAILED
+        semantic_unavailable = any(v.evaluation_method == "DETERMINISTIC_ONLY" for v in verdicts)
+        
+        if semantic_unavailable:
+            job.status = "partial"
+            job.current_step = f"Evaluation completed with PARTIAL status (Evaluated {len(verdicts)} of {len(traces)} scenarios with deterministic assertions; Semantic Judge was UNAVAILABLE due to invalid LLM credentials)."
+        else:
+            job.status = "completed"
+            job.current_step = f"Evaluation complete. Evaluated all {len(verdicts)} scenarios with deterministic and semantic judge layers."
+            
         job.total_verdicts = len(verdicts)
         job.finished_at = _now()
         store.jobs[job_id] = job
 
         logger.info(
-            "[EVAL TRACE] job_id=%s phase=COMPLETED verdicts=%d/%d scorecard_composite=%s",
-            job_id, len(verdicts), len(traces), scorecard.composite
+            "[EVAL TRACE] job_id=%s status=%s verdicts=%d/%d scorecard_composite=%s",
+            job_id, job.status, len(verdicts), len(traces), scorecard.composite
         )
 
         activity_log.emit(
             category="EVALUATION",
             action="JOB_COMPLETE",
-            detail=f"Evaluation job {job_id} completed successfully for '{agent.name}'. Overall Score: {scorecard.composite}/100",
+            detail=f"Evaluation job {job_id} finished ({job.status.upper()}) for '{agent.name}'. Composite Score: {scorecard.composite}/100",
             response_summary=f"Passed: {scorecard.passed}/{scorecard.total_scenarios} | Failed: {scorecard.failed}",
-            status="success"
+            status="success" if job.status == "completed" else "warning"
         )
 
         pass

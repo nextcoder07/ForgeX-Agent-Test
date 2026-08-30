@@ -72,16 +72,16 @@ const syncProfileToBackend = async (firebaseUser: User, idToken: string) => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => auth.currentUser);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY));
-  const [loading, setLoading] = useState<boolean>(!auth.currentUser && !localStorage.getItem(LOCAL_STORAGE_USER_KEY));
+  const [loading, setLoading] = useState<boolean>(true);
 
   // Synchronize Firebase Auth state
   useEffect(() => {
     let isMounted = true;
 
-    // Safety timeout: Never keep loading spinner stuck for more than 1 second
+    // Safety timeout: Never keep loading spinner stuck for more than 1 text second
     const fallbackTimer = setTimeout(() => {
       if (isMounted) setLoading(false);
-    }, 1000);
+    }, 1200);
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       clearTimeout(fallbackTimer);

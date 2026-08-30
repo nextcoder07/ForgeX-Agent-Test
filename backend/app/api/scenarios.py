@@ -38,7 +38,8 @@ router = APIRouter(prefix="/scenarios", tags=["Scenarios"])
 
 def _build_unique_padding_scenario(agent: Any, context: Any, category: ScenarioCategory, variation: int) -> Scenario:
     payload = f"padding_{category.value}_{variation}"
-    args = ["--payload", payload] if context.interface_type == "CLI" else []
+    cli_flag = list(context.valid_cli_flags)[0] if context.valid_cli_flags else "--request"
+    args = [cli_flag, payload] if context.interface_type == "CLI" else []
     command = f"python {context.entrypoint} {' '.join(args)}".strip()
     scenario = Scenario(
         id=f"SC-FILL-{category.value[:3].upper()}-{uuid.uuid4().hex[:6]}",
