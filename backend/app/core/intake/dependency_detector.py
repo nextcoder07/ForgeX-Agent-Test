@@ -216,10 +216,13 @@ class DependencyDetector:
             )
             idx += 1
 
-        # Fallback if no explicit assignments found but imports exist
+        # Fallback only if actual LLM SDK imports exist in code
         if not deps:
-            code_lower = code_text.lower()
-            if "openai" in code_lower:
+            has_openai_import = bool(re.search(r'\b(import\s+openai|from\s+openai|ChatOpenAI)\b', code_text))
+            has_google_import = bool(re.search(r'\b(import\s+google\.generativeai|from\s+google\.generativeai|ChatGoogleGenerativeAI|genai\.GenerativeModel)\b', code_text))
+            has_anthropic_import = bool(re.search(r'\b(import\s+anthropic|from\s+anthropic|ChatAnthropic)\b', code_text))
+
+            if has_openai_import:
                 deps.append(
                     AgentModelDependency(
                         id=f"dep-model-{agent_id}-1",
@@ -234,7 +237,7 @@ class DependencyDetector:
                         created_at=_now()
                     )
                 )
-            elif "google" in code_lower or "gemini" in code_lower:
+            elif has_google_import:
                 deps.append(
                     AgentModelDependency(
                         id=f"dep-model-{agent_id}-1",
@@ -249,18 +252,17 @@ class DependencyDetector:
                         created_at=_now()
                     )
                 )
-            else:
-                # Absolute fallback default
+            elif has_anthropic_import:
                 deps.append(
                     AgentModelDependency(
                         id=f"dep-model-{agent_id}-1",
                         agent_id=agent_id,
-                        provider="google",
-                        model_name="gemini-3.7-flash",
+                        provider="anthropic",
+                        model_name="claude-3-5-sonnet",
                         dependency_type="llm",
                         required=True,
-                        original_provider="google",
-                        original_endpoint="https://generativelanguage.googleapis.com",
+                        original_provider="anthropic",
+                        original_endpoint="https://api.anthropic.com",
                         detected_from="ast_code_import",
                         created_at=_now()
                     )

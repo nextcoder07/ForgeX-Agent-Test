@@ -116,6 +116,14 @@ class SyncedDict:
                 self._sb.table(self.table_name).upsert(row, on_conflict=conflict_col).execute()
             except Exception as e:
                 err_msg = str(e)
+                if "409" in err_msg or "Conflict" in err_msg or "duplicate key" in err_msg:
+                    try:
+                        row = self.serialize_fn(key, value)
+                        conflict_col = "id" if "id" in row else self.key_col
+                        self._sb.table(self.table_name).update(row).eq(conflict_col, key).execute()
+                        return
+                    except Exception:
+                        pass
                 if self.table_name == "sandbox_specifications" and ("PGRST204" in err_msg or "schema cache" in err_msg):
                     try:
                         row = self.serialize_fn(key, value)
@@ -1651,8 +1659,11 @@ class Store:
             except Exception as e:
                 logger.error(f"Supabase error fetching all scenarios: {e}")
 
+        active_agent_ids = set(self.agents.keys())
         if agent_id:
             return [s for s in self.scenarios._local_data.values() if getattr(s, 'agent_id', None) == agent_id]
+        if active_agent_ids:
+            return [s for s in self.scenarios._local_data.values() if getattr(s, 'agent_id', None) in active_agent_ids]
         return list(self.scenarios._local_data.values())
 
     def clear_scenarios_for_agent(self, agent_id: str):
@@ -1880,7 +1891,8 @@ class Store:
     def save_execution_model_binding(self, binding: Any):
         if not hasattr(self, "_bindings"):
             self._bindings = {}
-        self._bindings[binding.execution_id] = binding
+        exec_id = getattr(binding, "execution_id", getattr(binding, "id", None)) or "default"
+        self._bindings[exec_id] = binding
 
     def get_execution_model_binding(self, exec_id: str) -> Optional[Any]:
         if not hasattr(self, "_bindings"):

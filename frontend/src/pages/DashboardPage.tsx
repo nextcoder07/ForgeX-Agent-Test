@@ -19,10 +19,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
 
   useEffect(() => {
     Promise.allSettled([
-      fetchAgents().then(setAgents),
-      fetchScenarioLibrary().then(setScenarios),
-      fetchCalibrationReport().then(setCalibration),
-    ]).finally(() => setLoading(false));
+      fetchAgents(),
+      fetchScenarioLibrary(),
+      fetchCalibrationReport(),
+    ]).then(([agRes, scRes, calRes]) => {
+      const activeAgents = agRes.status === 'fulfilled' ? agRes.value : [];
+      const activeAgentIds = new Set(activeAgents.map(a => a.id));
+      const rawScenarios = scRes.status === 'fulfilled' ? scRes.value : [];
+      
+      setAgents(activeAgents);
+      // Only keep scenarios belonging to currently active indexed agents
+      const filteredScenarios = activeAgentIds.size > 0 
+        ? rawScenarios.filter(s => s.agent_id && activeAgentIds.has(s.agent_id))
+        : rawScenarios;
+      setScenarios(filteredScenarios);
+
+      if (calRes.status === 'fulfilled') setCalibration(calRes.value);
+    }).finally(() => setLoading(false));
   }, []);
 
   const categories = [...new Set(scenarios.map(s => s.category))];

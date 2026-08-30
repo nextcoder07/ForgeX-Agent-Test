@@ -29,6 +29,8 @@ import type { AgentRecord, ReliabilityScorecard, FailureCluster, FailureFinding 
 import {
   fetchAgents,
   runEvaluationJob,
+  evaluateExecutionJob,
+  fetchLatestExecutionJob,
   fetchScorecard,
   fetchFailureClusters,
   fetchEvaluationJobs,
@@ -241,13 +243,26 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
     setUserDeclinedRepair(false);
 
     try {
-      const job = await runEvaluationJob(selectedAgentId, batchSize);
+      // Check if an execution job exists for the selected agent
+      const latestExec = await fetchLatestExecutionJob(selectedAgentId).catch(() => null);
+      let job: any = null;
+      if (latestExec?.job?.id) {
+        job = await evaluateExecutionJob(latestExec.job.id);
+      } else {
+        job = await runEvaluationJob(selectedAgentId, batchSize);
+      }
       setEvalJob(job);
-      setSelectedJobId(job.id || job.job_id);
-      startPolling(job.id || job.job_id);
-    } catch (e) {
+      const targetId = job?.id || job?.job_id;
+      if (targetId) {
+        setSelectedJobId(targetId);
+        startPolling(targetId);
+      } else {
+        setRunning(false);
+      }
+    } catch (e: any) {
       console.error('Failed to launch evaluation run:', e);
       setRunning(false);
+      setResultsError(e.message || 'Failed to launch evaluation run.');
     }
   };
 

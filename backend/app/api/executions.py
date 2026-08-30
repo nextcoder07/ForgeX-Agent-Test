@@ -456,21 +456,29 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
         execution_id=job_id
     )
     
-    if not res_result.execution_dependency_binding.all_fulfilled:
-        # Gracefully auto-fallback to COMPATIBLE mode with platform test models instead of hard blocking
-        res_result = DependencyResolver.resolve_mode(
-            agent=agent,
-            requested_mode=ExecutionMode.COMPATIBLE,
-            provided_secrets=payload.secrets,
-            execution_id=job_id
+    if not res_result.execution_dependency_binding.all_fulfilled and req_mode_enum == ExecutionMode.FAITHFUL:
+        missing_deps = ", ".join(res_result.execution_dependency_binding.unfulfilled_dependencies)
+        job = ExecutionJob(
+            id=job_id,
+            agent_id=payload.agent_id,
+            agent_name=agent.name,
+            status="BLOCKED",
+            error_message=f"Execution blocked: missing required credentials ({missing_deps})",
+            total_scenarios=len(payload.scenario_ids),
+            completed_scenarios=0,
+            execution_mode=ExecutionMode.FAITHFUL.value,
+            original_model="user_configured",
+            executed_model="UNAVAILABLE",
+            model_substitution=False,
+            confidence="LOW",
+            created_at=_now(),
         )
-        if not res_result.execution_dependency_binding.all_fulfilled:
-            res_result = DependencyResolver.resolve_mode(
-                agent=agent,
-                requested_mode=ExecutionMode.SIMULATION,
-                provided_secrets=payload.secrets,
-                execution_id=job_id
-            )
+        store.save_execution_job(job)
+        # Mark agent execution_status as BLOCKED
+        agent.execution_status = "BLOCKED"
+        agent.blocking_reason = "MISSING_AGENT_CREDENTIAL"
+        store.save_agent(agent)
+        return job
 
     binding = res_result.active_binding or ExecutionModelBinding(
         id=f"bind-{job_id}",
@@ -479,9 +487,9 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
         executed_model="ForgeX Test Model",
         original_provider="default",
         executed_provider="platform_test_pool",
-        mode=ExecutionMode.FAITHFUL,
+        mode=req_mode_enum or ExecutionMode.FAITHFUL,
         model_substitution=False,
-        reason="Auto-resolved with platform defaults",
+        reason="Resolved with platform bindings",
         confidence="high",
         created_at=_now()
     )

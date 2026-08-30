@@ -1153,7 +1153,8 @@ export interface ExecutionJob {
   id: string;
   agent_id: string;
   agent_name: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'BLOCKED';
+  error_message?: string;
   total_scenarios: number;
   completed_scenarios: number;
   scenario_ids: string[];

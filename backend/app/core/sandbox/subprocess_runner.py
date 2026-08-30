@@ -424,26 +424,30 @@ if not _TAVILY_KEY or _TAVILY_KEY.startswith('your_') or _TAVILY_KEY.endswith('_
                     content=f"STDOUT_CHUNK: {stdout_str.strip()}"
                 ))
 
-                # Parse JSON stdout output for tool call invocations
+                # Robust JSON stdout parsing for tool call invocations
                 for line in stdout_str.strip().splitlines():
                     line_clean = line.strip()
-                    if line_clean.startswith("{") and line_clean.endswith("}"):
-                        try:
-                            parsed_data = json.loads(line_clean)
-                            if isinstance(parsed_data, dict):
-                                tool_name = parsed_data.get("tool") or parsed_data.get("action") or parsed_data.get("function")
-                                if tool_name:
-                                    targs = {k: v for k, v in parsed_data.items() if k not in ["tool", "action", "function", "result"]}
-                                    tool_calls.append(ToolCallRecord(
-                                        id=f"tc-{uuid.uuid4().hex[:6]}",
-                                        tool_name=str(tool_name),
-                                        arguments=targs,
-                                        result=parsed_data.get("result"),
-                                        status="SUCCESS",
-                                        latency_ms=12.0
-                                    ))
-                        except Exception:
-                            pass
+                    if "{" in line_clean and "}" in line_clean:
+                        start_idx = line_clean.find("{")
+                        end_idx = line_clean.rfind("}")
+                        if start_idx != -1 and end_idx > start_idx:
+                            jstr = line_clean[start_idx:end_idx + 1]
+                            try:
+                                parsed_data = json.loads(jstr)
+                                if isinstance(parsed_data, dict):
+                                    tool_name = parsed_data.get("tool") or parsed_data.get("action") or parsed_data.get("function")
+                                    if tool_name:
+                                        targs = {k: v for k, v in parsed_data.items() if k not in ["tool", "action", "function", "result"]}
+                                        tool_calls.append(ToolCallRecord(
+                                            id=f"tc-{uuid.uuid4().hex[:6]}",
+                                            tool_name=str(tool_name),
+                                            arguments=targs,
+                                            result=parsed_data.get("result"),
+                                            status="SUCCESS",
+                                            latency_ms=12.0
+                                        ))
+                            except Exception:
+                                pass
             if stderr_str:
                 events.append(TraceEvent(
                     timestamp=_now(),

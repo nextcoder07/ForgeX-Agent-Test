@@ -134,6 +134,14 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
       const job = await runExecutionJob(selectedAgentId, selectedScenarioIds, true, safeMode);
       setExecutionJob(job);
 
+      if (job.status === 'BLOCKED' || job.status === 'blocked') {
+        setRunning(false);
+        setExecutionBlockedMsg(
+          job.error_message || `Execution blocked for agent '${selectedAgent?.name || selectedAgentId}': missing required dependencies or invalid credentials.`
+        );
+        return;
+      }
+
       // Start polling for live job status and trace updates
       pollIntervalRef.current = window.setInterval(async () => {
         try {
@@ -145,9 +153,14 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
           if (traces && traces.length > 0) {
             setExecutionTraces(traces);
           }
-          if (updatedJob.status === 'completed' || updatedJob.status === 'failed') {
+          if (['completed', 'failed', 'blocked', 'BLOCKED'].includes(updatedJob.status)) {
             if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
             setRunning(false);
+            if (updatedJob.status === 'blocked' || updatedJob.status === 'BLOCKED') {
+              setExecutionBlockedMsg(
+                updatedJob.error_message || `Execution blocked for agent '${selectedAgent?.name || selectedAgentId}': missing required credentials or invalid API key.`
+              );
+            }
           }
         } catch (e) {
           console.error('Error polling execution job:', e);
@@ -159,7 +172,9 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     } catch (e: any) {
       console.error('Failed to run execution:', e);
       setRunning(false);
-      setExecutionBlockedMsg(e.message || 'Execution blocked. Missing required credentials or dependencies.');
+      setExecutionBlockedMsg(
+        e.message || `Execution failed to start for agent '${selectedAgent?.name || selectedAgentId}'. Please check API key and dependencies under Setup.`
+      );
     }
   };
 
@@ -184,12 +199,41 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
   };
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
-  const progressPct = executionJob && executionJob.total_scenarios > 0
-    ? Math.round((executionJob.completed_scenarios / executionJob.total_scenarios) * 100)
-    : 0;
+  const isJobBlocked = executionJob?.status === 'BLOCKED' || executionJob?.status === 'blocked';
 
-  // Aggregate metrics from execution traces
-  const totalToolCalls = executionTraces.reduce((acc, t) => acc + (t.tool_calls?.length || 0), 0);
+  const progressPct = isJobBlocked || !executionJob || executionJob.total_scenarios === 0
+    ? 0
+    : Math.min(100, Math.round((executionJob.completed_scenarios / executionJob.total_scenarios) * 100));
+
+  // Deduplicate execution traces by scenario_id to prevent double counting across runs
+  const uniqueTracesByScenario = React.useMemo(() => {
+    if (isJobBlocked) return [];
+    const map = new Map<string, any>();
+    for (const t of executionTraces) {
+      const scId = t.scenario_id || t.id;
+      if (scId && (!map.has(scId) || t.status === 'COMPLETED')) {
+        map.set(scId, t);
+      }
+    }
+    return Array.from(map.values());
+  }, [executionTraces, isJobBlocked]);
+
+  const totalExecutedCount = isJobBlocked ? 0 : uniqueTracesByScenario.length;
+  const targetScenarioCount = executionJob?.total_scenarios || scenarios.length;
+  const coveragePct = isJobBlocked || targetScenarioCount === 0 
+    ? 0 
+    : Math.min(100, Math.round((totalExecutedCount / targetScenarioCount) * 100));
+
+  // Aggregate metrics from execution traces (checking explicit tool_calls + stdout chunks)
+  const totalToolCalls = executionTraces.reduce((acc, t) => {
+    const explicitCalls = t.tool_calls?.length || 0;
+    if (explicitCalls > 0) return acc + explicitCalls;
+    const stdoutCalls = t.events?.filter(e => 
+      e.role === 'agent_message' && e.content && e.content.includes('"tool"')
+    ).length || 0;
+    return acc + stdoutCalls;
+  }, 0);
+
   const totalSecurityEvents = executionTraces.reduce((acc, t) => acc + (t.security_events?.length || 0), 0);
   const totalBlockedTools = executionTraces.reduce((acc, t) => 
     acc + (t.tool_calls?.filter(tc => tc.routing_decision === 'BLOCK' || tc.status === 'BLOCKED_POLICY').length || 0), 0);
@@ -198,7 +242,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     : 0;
 
   const filteredTraces = executionTraces.filter(t => {
-    if (traceFilter === 'tools') return (t.tool_calls && t.tool_calls.length > 0);
+    if (traceFilter === 'tools') return (t.tool_calls && t.tool_calls.length > 0) || t.events?.some(e => e.content?.includes('"tool"'));
     if (traceFilter === 'security') return (t.security_events && t.security_events.length > 0) || (t.tool_calls?.some(tc => tc.routing_decision === 'BLOCK'));
     if (traceFilter === 'failed') return t.status !== 'COMPLETED';
     return true;
@@ -244,32 +288,40 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
       {/* Run tab content starts below */}
       {execTab === 'run' && <>
 
-      {/* 🛑 Blocked Execution Warning Banner with One-Click Auto-Resolve */}
+      {/* 🛑 Blocked Execution Warning Banner with Root-Cause Diagnostics & Setup Navigation */}
       {executionBlockedMsg && (
-        <div className="p-4 rounded-2xl glass-panel border border-rose-500/40 bg-rose-950/30 flex items-center justify-between flex-wrap gap-3 animate-fadeIn">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-rose-500/20">
+        <div className="p-4 rounded-2xl glass-panel border border-rose-500/40 bg-rose-950/40 flex items-center justify-between flex-wrap gap-3 animate-fadeIn">
+          <div className="flex items-center space-x-3 max-w-2xl">
+            <div className="p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/30 flex-shrink-0">
               <AlertTriangle className="w-5 h-5 text-rose-400" />
             </div>
-            <div>
-              <p className="text-xs font-bold text-rose-200">Execution Notice</p>
-              <p className="text-[11px] text-slate-300 mt-0.5">{executionBlockedMsg}</p>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-extrabold text-rose-200 uppercase tracking-wider">Execution Blocked / Error</p>
+                <span className="px-2 py-0.5 text-[9px] font-mono font-bold rounded bg-rose-950 text-rose-300 border border-rose-500/30">
+                  Target: {selectedAgent?.name || selectedAgentId}
+                </span>
+              </div>
+              <p className="text-xs text-slate-200 font-medium leading-relaxed">{executionBlockedMsg}</p>
+              <p className="text-[10px] text-rose-300/80">
+                Source of issue: Invalid/missing API key, missing runtime package, or preflight authentication failure.
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleStartExecution('compatible')}
-              className="px-3 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/20 flex items-center space-x-1.5 transition hover:scale-[1.02]"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              <span>Auto-Resolve & Execute</span>
-            </button>
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => navigate(`/dependencies?agentId=${selectedAgentId}&blocked=true`)}
-              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition"
+              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-500/20 flex items-center space-x-1.5 transition hover:scale-[1.02] cursor-pointer"
             >
               <Shield className="w-3.5 h-3.5" />
-              <span>Configure Gateway →</span>
+              <span>Configure Credentials & Keys →</span>
+            </button>
+            <button
+              onClick={() => handleStartExecution('compatible')}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition cursor-pointer"
+            >
+              <Zap className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Try Simulation Mode</span>
             </button>
           </div>
         </div>
@@ -445,28 +497,32 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                     Execution Job: {executionJob.id}
                   </h3>
                 </div>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${
+                <span className={`px-2.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${
                   executionJob.status === 'completed'
                     ? 'bg-emerald-950 text-emerald-400 border-emerald-500/30'
                     : executionJob.status === 'running'
                     ? 'bg-indigo-950 text-indigo-400 border-indigo-500/30 animate-pulse'
+                    : isJobBlocked
+                    ? 'bg-amber-950 text-amber-400 border-amber-500/40'
                     : 'bg-slate-900 text-slate-400 border-slate-800'
                 }`}>
-                  {executionJob.status}
+                  {isJobBlocked ? 'BLOCKED — CREDENTIAL REQUIRED' : executionJob.status}
                 </span>
               </div>
 
               {/* Progress Bar */}
               <div className="space-y-2">
                 <div className="flex justify-between text-[11px] font-mono">
-                  <span className="text-slate-400">Sandbox Runs</span>
-                  <span className="text-slate-200">
-                    {executionJob.completed_scenarios}/{executionJob.total_scenarios} ({progressPct}%)
+                  <span className="text-slate-400">{isJobBlocked ? 'Faithful Execution Status' : 'Sandbox Runs'}</span>
+                  <span className={isJobBlocked ? 'text-amber-400 font-bold' : 'text-slate-200'}>
+                    {isJobBlocked ? `0/${executionJob.total_scenarios} faithfully executed (0%)` : `${executionJob.completed_scenarios}/${executionJob.total_scenarios} (${progressPct}%)`}
                   </span>
                 </div>
                 <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-300"
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      isJobBlocked ? 'bg-amber-500/40' : 'bg-gradient-to-r from-indigo-500 to-purple-500'
+                    }`}
                     style={{ width: `${progressPct}%` }}
                   />
                 </div>
@@ -551,9 +607,9 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
             <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
               <span className="text-[10px] uppercase font-bold text-slate-400">Execution Coverage</span>
               <div className="text-base font-extrabold text-cyan-300">
-                {scenarios.length > 0 ? Math.round((executionTraces.length / scenarios.length) * 100) : 0}%
+                {coveragePct}%
               </div>
-              <span className="text-[9px] text-slate-500">{executionTraces.length}/{scenarios.length} executed</span>
+              <span className="text-[9px] text-slate-500">{totalExecutedCount}/{targetScenarioCount} executed</span>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
