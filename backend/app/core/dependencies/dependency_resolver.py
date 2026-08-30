@@ -597,19 +597,29 @@ class DependencyResolver:
         agent: AgentRecord,
         provided_secrets: Optional[Dict[str, str]] = None,
         session_id: str = "",
-        mode: ExecutionMode = ExecutionMode.FAITHFUL
+        mode: Any = ExecutionMode.FAITHFUL
     ) -> SessionCredentialPrompt:
         """
         Evaluates mode-specific credential demands.
-        - FAITHFUL: requires original agent keys (e.g. OPENAI_API_KEY, TAVILY_API_KEY). Never demands GEMINI_API_KEY.
-        - COMPATIBLE: requires GEMINI_API_KEY + tool keys.
+        - FAITHFUL: requires working AI LLM keys (OpenRouter/Gemini/OpenAI/Ollama pool) + mandatory service keys.
+        - COMPATIBLE: requires working AI LLM keys (Gemini/OpenRouter/Ollama pool) + tool gateway mocks.
         - SIMULATION: requires 0 keys (status = CLEARED).
         """
         secrets = provided_secrets or {}
-        system_items = {item.key_name: item for item in DependencyResolver.get_system_credentials(secrets)}
+        
+        # Ensure mode is an ExecutionMode enum
+        if isinstance(mode, str):
+            try:
+                mode_enum = ExecutionMode(mode.lower())
+            except Exception:
+                mode_enum = ExecutionMode.FAITHFUL
+        elif isinstance(mode, ExecutionMode):
+            mode_enum = mode
+        else:
+            mode_enum = ExecutionMode.FAITHFUL
 
         # Simulation mode needs zero keys
-        if mode == ExecutionMode.SIMULATION:
+        if mode_enum == ExecutionMode.SIMULATION:
             return SessionCredentialPrompt(
                 session_id=session_id or f"sess-{uuid.uuid4().hex[:8]}",
                 agent_id=agent.id,
@@ -620,91 +630,135 @@ class DependencyResolver:
                 message="Simulation execution requires zero real API credentials. Deterministic MockLLM active."
             )
 
+        system_items = {item.key_name: item for item in DependencyResolver.get_system_credentials(secrets)}
         requirements: List[CredentialRequirement] = []
         agent_reqs = DependencyResolver.extract_requirements(agent)
+        raw_manifest = agent.runtime_manifest or {}
 
-        # Check active Test Agent API keys
+        # Check active Test Agent API keys and rotation pools
         try:
             from app.core.llm.key_manager import TestAgentKeyManager
             test_creds = TestAgentKeyManager().get_active_test_credentials()
         except Exception:
             test_creds = {}
 
-        LLM_KEY_NAMES = {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "PLATFORM_SAFETY_LLM", "TEST_AGENT_GEMINI_API_KEY"}
+        has_plat_llm = bool(
+            os.getenv("OPENROUTER_API_KEY") or
+            os.getenv("TEST_AGENT_GEMINI_API_KEY") or
+            os.getenv("GEMINI_API_KEY") or
+            os.getenv("OPENAI_API_KEY") or
+            ("OPENAI_API_KEY" in test_creds) or
+            ("OPENROUTER_API_KEY" in test_creds) or
+            ("GEMINI_API_KEY" in test_creds) or
+            (agent.runtime_manifest and agent.runtime_manifest.get("model_bindings")) or
+            (store.list_model_connections())
+        )
 
-        if mode in (ExecutionMode.FAITHFUL, ExecutionMode.COMPATIBLE):
-            has_plat_llm = bool(
-                os.getenv("OPENROUTER_API_KEY") or
-                os.getenv("TEST_AGENT_GEMINI_API_KEY") or
-                os.getenv("GEMINI_API_KEY") or
-                os.getenv("OPENAI_API_KEY") or
-                ("OPENAI_API_KEY" in test_creds) or
-                ("OPENROUTER_API_KEY" in test_creds) or
-                ("GEMINI_API_KEY" in test_creds) or
-                (agent.runtime_manifest and agent.runtime_manifest.get("model_bindings")) or
-                (store.list_model_connections())
+        LLM_KEY_NAMES = {
+            "OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", 
+            "DEEPSEEK_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", 
+            "PLATFORM_SAFETY_LLM", "TEST_AGENT_GEMINI_API_KEY"
+        }
+
+        for r in agent_reqs:
+            if not r.credential:
+                continue
+
+            cred_name = r.credential
+            user_provided = bool(secrets.get(cred_name))
+
+            # Direct env or test cred check (including rotation e.g. TAVILY_API_KEY_1)
+            env_val = secrets.get(cred_name) or os.getenv(cred_name) or test_creds.get(cred_name)
+            if not env_val and "_API_KEY" in cred_name:
+                base_prefix = cred_name
+                for idx in range(1, 10):
+                    rv = os.getenv(f"{base_prefix}_{idx}")
+                    if rv and not rv.startswith("your_") and not rv.endswith("_here"):
+                        env_val = rv
+                        break
+
+            has_direct_key = bool(env_val and not env_val.startswith("your_") and not env_val.endswith("_here"))
+            sys_item = system_items.get(cred_name)
+
+            is_llm_cred = (cred_name in LLM_KEY_NAMES) or (getattr(r, "type", "") == "llm")
+
+            if is_llm_cred:
+                is_full = has_plat_llm or has_direct_key or (mode_enum == ExecutionMode.COMPATIBLE)
+                sys_cfg = is_full
+                is_opt = True
+            else:
+                if has_direct_key:
+                    is_full = True
+                    sys_cfg = True
+                    is_opt = True
+                elif mode_enum == ExecutionMode.COMPATIBLE:
+                    is_full = True
+                    sys_cfg = True
+                    is_opt = True
+                else:
+                    explicit_secret = any(
+                        (sec.get("name") if isinstance(sec, dict) else getattr(sec, "name", "")) == cred_name
+                        for sec in raw_manifest.get("detected_secrets", [])
+                    )
+                    if explicit_secret:
+                        is_full = user_provided
+                        sys_cfg = False
+                        is_opt = False
+                    else:
+                        is_full = True
+                        sys_cfg = True
+                        is_opt = True
+
+            sys_masked = (
+                f"***{str(secrets.get(cred_name))[-4:]}***" if user_provided
+                else (getattr(sys_item, "masked_value", None) if sys_cfg else None)
             )
 
-            for r in agent_reqs:
-                if r.credential:
-                    sys_item = system_items.get(r.credential)
-                    sys_cfg = getattr(sys_item, "is_configured", False) if sys_item else bool(os.getenv(r.credential) or test_creds.get(r.credential))
+            prov_upper = (r.provider or "").upper()
+            is_plat_supp = prov_upper in ("OPENAI", "OPENROUTER", "GEMINI", "GOOGLE", "GROQ", "OLLAMA", "TAVILY")
 
-                    if r.credential in LLM_KEY_NAMES and has_plat_llm:
-                        sys_cfg = True
+            if user_provided:
+                c_source = CredentialSource.USER_CREDENTIAL_PROVIDED
+                c_status = CredentialStatus.READY
+            elif sys_cfg:
+                c_source = CredentialSource.SUPPORTED_PLATFORM_DEFAULT
+                c_status = CredentialStatus.READY
+            else:
+                c_source = CredentialSource.USER_CREDENTIAL_REQUIRED
+                c_status = CredentialStatus.REQUIRED
 
-                    user_provided = bool(secrets.get(r.credential))
-
-                    is_full = bool(user_provided or sys_cfg)
-                    sys_masked = (
-                        f"***{str(secrets.get(r.credential))[-4:]}***" if user_provided
-                        else (getattr(sys_item, "masked_value", None) if sys_cfg else None)
-                    )
-
-                    prov_upper = (r.provider or "").upper()
-                    is_plat_supp = prov_upper in ("OPENAI", "OPENROUTER", "GEMINI", "GOOGLE", "GROQ", "OLLAMA")
-
-                    if user_provided:
-                        c_source = CredentialSource.USER_CREDENTIAL_PROVIDED
-                        c_status = CredentialStatus.READY
-                    elif sys_cfg:
-                        c_source = CredentialSource.SUPPORTED_PLATFORM_DEFAULT
-                        c_status = CredentialStatus.READY
-                    else:
-                        c_source = CredentialSource.USER_CREDENTIAL_REQUIRED
-                        c_status = CredentialStatus.REQUIRED
-
-                    requirements.append(
-                        CredentialRequirement(
-                            key_name=r.credential,
-                            provider=r.provider or "Agent Service",
-                            description=f"{r.capability or r.type} credential for {agent.name}",
-                            is_fulfilled=is_full,
-                            is_optional=False,
-                            provided_by_system=sys_cfg,
-                            masked_value=sys_masked,
-                            credential_source=c_source,
-                            credential_status=c_status,
-                            is_platform_supported=is_plat_supp
-                        )
-                    )
+            requirements.append(
+                CredentialRequirement(
+                    key_name=cred_name,
+                    provider=r.provider or "Agent Service",
+                    description=f"{r.capability or r.type} credential for {agent.name}",
+                    is_fulfilled=is_full,
+                    is_optional=is_opt,
+                    provided_by_system=sys_cfg,
+                    masked_value=sys_masked,
+                    credential_source=c_source,
+                    credential_status=c_status,
+                    is_platform_supported=is_plat_supp
+                )
+            )
 
         unfulfilled = [r for r in requirements if not r.is_fulfilled and not r.is_optional]
         all_fulfilled = len(unfulfilled) == 0
 
         status = "CLEARED" if all_fulfilled else "CREDS_REQUIRED"
         if all_fulfilled:
-            msg = f"All required credentials for {mode.value.upper()} execution are fulfilled. Ready for execution."
+            msg = f"All required credentials for {mode_enum.value.upper()} execution are fulfilled. Ready for execution."
         else:
             missing_names = ", ".join([r.key_name for r in unfulfilled])
-            msg = f"{mode.value.upper()} execution blocked. Missing required user credentials: {missing_names}."
+            msg = f"{mode_enum.value.upper()} execution blocked. Missing required user credentials: {missing_names}."
 
         return SessionCredentialPrompt(
             session_id=session_id or f"sess-{uuid.uuid4().hex[:8]}",
             agent_id=agent.id,
-            mode=mode,
+            mode=mode_enum,
             all_fulfilled=all_fulfilled,
             status=status,
             requirements=requirements,
             message=msg
         )
+

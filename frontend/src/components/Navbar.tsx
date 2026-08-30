@@ -131,9 +131,6 @@ export const Navbar: React.FC = () => {
                 <span className="font-extrabold text-xs sm:text-sm tracking-tight text-slate-100 font-mono">
                   <span className="text-cyan-400">FORGE</span>X
                 </span>
-                <span className="px-1 py-0.5 text-[8px] sm:text-[9px] font-mono uppercase rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/40">
-                  v2.0 CI
-                </span>
               </div>
               <p className="text-[9px] sm:text-[10px] text-slate-300 -mt-0.5">Agent Reliability & Security Testing</p>
             </div>

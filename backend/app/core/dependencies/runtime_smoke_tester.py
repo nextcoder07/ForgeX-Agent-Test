@@ -327,7 +327,7 @@ class RuntimeSmokeTester:
             uploaded_file_val = file_secrets.get(key_name)
             has_uploaded_file_val = bool(uploaded_file_val and not str(uploaded_file_val).startswith("your_"))
 
-            # 3. Platform environment & Key Manager Vault
+            # 3. Platform environment & Key Manager Vault (includes TAVILY_API_KEY, NEWS_API_KEY, etc.)
             platform_val = platform_test_creds.get(key_name) or os.getenv(key_name)
             has_valid_platform_val = bool(platform_val and not str(platform_val).startswith("your_") and not str(platform_val).endswith("_here"))
 
@@ -351,15 +351,25 @@ class RuntimeSmokeTester:
                     source=CredentialSource.USER_CREDENTIAL_PROVIDED.value,
                     message=f"Extracted credential '{key_name}' from uploaded configuration file."
                 ))
-            elif key_name not in declared_agent_keys and is_platform_supported and (has_valid_platform_val or has_platform_llm):
-                # Source 3: ForgeX-supported platform default LLM/Search gateway for undeclared / internal AI provider
+            elif has_valid_platform_val:
+                # Source 3: Key found in system environment (covers TAVILY_API_KEY, NEWS_API_KEY, and any platform LLM key)
                 checks.append(SmokeCheckItem(
                     check_type="CREDENTIAL",
                     target=key_name,
                     passed=True,
                     status="READY",
                     source=CredentialSource.SUPPORTED_PLATFORM_DEFAULT.value,
-                    message=f"Platform-supported default available for '{prov}' ({key_name})."
+                    message=f"System environment credential available for '{key_name}' ({prov})."
+                ))
+            elif key_name not in declared_agent_keys and is_platform_supported and has_platform_llm:
+                # Source 4: ForgeX platform LLM gateway can route this (undeclared LLM key with active platform connection)
+                checks.append(SmokeCheckItem(
+                    check_type="CREDENTIAL",
+                    target=key_name,
+                    passed=True,
+                    status="READY",
+                    source=CredentialSource.SUPPORTED_PLATFORM_DEFAULT.value,
+                    message=f"Platform-supported default available for '{prov}' ({key_name}) via active connection."
                 ))
             else:
                 # Source Unfulfilled: Required from user before execution can proceed

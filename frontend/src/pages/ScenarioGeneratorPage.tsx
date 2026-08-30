@@ -36,6 +36,7 @@ export const ScenarioGeneratorPage: React.FC<{}> = () => {
     security: 2,
     stress: 1,
     chaos: 1,
+    destructive_guardrail: 1,
   });
   const [useCategoryCounts, setUseCategoryCounts] = useState(false);
 
@@ -228,12 +229,13 @@ export const ScenarioGeneratorPage: React.FC<{}> = () => {
                 Currently in agent library: <b className="text-cyan-300">{scenarios.length} scenarios</b>
               </span>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-              {['normal', 'edge', 'recovery', 'adversarial', 'safety', 'security', 'stress', 'chaos'].map(cat => {
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
+              {['normal', 'edge', 'recovery', 'adversarial', 'safety', 'security', 'stress', 'chaos', 'destructive_guardrail'].map(cat => {
                 const count = categoryCounts[cat] || 0;
+                const label = cat === 'destructive_guardrail' ? 'DESTRUCTIVE' : cat;
                 return (
-                  <div key={cat} className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col items-center space-y-1.5">
-                    <span className="text-[10px] font-mono font-bold uppercase text-slate-300">{cat}</span>
+                  <div key={cat} className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col items-center space-y-1.5" title={cat}>
+                    <span className="text-[10px] font-mono font-bold uppercase text-slate-300 truncate max-w-full">{label}</span>
                     <div className="flex items-center space-x-2">
                       <button
                         onClick={() => updateCatCount(cat, -1)}

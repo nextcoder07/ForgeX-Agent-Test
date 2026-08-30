@@ -576,8 +576,12 @@ def _deserialize_verdicts(row: Dict[str, Any]) -> List[RunVerdict]:
 
 def _serialize_traces(key: str, traces: List[ExecutionTrace]) -> Dict[str, Any]:
     safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
+    # Ensure ID is a valid UUID format for PostgreSQL evaluation_traces table
+    safe_uuid = key
+    if key and not (len(key) == 36 and key.count("-") == 4):
+        safe_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, key))
     return {
-        "id": key,
+        "id": safe_uuid,
         "evaluation_run_id": safe_eval_id,
         "record_type": "traces",
         "status": "completed",

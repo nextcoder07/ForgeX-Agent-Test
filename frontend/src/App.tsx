@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navbar } from './components/Navbar';
+import { Sidebar } from './components/Sidebar';
+import { TopHeader } from './components/TopHeader';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
@@ -45,10 +47,16 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#030712] text-slate-100 pb-12">
-      <Navbar />
-      <main className="pb-32">
-        <Routes>
+    <div className="min-h-screen bg-[#020617] text-slate-100 flex">
+      {/* Left Sidebar Layout for Logged In Workspace */}
+      {user && <Sidebar />}
+
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Header Bar */}
+        {user ? <TopHeader /> : <Navbar />}
+
+        <main className="flex-1 pb-16">
+          <Routes>
           {/* Public Landing & Authentication */}
           <Route path="/" element={user ? <Navigate to={getSavedPath()} replace /> : <HomePage />} />
           <Route path="/home" element={<HomePage />} />
@@ -167,16 +175,12 @@ function AppContent() {
           <Route path="/failures/:jobId" element={<Navigate to="/improve?tab=failures" replace />} />
           <Route path="/scorecard" element={<Navigate to="/results?tab=failures" replace />} />
           <Route path="/calibration" element={<Navigate to="/results?tab=settings" replace />} />
-          <Route path="/pipeline" element={<Navigate to="/executions?tab=telemetry" replace />} />
-
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      {/* Agent Tester Subsystem temporarily turned off to prevent automated AI token consumption */}
-      {/* Can be re-enabled whenever needed by toggling the flag below */}
-      {false && user && <AgentTesterBottomDrawer currentAgent={lastRegisteredAgent} />}
     </div>
-  );
+  </div>
+);
 }
 
 export default function App() {

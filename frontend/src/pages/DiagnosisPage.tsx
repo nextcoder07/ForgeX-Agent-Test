@@ -61,6 +61,11 @@ export const DiagnosisPage: React.FC = () => {
       });
   }, []);
 
+  useEffect(() => {
+    if (agentIdFromUrl) setSelectedAgentId(agentIdFromUrl);
+    if (jobIdFromUrl) setSelectedJobId(jobIdFromUrl);
+  }, [agentIdFromUrl, jobIdFromUrl]);
+
   // Fetch diagnosis when selected agent or job changes
   useEffect(() => {
     if (!selectedAgentId && !selectedJobId) return;

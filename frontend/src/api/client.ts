@@ -1197,7 +1197,8 @@ export async function runExecutionJob(
   agentId: string,
   scenarioIds: string[],
   includeCounterfactuals: boolean = true,
-  requestedMode: string = 'faithful'
+  requestedMode: string = 'faithful',
+  providedSecrets?: Record<string, string>
 ): Promise<ExecutionJob> {
   const res = await fetch(`${API_BASE_URL}/executions/run`, {
     method: 'POST',
@@ -1207,6 +1208,7 @@ export async function runExecutionJob(
       scenario_ids: scenarioIds,
       include_counterfactuals: includeCounterfactuals,
       requested_mode: requestedMode,
+      secrets: providedSecrets || {},
     }),
   });
   if (!res.ok) {

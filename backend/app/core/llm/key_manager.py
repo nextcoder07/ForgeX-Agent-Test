@@ -333,11 +333,40 @@ class TestAgentKeyManager:
     def get_active_test_credentials(self) -> Dict[str, str]:
         creds: Dict[str, str] = {}
         
-        # 1. Check direct env keys
-        for k in ["OPENAI_API_KEY", "GEMINI_API_KEY", "TEST_AGENT_GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY", "NEWS_API_KEY", "STRIPE_TEST_KEY"]:
+        # 1. Check direct env keys (single keys, highest fidelity)
+        for k in ["OPENAI_API_KEY", "GEMINI_API_KEY", "TEST_AGENT_GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY", "NEWS_API_KEY", "STRIPE_TEST_KEY", "SERPER_API_KEY", "WEATHER_API_KEY"]:
             val = os.getenv(k, "").strip()
             if val and not val.startswith("your_") and not val.endswith("_here"):
                 creds[k] = val
+
+        # 1.5. Check TAVILY_API_KEY_1..N rotation pool (like AI key rotation)
+        for idx in range(1, 20):
+            val = os.getenv(f"TAVILY_API_KEY_{idx}", "").strip()
+            if not val or val.startswith("your_") or val.endswith("_here"):
+                continue
+            if "TAVILY_API_KEY" not in creds:
+                creds["TAVILY_API_KEY"] = val
+                logger.info(f"Registered TAVILY_API_KEY_{idx} as active Tavily key (priority={idx})")
+            # Keep first found (lowest index = highest priority)
+            break
+
+        # 1.6. Check NEWS_API_KEY_1..N rotation pool
+        for idx in range(1, 20):
+            val = os.getenv(f"NEWS_API_KEY_{idx}", "").strip()
+            if not val or val.startswith("your_") or val.endswith("_here"):
+                continue
+            if "NEWS_API_KEY" not in creds:
+                creds["NEWS_API_KEY"] = val
+            break
+
+        # 1.7. Check SERPER_API_KEY_1..N rotation pool
+        for idx in range(1, 20):
+            val = os.getenv(f"SERPER_API_KEY_{idx}", "").strip()
+            if not val or val.startswith("your_") or val.endswith("_here"):
+                continue
+            if "SERPER_API_KEY" not in creds:
+                creds["SERPER_API_KEY"] = val
+            break
 
         # 2. Check TEST_AI_API_KEY_1..10 specifically configured for test agents
         for idx in range(1, 11):

@@ -311,6 +311,15 @@ async def generate_scenarios_for_agent(
     # 6. Parse into Scenarios, applying deterministic overrides
     for idx, raw in enumerate(raw_scenarios):
         try:
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    pass
+            if not isinstance(raw, dict):
+                logger.warning(f"Skipping malformed scenario object: item is not a dictionary ({type(raw).__name__})")
+                continue
+
             cat_str = str(raw.get("category", "normal")).lower().strip()
             cat_map = {
                 "unauthorized_financial": "security",

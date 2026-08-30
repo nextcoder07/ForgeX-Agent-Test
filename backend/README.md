@@ -15,13 +15,14 @@ flowchart TD
     E --> F[11-Rule Hard Deterministic Validator]
     F --> G[LLM Adversarial Critic]
     G --> H[Final Executable Scenario Suite]
-    H --> I[Stage 3 & 4: Isolated Ephemeral Sandbox]
-    I --> J[ToolGateway Interceptor & Fault Injector]
-    J --> K[Immutable Execution Traces]
-    K --> L[Stage 5: Dual-Layer Hybrid Evaluator]
-    L --> M[Counterfactual Causation Engine]
-    M --> N[2D Safety × Capability Scorecard]
-    N --> O[Stage 6: Self-Healing Code Repair]
+    H --> I[Stage 3: Setup Orchestrator & Mode Resolver]
+    I --> J[Preflight Ping Test & Credential Vault]
+    J --> K[Stage 4: Isolated Subprocess Sandbox]
+    K --> L[ToolGateway Interceptor & Circuit Breaker]
+    L --> M[Immutable Execution Traces]
+    M --> N[Stage 5: Dual-Layer Hybrid Evaluator]
+    N --> O[Counterfactual Causation Engine & 2D Scorecard]
+    O --> P[Stage 6: Self-Healing Code Repair & Datasets]
 ```
 
 ---
@@ -36,36 +37,24 @@ flowchart TD
   - `capabilities[]`: Standardized capability tokens (e.g., `KNOWLEDGE_RETRIEVAL`, `DATA_MUTATION`, `CODE_EXECUTION`).
   - `constitution`: Hard safety rules (`never_rules`, `always_rules`).
   - `risk_profile`: Multi-dimensional risk score.
-- **Interactive Visual Architecture Graph**: Maps agent topology into interactive nodes (Controller, Model Slots, Planning Engine, Memory Buffers, Tool Gateways, Security Boundaries).
 - **Doc-Code Safety Conflict Detector**: Statically detects discrepancies between safety promises in system prompts and actual Python execution semantics (e.g. system prompt claims "$100 refund limit", code has no boundary check).
 
 ### Stage 2: Scenario Intelligence & Hard Validation (`app/core/scenarios/`)
-- **8-Category Adversarial Matrix**:
-  1. `NORMAL`: Baseline happy-path workflows.
-  2. `EDGE`: Empty inputs, malformed types, boundary integers, whitespace queries.
-  3. `RECOVERY`: Injected socket delays, HTTP 500/504 errors, network timeouts.
-  4. `ADVERSARIAL`: Emotional coercion, urgency pressure, false authority framing.
-  5. `SAFETY`: High-value operations, destructive mutations, unauthorized tool calls.
-  6. `SECURITY`: Prompt injections, canary secret extraction attempts, jailbreak escapes.
-  7. `STRESS`: 5,000+ character context saturation payloads, multi-turn distraction prompts.
-  8. `CHAOS`: Corrupted schema payloads, missing return keys, contradictory database mock data.
+- **8-Category Adversarial Matrix**: `NORMAL`, `EDGE`, `RECOVERY`, `ADVERSARIAL`, `SAFETY`, `SECURITY`, `STRESS`, `CHAOS`, and `DESTRUCTIVE_GUARDRAIL`.
 - **14-Subsystem Taxonomy**: Evaluates agents across distinct subsystem boundaries (`functional_execution`, `input_handling`, `tool_authorization`, `prompt_injection`, `external_service_resilience`, `error_recovery`, `performance_stress`, `multi_agent_orchestration`, `data_handling`).
-- **11-Rule Deterministic Hard Validator**: Enforced *before* the LLM critic to strictly reject:
-  - `RULE1`: Hallucinated CLI flags not found in AST.
-  - `RULE2`: Unsupported interface mismatch (CLI vs CHAT vs REST).
-  - `RULE3`: Invented error messages and brittle string assumptions.
-  - `RULE4`: Process exit code contradictions.
-  - `RULE5`: Semantic assertions missing required fields.
-  - `RULE6`: Canary secret disclosure in non-security scenarios.
-  - `RULE7`: Quality score below 0.35 threshold.
-  - `RULE8`: Invalid fault target not present in discovered services.
-  - `RULE9`: Duplicate invocations within the same category.
-  - `RULE10`: Required service whitelisting.
-  - `RULE11`: Subsystem validation and auto-correction.
-- **Multi-Surface Coverage Gap Engine**: Computes exact mathematical coverage across tools (user + framework), capabilities, workflow nodes, services, and failure surfaces with zero-baseline integrity.
+- **11-Rule Deterministic Hard Validator**: Enforced *before* the LLM critic to strictly reject hallucinated CLI flags, un-supported interface mismatches, brittle assertions, and canary leaks.
+- **Multi-Surface Coverage Gap Engine**: Computes mathematical coverage across tools (user + framework), capabilities, workflow nodes, services, and failure surfaces (e.g. 13 gaps detected on new un-tested agents).
 
-### Stage 3 & 4: Sandbox Isolation & Fault Injections (`app/core/sandbox/`)
-- **Ephemeral Sandbox Isolation**: Spawns isolated subprocess environments in ephemeral temporary directories, strictly stripping platform credentials.
+### Stage 3: Dependency Resolution & Setup Orchestration (`app/core/dependencies/`)
+- **12-Step Setup Orchestrator**: Manages state transitions (`NOT_STARTED → ANALYZING → PREPARING → INSTALLING → VERIFYING → READY`) to verify dependencies and pre-requisites before scenario launch.
+- **Preflight Ping Test**: Instant latency and model endpoint check (`/api/dependencies/preflight-ping-test`) verifying connection health before running full scenario suites.
+- **3 Execution Fidelity Modes**:
+  - `FAITHFUL`: 100% fidelity using original bound AI models (OpenRouter/Gemini/OpenAI) and real tool credentials.
+  - `COMPATIBLE`: 70% fidelity substituting platform AI models (Gemini Flash or OpenRouter pool) and tool mocks when specific third-party keys are unconfigured.
+  - `SIMULATION`: 100% offline deterministic execution using MockLLM and tool gateway. Requires 0 real API keys.
+
+### Stage 4: Subprocess Sandbox Isolation (`app/core/sandbox/`)
+- **Ephemeral Sandbox Isolation**: Spawns isolated subprocess environments in ephemeral temporary directories, strictly stripping backend platform credentials.
 - **Tool Gateway with Fault Injections**: Simulates socket timeouts (12s controlled delays), HTTP 500/504 errors, network partitions, and contradictory database payloads.
 - **Infinite Loop Circuit Breaker**: Halts runaway agents if more than 6 repetitive tool calls occur without meaningful state transitions.
 - **Immutable Execution Traces**: Captures step-by-step logs of user prompts, model reasoning chains, tool inputs/outputs, and latency metrics.
@@ -76,10 +65,10 @@ flowchart TD
 - **2D Safety × Capability Reliability Scorecard**: Computes independent Safety Index and Capability Index ratings with drill-downs into 5 reliability dimensions.
 - **Failure Cause Clustering**: Groups execution traces into actionable failure archetypes (e.g., *Tool Authorization Bypass*, *Prompt Injection Vulnerability*, *Network Timeout Crash*).
 
-### Stage 6: Self-Healing Code Repair & Live Sandbox (`app/core/healing/`)
+### Stage 6: Self-Healing Code Repair & Datasets (`app/core/healing/`)
 - **Self-Healing Code Repair**: Synthesizes verified `git diff` patches and system prompt guardrails to fix detected vulnerabilities automatically.
-- **Live Attack Sandbox**: Interactive red-teaming playground for developers to manually challenge agents with live attacks, prompt injections, and custom inputs.
-- **Persistent Storage with Memory Fallback**: Backed by Supabase PostgreSQL with seamless fallback to high-speed in-memory storage for offline development.
+- **Safety Gate**: Requires user confirmation before creating candidate version (`v1.0 → v1.1`), never mutating code silently.
+- **Model Training Studio**: Compiles Supervised Fine-Tuning (SFT) and Direct Preference Optimization (DPO) datasets from real failure traces with export support (`JSONL`, `SFT`, `LoRA`).
 
 ---
 
@@ -89,24 +78,20 @@ ForgeX features a resilient AI provider hierarchy managed by `PlatformKeyManager
 
 ```mermaid
 graph TD
-    A[AI Request] --> B{Key Rotation Pool}
-    B -->|Gemini Keys| C[Google Gemini 2.5 / 2.0]
-    B -->|Groq Keys| D[Groq LPUs Llama-3.3-70B]
-    B -->|OpenRouter Keys| E[OpenRouter Paid Tier]
-    E -->|402 / No Balance| F[OpenRouter :free Tier Pool]
+    A[AI / Tool Request] --> B{Key Rotation Pool}
+    B -->|OpenRouter Keys| C[OpenRouter 396+ Models]
+    B -->|Gemini Keys| D[Google Gemini 3.7 / 3.6 Flash]
+    B -->|Tool Keys| E[Tavily / News / Serper Rotation Pools]
+    C -->|402 / No Balance| F[OpenRouter :free Tier Pool]
     F -->|Llama 3.3 70B :free| G[Zero-Cost Execution]
     B -->|Offline Mode| H[Local Ollama / FallbackMock]
 ```
 
 ### Auto-Fallback & Free Tier Policy:
-1. **Primary Cloud Rotation**: Distributes calls across active keys (`GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
-2. **OpenRouter Zero-Credit Auto-Fallback**: When OpenRouter returns HTTP 402 or 0 credits, ForgeX automatically retries across free open models:
-   - `meta-llama/llama-3.3-70b-instruct:free`
-   - `google/gemini-2.0-flash-exp:free`
-   - `deepseek/deepseek-r1:free`
-   - `meta-llama/llama-3.1-8b-instruct:free`
-   - `google/gemini-2.0-pro-exp-02-05:free`
-3. **100% Offline Local Mode**: If no cloud credentials exist, ForgeX routes directly to your local Ollama instance (`http://localhost:11434` with `qwen2.5-coder:7b`) or deterministic `FallbackMockEngine`.
+1. **Primary Cloud Rotation**: Distributes calls across active keys (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
+2. **Tool Key Rotation**: Automatic rotation across `TAVILY_API_KEY_1..N`, `NEWS_API_KEY_1..N`, and `SERPER_API_KEY_1..N`.
+3. **OpenRouter Zero-Credit Auto-Fallback**: When OpenRouter returns HTTP 402 or 0 credits, ForgeX automatically retries across free open models (`meta-llama/llama-3.3-70b-instruct:free`, `google/gemini-2.0-flash-exp:free`, `deepseek/deepseek-r1:free`).
+4. **100% Offline Local Mode**: If no cloud credentials exist, ForgeX routes directly to your local Ollama instance (`http://localhost:11434` with `qwen2.5-coder:3b`) or deterministic `FallbackMockEngine`.
 
 ---
 
@@ -119,8 +104,10 @@ backend/
 │   ├── api/                        ← REST API routes
 │   │   ├── agents.py               ← Agent registration and retrieval
 │   │   ├── intake.py               ← AST intake, demo loader, conflict audit
-│   │   ├── scenarios.py            ← Scenario generation, library, strategy plans
-│   │   ├── evaluations.py          ← Execution runs, scorecards, failure clusters
+│   │   ├── scenarios.py            ← Scenario generation, library, strategy plans, coverage
+│   │   ├── dependencies.py         ← Setup orchestrator, system credentials, preflight ping
+│   │   ├── executions.py           ← Sandboxed execution runs, traces, telemetries
+│   │   ├── evaluations.py          ← Dual-layer evaluations, scorecards, failure clusters
 │   │   ├── live_attack.py          ← Interactive live red-teaming
 │   │   ├── self_healing.py         ← Git diff synthesis and automated patches
 │   │   ├── activity.py             ← SSE live event stream
@@ -129,7 +116,7 @@ backend/
 │   ├── core/                       ← Six evaluation engines
 │   │   ├── intake/                 ← Engine 1: AST parser, NAS reconstructor, conflict detector
 │   │   ├── scenarios/              ← Engine 2: Strategy planner, validator, critic, coverage
-│   │   ├── dependencies/           ← Engine 3: Dependency resolution and credential vault
+│   │   ├── dependencies/           ← Engine 3: Dependency resolver, setup orchestrator, preflight
 │   │   ├── sandbox/                ← Engine 4: Subprocess sandbox, ToolGateway, circuit breaker
 │   │   ├── evaluation/             ← Engine 5: Hybrid evaluator, counterfactuals, scorecards
 │   │   ├── healing/                ← Engine 6: Self-healing code and prompt repair
@@ -138,7 +125,7 @@ backend/
 │   ├── models/                     ← Pydantic v2 schemas and validation contracts
 │   └── services/                   ← Supabase database client and in-memory store
 │
-├── test-agents/                    ← 9 Local demonstration agent archetypes
+├── test-agents/                    ← 10 Local demonstration agent archetypes
 │   ├── 01-simple-python/           ← Order processing agent (CLI / functional)
 │   ├── 02-tool-agent/              ← News search & calculation agent
 │   ├── 03-customer-support/        ← Support agent with intentional doc-code conflict
@@ -147,9 +134,10 @@ backend/
 │   ├── 06-browser-agent/           ← DOM navigation & web agent
 │   ├── 07-tool-loop-vulnerable/    ← Vulnerable agent trapped in infinite retry loops
 │   ├── 08-prompt-injection-unsafe/ ← Vulnerable agent susceptible to authority override
-│   └── 09-news-summarizer-agent/   ← News fetching and structured summarization
+│   ├── 09-news-summarizer-agent/   ← News fetching and structured summarization
+│   └── 10-comprehensive-agent/     ← Multi-tool transactional agent with auth gates
 │
-└── tests/                          ← Unit and integration test suites (32+ passing tests)
+└── tests/                          ← Unit and integration test suites
 ```
 
 ---
@@ -157,7 +145,7 @@ backend/
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
-- Python 3.11+
+- Python 3.10+
 - Virtual environment tool (`venv`)
 
 ### 2. Installation
@@ -166,11 +154,11 @@ backend/
 cd backend
 
 # Create and activate virtual environment
-python -m venv venv
+python -m venv .venv
 # On Windows:
-.\venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 # On Linux/macOS:
-source venv/bin/activate
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -190,6 +178,6 @@ API Documentation will be available at `http://localhost:8000/docs`.
 
 ### 5. Run Test Suite
 ```bash
-pytest tests/ -v
+python -m pytest tests/ -v
 ```
-All 32 test cases across intake, strategy planning, hard validation, and scenario generation will execute cleanly.
+All unit test suites across intake, strategy planning, hard validation, scenario generation, and dependency resolution will execute cleanly.

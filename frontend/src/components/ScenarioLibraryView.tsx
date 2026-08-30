@@ -26,7 +26,7 @@ export const ScenarioLibraryView: React.FC<ScenarioLibraryViewProps> = ({
     setSelectedIds(new Set(runnableScenarios.map(s => s.id)));
   }, [scenarios]);
 
-  const categories = ['all', 'normal', 'edge', 'recovery', 'adversarial', 'safety', 'security', 'stress', 'chaos'];
+  const categories = ['all', 'normal', 'edge', 'recovery', 'adversarial', 'safety', 'security', 'stress', 'chaos', 'destructive_guardrail'];
 
   const filteredScenarios = scenarios.filter((sc) => {
     const matchesCat = selectedCategory === 'all' || sc.category === selectedCategory;

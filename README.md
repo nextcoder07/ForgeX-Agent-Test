@@ -1,18 +1,21 @@
 <div align="center">
 
-# 🛡️ ForgeX
+# 🛡️ ForgeX Agents
 ### Autonomous AI Agent Reliability, Evaluation & Self-Healing Engine
 **The Open-Source Pre-Deployment CI/CD, Sandboxed Red-Teaming & Testing Gateway for AI Agents**
+
+🌐 **Live Web Application**: [**forge-agent.netlify.app**](https://forge-agent.netlify.app)
 
 *Built for the **OOSC 4.0 Hackathon** (Opportunity Open Source Conference 4.0 @ IIIT Allahabad)*  
 *Track: Open-Source AI Infrastructure, DevTools & Autonomous System Reliability*
 
 <br/>
 
+[![Live Web App](https://img.shields.io/badge/Live_Web_App-forge--agent.netlify.app-00C7B7?style=flat-square&logo=netlify&logoColor=white)](https://forge-agent.netlify.app)
 [![OOSC 4.0](https://img.shields.io/badge/OOSC_4.0-IIIT_Allahabad-06b6d4?style=flat-square&logo=google)](https://oosc.iiita.ac.in/)
 [![Google Gemini](https://img.shields.io/badge/Google_Gemini-3.7_Flash-4285F4?style=flat-square&logo=google-gemini&logoColor=white)](https://aistudio.google.com/)
-[![Groq](https://img.shields.io/badge/Groq-LPU_Fast_Inference-F55036?style=flat-square&logo=fastapi&logoColor=white)](https://groq.com/)
-[![OpenRouter](https://img.shields.io/badge/OpenRouter-Free_Tier_Fallback-6366F1?style=flat-square)](https://openrouter.ai/)
+[![OpenRouter](https://img.shields.io/badge/OpenRouter-396_Models_Ready-6366F1?style=flat-square)](https://openrouter.ai/)
+[![Tavily Search](https://img.shields.io/badge/Tavily_Search-Key_Rotation_Active-06B6D4?style=flat-square)](https://tavily.com/)
 [![Ollama](https://img.shields.io/badge/Ollama-100%25_Offline_Local-000000?style=flat-square&logo=ollama&logoColor=white)](https://ollama.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_18-20232a?style=flat-square&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -28,62 +31,52 @@
 
 ---
 
-## ⚡ Core Innovations & Platform Features
+## ⚡ Core Innovations & Working Features
 
-ForgeX provides an end-to-end, deterministic evaluation pipeline designed specifically for autonomous AI agents across **5 Core Stages**:
+ForgeX provides an end-to-end, deterministic evaluation pipeline designed specifically for autonomous AI agents across **6 Core Pipeline Stages**:
 
 ```
-Intake → Scenarios → Execute → Results → Improve
+Intake → Scenarios → Setup → Execute → Results → Improve
 ```
 
-### 1. 🔄 Multi-Provider Resilience & Zero-Cost Rotation Pool
-- **Multi-Cloud Key Rotation**: Seamless round-robin key rotation across **Gemini 3.7 Flash**, **Groq (LPUs)**, **OpenRouter**, **Anthropic**, and **OpenAI**.
-- **Auto-Recovery to Free Tier**: If OpenRouter runs out of credits ($0 balance or HTTP 402), it automatically reroutes to zero-cost open models (`meta-llama/llama-3.3-70b-instruct:free`, `google/gemini-2.0-flash-exp:free`, `deepseek/deepseek-r1:free`).
-- **100% Offline Local Ollama**: When no cloud API keys exist, ForgeX routes directly to your local Ollama server (`http://localhost:11434` with `qwen2.5-coder:7b`) for complete offline privacy.
-- **Test Agent Key Isolation**: Platform pipeline keys are strictly separated from test agent keys. Sandboxed subprocesses receive test agent credentials in isolated environments.
+### 1. 🔄 Multi-Provider Key Pool & Automatic Tool Rotation
+- **Multi-Cloud Key Rotation**: Seamless round-robin key rotation across **Gemini 3.7 Flash**, **OpenRouter (396+ models)**, **Groq (LPUs)**, **Anthropic**, and **OpenAI**.
+- **External Tool Key Rotation**: Automatic rotation support for external tool credentials (`TAVILY_API_KEY_1..N`, `NEWS_API_KEY_1..N`, `SERPER_API_KEY_1..N`) with priority fallbacks.
+- **Auto-Recovery to Free Tier & Local Ollama**: If primary cloud keys hit rate limits (429), auth failures (401), or quota exhaustion (402), ForgeX automatically rotates down to local **Ollama** (`http://localhost:11434` with `qwen2.5-coder:3b`) or free tier open models.
+- **Strict Sandbox Credential Isolation**: Backend platform keys stay completely isolated from tested code. Sandboxed child processes only receive sanitized environment variables and designated test agent keys.
 
-### 2. 🧠 Static AST Intake & Canonical Agent Specifications
-- **Zero-Execution Static AST**: Inspects source files (`.py`, `.ts`, `.js`, prompts) via native Python AST to discover tool schemas, parameter types, CLI arguments, and imports without running untrusted code.
-- **Strict AST Import Detection**: Plain Python agents with `0 static LLM constructors` and no LLM SDK imports detect **0 model dependencies (`[]`)**, stay marked `execution_status: READY`, and run without false credential blocks.
-- **Canonical Agent Record**: Enforces a single source of truth across intake, scenario generation, sandbox execution, dual-layer evaluations, and self-healing code repair.
-- **Doc-Code Safety Conflict Detector**: Statically flags contradictions between natural language claims in system prompts and actual Python execution semantics.
+### 2. 🧠 Static AST Intake & Pre-Execution Analysis
+- **Zero-Execution Static AST**: Inspects Python source files, prompts, and CLI configurations via AST parsing to discover tool schemas, parameter types, and external dependencies without running untrusted code.
+- **Strict AST Import Detection**: Python agents with standard logic or no LLM SDK imports detect 0 model dependencies (`[]`), remain marked `READY`, and execute without false credential blockages.
+- **Doc-Code Safety Conflict Detector**: Statically flags contradictions between natural language claims in system prompts (e.g. *"Max refund $50"*) and actual Python execution semantics (e.g. no ceiling check in code).
 
-### 3. 🎯 8-Category Adversarial Test Matrix & Hard Deterministic Validator
-- **Comprehensive Vector Coverage**: Generates scenarios across 8 targeted categories: `NORMAL`, `EDGE`, `RECOVERY`, `ADVERSARIAL`, `SAFETY`, `SECURITY`, `STRESS`, and `CHAOS`.
-- **14-Subsystem Taxonomy**: Evaluates agents across specific subsystem boundaries (`functional_execution`, `input_handling`, `tool_authorization`, `prompt_injection`, `external_service_resilience`, `error_recovery`, `performance_stress`, `multi_agent_orchestration`, `data_handling`).
-- **11-Rule Hard Deterministic Validator**: Runs **before** the LLM critic to strictly reject CLI flag hallucinations, invented error messages, brittle assertions, and canary leaks.
+### 3. 🎯 8-Category Adversarial Test Matrix & Static Coverage Engine
+- **8-Category Test Suite**: Generates test scenarios across `NORMAL`, `EDGE`, `RECOVERY`, `ADVERSARIAL`, `SAFETY`, `SECURITY`, `STRESS`, `CHAOS`, and `DESTRUCTIVE_GUARDRAIL`.
+- **Static Coverage Gap Engine**: Automatically analyzes an agent's AST tools, workflow nodes, and external services to detect un-tested behavioral surfaces (e.g. 13 gaps detected on new agents) and prompts targeted test generation.
+- **Hard Deterministic Validator**: 11-rule validator runs before the LLM critic to eliminate hallucinations, invented CLI flags, and brittle test assertions.
 
-### 4. 🛡️ Isolated Sandbox Execution & Execution Truth
-- **Execution Truth & Status Propagation**: Preflight credential checks block invalid executions up front (`BLOCKED — CREDENTIAL REQUIRED`). Blocked jobs report `0% progress` and `0 executed scenarios`, avoiding misleading success badges.
-- **Trace vs Scenario Accounting**: Execution coverage is mathematically capped at 100% (`executed_scenarios / total_scenarios`). Trace collection telemetry is tracked as a separate metric (`13 traces collected`).
-- **No Silent Fallback in Faithful Mode**: In `FAITHFUL` execution mode, missing credentials trigger an explicit credential prompt rather than degrading silently to `MockLLM`.
-- **Ephemeral Process Isolation**: Spawns isolated subprocess environments in ephemeral temporary directories, strictly stripping platform credentials.
-- **Infinite Loop Circuit Breaker**: Halts runaway agents if more than 6 repetitive tool calls occur without meaningful state transitions.
+### 4. 🛡️ 3 Execution Modes & Setup Orchestration
+ForgeX supports 3 distinct execution fidelity modes, each fully operational without false setup blockages:
+
+| Execution Mode | Fidelity | Description & Prerequisites |
+| :--- | :--- | :--- |
+| **Faithful Mode** | **HIGH (100%)** | Executes agent using original bound AI models (OpenRouter/OpenAI/Gemini) and real tool credentials. |
+| **Compatible Mode** | **MEDIUM (70%)** | Substitutes platform AI models (e.g., Gemini Flash or OpenRouter pool) and provides tool gateway mocks when specific third-party keys are unconfigured. |
+| **Simulation Mode** | **TEST-SPECIFIC** | 100% offline deterministic execution using MockLLM and tool gateway. Requires 0 real API keys. |
+
+- **Setup Orchestrator**: 12-step pre-execution state machine (`ANALYZING → PREPARING → INSTALLING → VERIFYING → READY`) that verifies all prerequisites before scenario launch.
+- **Preflight Ping Test**: Instant latency and connection check (`/api/setup/ping-test`) to verify model endpoints and sandbox health before running full scenario suites.
 
 ### 5. 📊 Dual-Layer Hybrid Evaluation & 2D Reliability Matrix
-- **Programmatic Rules + LLM Judge**: Combines 100% objective deterministic assertions (exit codes, parameter checks, confirmation prompts, PII leaks, circuit breakers) with calibrated LLM judgment.
-- **2D Safety × Capability Reliability Scorecard**: Computes independent Safety Index and Capability Index ratings with drill-downs into 5 reliability dimensions.
+- **Deterministic Assertions + Calibrated LLM Judge**: Combines 100% objective assertion rules (exit codes, parameter validation, PII leak detection, circuit breaker trip logs) with an independent Gemini judge.
+- **2D Safety × Capability Matrix**: Classifies agents into 4 quadrants: *Production Ready*, *Over-Constrained*, *Reckless/Vulnerable*, or *Critical Failure*.
 - **Counterfactual Replay Engine**: Strips adversarial tokens from failing scenarios and re-executes clean baselines to prove root-cause causation.
 
 ### 6. 🛠️ Stage 6: IMPROVE — Evidence-Driven Action Layer
-ForgeX turns evaluation results into actionable improvements across **4 specialized tabs**:
-
-- **Failures & Diagnosis**:
-  - Severity-sorted failure cards (`CRITICAL` → `HIGH` → `MEDIUM` → `LOW`).
-  - **Observed vs Expected Box**: Expected Invariant vs Observed Behavior vs Assertion Verdict.
-  - **Root Cause Engine**: Derived deterministically from AST call graphs + sandbox execution traces + failed assertions (`process() → delete_record() at agent.py:12-14`).
-  - **Evidence Chain Visualizer**: `Scenario → Input → Observed Execution → Assertion → Verdict`.
-  - Explicit empty states for State A (No Evaluation) and State B (Clean Run - 0 Failures).
-- **Repairs & Self-Healing**:
-  - **Repair Safety Gate**: Prompts user review before patch application (*"You are about to create Agent v1.1. Affected file: agent.py. Reason: SAFETY-001"*).
-  - Candidate versioning (`v1.0 → v1.1`), never mutating user code silently.
-- **Regression Check**:
-  - Comparative delta matrix (`Baseline v1.0 vs Candidate v1.1`) tracking Safety, Reliability, Tool Discipline, and Composite scores.
-  - Scenario status delta (`PASS → PASS`, `FAIL → PASS`, `PASS → FAIL` regression detection).
-- **Model Training Studio**:
-  - Supervised Fine-Tuning (SFT) & Preference (DPO) dataset compiler derived strictly from real evaluation failure traces.
-  - Strict provenance per example (`agent_version`, `scenario_id`, `execution_id`, `failure_id`, `source_evidence`, `observed_behavior`, `expected_behavior`, `label`).
-  - Export support (`[ Export JSONL ]`, `[ Export SFT Dataset ]`, `[ Prepare LoRA Dataset ]`).
+- **Failures & Diagnosis**: Severity-sorted failure cards (`CRITICAL` → `LOW`), observed vs. expected invariant boxes, and AST call graph root-cause analysis.
+- **Repairs & Self-Healing Safety Gate**: Synthesizes AST code patches and hardened prompts with explicit safety confirmation before candidate versioning (`v1.0 → v1.1`).
+- **Regression Check**: Comparative delta matrix (`Baseline v1.0 vs Candidate v1.1`) tracking safety, capability, tool discipline, and scenario status deltas (`FAIL → PASS`).
+- **Model Training Studio**: Compiles Supervised Fine-Tuning (SFT) and Direct Preference Optimization (DPO) datasets from real failure traces with export support (`JSONL`, `SFT`, `LoRA`).
 
 ---
 
@@ -102,7 +95,7 @@ ForgeX runs two evaluation layers simultaneously:
 | `PROCESS_EXIT_CODE` | Did the agent process exit successfully? |
 
 ### Layer 2 — Calibrated LLM Judge (qualitative reasoning alignment)
-An independent Gemini judge evaluates each trace against the agent's constitutional `never_rules` — catching nuanced failures like "the agent reasoned incorrectly before a correct refusal" that deterministic rules cannot express.
+An independent Gemini / OpenRouter judge evaluates each trace against the agent's constitutional `never_rules` — catching nuanced failures like "the agent reasoned incorrectly before a correct refusal".
 
 Together, these produce a **2D Safety × Capability Scorecard** classifying the agent into one of 4 quadrants:
 
@@ -131,38 +124,40 @@ flowchart TB
         B3 --> B4[Executable Scenario Library]
     end
 
-    subgraph STAGE3["3. EXECUTE (Sandboxed Execution & Traces)"]
-        C1[4-Layer Dependency Resolver] --> C2[Active Credential Binding]
-        C2 --> C3[Ephemeral Process Sandbox]
-        C3 --> C4[Execution Truth & Circuit Breaker]
-        C4 --> C5[Immutable Trace Logger]
+    subgraph STAGE3["3. SETUP & RESOLUTION (Prerequisites & Gateways)"]
+        C1[12-Step Setup Orchestrator] --> C2[Mode-Aware Dependency Resolver]
+        C2 --> C3[Preflight Ping Test & Vault Validation]
     end
 
-    subgraph STAGE4["4. RESULTS (Dual-Layer Evaluation & Scorecards)"]
-        D1[Layer 1: Deterministic Assertion Engine] --> D3[Hybrid Evaluator]
-        D2[Layer 2: Calibrated LLM Judge] --> D3
-        D3 --> D4[Safety × Capability Scorecard]
-        D3 --> D5[Failure Cause Clustering]
-        D3 --> D6[Counterfactual Causation Proofs]
+    subgraph STAGE4["4. EXECUTE (Sandboxed Execution & Traces)"]
+        D1[Active Credential Binding] --> D2[Ephemeral Subprocess Sandbox]
+        D2 --> D3[Circuit Breaker & Trace Logger]
     end
 
-    subgraph STAGE5["5. IMPROVE (Evidence-Driven Action Layer)"]
-        E1[Failures & Evidence Diagnosis] --> E2[Repairs & Self-Healing Safety Gate]
-        E2 --> E3[Regression Check Delta Matrix]
-        E1 --> E4[Model Training SFT/DPO Dataset Generator]
+    subgraph STAGE5["5. RESULTS (Dual-Layer Evaluation & Scorecards)"]
+        E1[Layer 1: Deterministic Assertion Engine] --> E3[Hybrid Evaluator]
+        E2[Layer 2: Calibrated LLM Judge] --> E3
+        E3 --> E4[2D Safety × Capability Scorecard]
+    end
+
+    subgraph STAGE6["6. IMPROVE (Evidence-Driven Action Layer)"]
+        F1[Failures & Evidence Diagnosis] --> F2[Repairs & Self-Healing Safety Gate]
+        F2 --> F3[Regression Check Delta Matrix]
+        F1 --> F4[Model Training SFT/DPO Dataset Generator]
     end
 
     STAGE1 --> STAGE2
     STAGE2 --> STAGE3
     STAGE3 --> STAGE4
     STAGE4 --> STAGE5
+    STAGE5 --> STAGE6
 ```
 
 ---
 
 ## 🤖 Built-In Benchmark Agents
 
-ForgeX includes 10 pre-configured test agents in `backend/test-agents/` covering real-world architectures and notorious failure modes:
+ForgeX includes pre-configured test agents in `backend/test-agents/` covering real-world architectures and notorious failure modes:
 
 | Agent | Architecture | What's Being Tested |
 |---|---|---|
@@ -184,7 +179,7 @@ ForgeX includes 10 pre-configured test agents in `backend/test-agents/` covering
 ### Prerequisites
 - **Python 3.10+** & `pip`
 - **Node.js 18+** & `npm`
-- **Google Gemini API Key** *(or OpenRouter / Ollama for local LLM mode)*
+- **Google Gemini API Key** or **OpenRouter API Key** *(or Ollama for 100% offline local mode)*
 
 ---
 
@@ -206,34 +201,37 @@ cp .env.example .env
 
 Configure `backend/.env`:
 ```env
-# Primary Platform AI API Key (Intake, Scenarios, Evaluation, Diagnosis)
-AI_API_KEY_1=your_gemini_api_key_here
-AI_API_NAME_1=gemini
-AI_MODEL_1=gemini-3.7-flash
+# Primary Platform AI Key (OpenRouter or Gemini)
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=openai/gpt-4o-mini
 
-# Optional: rotated secondary keys
-AI_API_KEY_2=your_second_ai_api_key_here
-AI_API_NAME_2=gemini
-AI_MODEL_2=gemini-3.7-flash
+# Meta-Evaluator Judge Key Pool
+META_EVALUATOR_API_KEY_1=AQ.Ab8RN6...
+META_EVALUATOR_PROVIDER_1=gemini
+META_EVALUATOR_MODEL_1=gemini-3.6-flash
 
-# Optional: local Ollama fallback (used automatically if no API keys exist)
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5-coder:7b
+# Test Agent Sandbox Key Pool
+TEST_AI_API_KEY_1=sk-or-v1-...
+TEST_AI_API_NAME_1=openrouter
+TEST_AI_MODEL_1=openai/gpt-4o-mini
 
-# Test Agent sandbox pool key
-TEST_AI_API_KEY_1=your_test_key_here
-TEST_AI_API_NAME_1=gemini
-TEST_AI_MODEL_1=gemini-3.7-flash
+# External Service Keys & Tool Rotation
+TAVILY_API_KEY=tvly-dev-...
+
+# Database & Persistence (Supabase)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your-supabase-service-key
 
 PORT=8000
 ENVIRONMENT=development
 ```
 
+Start the API server:
 ```bash
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-- **API & Swagger UI**: `http://localhost:8000/docs`
+- **API Documentation (Swagger UI)**: `http://localhost:8000/docs`
 - **ReDoc Schema**: `http://localhost:8000/redoc`
 
 ---
@@ -254,13 +252,13 @@ Open **`http://localhost:5173`** in your browser.
 
 ```bash
 cd backend
-# Run full pytest suite across Stage 1, 2, and 3 engines
+# Run backend pytest suite across stage engines
 python -m pytest tests/test_stage1_canonical_intake.py tests/test_stage2.py tests/test_stage3.py -v
 ```
 
 ```bash
 cd frontend
-# Run TypeScript compilation and production build check
+# Verify frontend TypeScript build
 npm run build
 ```
 
@@ -278,7 +276,10 @@ All backend endpoints are mounted under `/api`:
 | **Agents** | `GET /api/agents/{id}` | Inspect tools, parameters, manifest, constitution |
 | **Scenarios** | `POST /api/scenarios/generate` | Generate 8-category test suite with 2nd-pass LLM Critic |
 | **Scenarios** | `GET /api/scenarios/library` | Query and filter generated scenario catalog |
-| **Dependencies** | `GET /api/dependencies/agent/{id}` | Fetch resolved dependencies and execution bindings |
+| **Scenarios** | `GET /api/scenarios/coverage/{id}` | Fetch 14-surface Coverage Gap Report |
+| **Dependencies** | `GET /api/dependencies/system-credentials` | Retrieve platform API key vault status |
+| **Dependencies** | `POST /api/dependencies/run-setup` | Run 12-step Setup Orchestrator pipeline |
+| **Dependencies** | `POST /api/dependencies/preflight-ping-test` | Run instant model endpoint & sandbox ping test |
 | **Executions** | `POST /api/executions/run` | Execute sandboxed scenarios with fault injection |
 | **Executions** | `GET /api/executions/{id}/trace` | Retrieve granular step-by-step execution trace |
 | **Evaluations** | `POST /api/evaluations/run` | Run dual-layer evaluation (deterministic + LLM judge) |
@@ -293,8 +294,8 @@ All backend endpoints are mounted under `/api`:
 ## 🏆 Hackathon Compliance & Submission Details
 
 - **Original Work & Open-Source**: All engine architectures, AST scanners, sandbox harnesses, and evaluation scoring algorithms are released under the [MIT License](LICENSE)
-- **Google Ecosystem Integration**: Primary AI engine uses Google Gemini 3.7 Flash via Google AI Studio SDK, with graceful offline fallback mock modes
-- **Deterministic Reliability**: Combines deterministic assertion rules (zero AI hallucinations) with calibrated LLM judges for complete evaluation coverage
+- **Google Ecosystem Integration**: Built with Google Gemini 3.7 Flash via Google AI Studio SDK, with graceful fallback to OpenRouter, Groq, or offline Ollama
+- **Deterministic Reliability**: Combines 100% objective assertion rules (zero AI hallucinations) with calibrated LLM judges for complete evaluation coverage
 - **Track Compliance**: Open-Source AI Infrastructure + DevTools + Autonomous System Reliability — ForgeX addresses all three
 
 ---

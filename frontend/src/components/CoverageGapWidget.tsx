@@ -73,21 +73,25 @@ export const CoverageGapWidget: React.FC<CoverageGapWidgetProps> = ({ report, on
 
       {/* Coverage Gaps Detected Alerts */}
       {report.gaps_detected.length > 0 && (
-        <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-500/30 flex items-center justify-between">
-          <div className="space-y-0.5">
-            <span className="text-xs font-bold text-amber-300 flex items-center space-x-1.5">
-              <ShieldAlert className="w-3.5 h-3.5" />
+        <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/40 flex items-center justify-between flex-wrap gap-3">
+          <div className="space-y-0.5 max-w-xl">
+            <span className="text-xs font-bold text-amber-300 flex items-center space-x-1.5 font-mono">
+              <ShieldAlert className="w-4 h-4 text-amber-400" />
               <span>Coverage Gaps Detected ({report.gaps_detected.length})</span>
             </span>
-            <p className="text-[11px] text-slate-400">{report.gaps_detected[0]}</p>
+            <p className="text-xs text-slate-300">
+              {report.exercised_tools === 0
+                ? `${report.gaps_detected.length} un-tested behavioral surfaces identified by static analysis (untested tools + 9 category gaps). Click "Generate +20 Scenarios" to build tests.`
+                : report.gaps_detected[0]}
+            </p>
           </div>
 
           {onGenerateTargeted && (
             <button
               onClick={onGenerateTargeted}
-              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-xs font-bold transition flex items-center space-x-1 shrink-0"
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-xs font-extrabold transition shadow-lg shadow-amber-500/20 flex items-center space-x-1.5 shrink-0 cursor-pointer"
             >
-              <Sparkles className="w-3 h-3" />
+              <Sparkles className="w-3.5 h-3.5" />
               <span>Generate Targeted Tests</span>
             </button>
           )}

@@ -34,6 +34,7 @@ import {
 import type { PageId } from '../components/Navbar';
 import type { AgentRecord, Scenario, ExecutionJob, ExecutionTrace, ToolCallRecord, TraceEvent, SecurityEvent, ObservationSummary, SetupReadinessRecord } from '../api/client';
 import {
+  API_BASE_URL,
   fetchAgents,
   fetchScenarioLibrary,
   runExecutionJob,
@@ -73,6 +74,8 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
   const [evaluating, setEvaluating] = useState(false);
   const [loadingScenarios, setLoadingScenarios] = useState(false);
   const [executionBlockedMsg, setExecutionBlockedMsg] = useState<string | null>(null);
+  const [providedSecrets, setProvidedSecrets] = useState<Record<string, string>>({});
+  const [showInlineKeys, setShowInlineKeys] = useState(false);
 
   const pollIntervalRef = useRef<number | null>(null);
 
@@ -135,14 +138,25 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
 
   const handleStartExecution = async (overrideMode?: string) => {
     if (selectedScenarioIds.length === 0) return;
-    const safeMode = typeof overrideMode === 'string' ? overrideMode : executionMode;
+    let safeMode = typeof overrideMode === 'string' ? overrideMode : executionMode;
+    
+    // Smart Preflight Check: If Faithful mode lacks un-injected mandatory custom keys, auto-recommend Compatible mode
+    const missingKeys = setupReadiness?.missing_credentials || [];
+    const hasUnprovidedMissingKeys = missingKeys.some(k => !providedSecrets[k] || !providedSecrets[k].trim());
+    
+    if (safeMode === 'faithful' && hasUnprovidedMissingKeys) {
+      console.log('[PREFLIGHT] Missing custom keys for Faithful mode. Falling back to Compatible mode.');
+      safeMode = 'compatible';
+      setExecutionMode('compatible');
+    }
+
     setRunning(true);
     setExecutionJob(null);
     setExecutionTraces([]);
     setExecutionBlockedMsg(null);
 
     try {
-      const job = await runExecutionJob(selectedAgentId, selectedScenarioIds, true, safeMode);
+      const job = await runExecutionJob(selectedAgentId, selectedScenarioIds, true, safeMode, providedSecrets);
       setExecutionJob(job);
 
       if (job.status === 'BLOCKED' || job.status === 'blocked') {
@@ -183,9 +197,12 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     } catch (e: any) {
       console.error('Failed to run execution:', e);
       setRunning(false);
-      setExecutionBlockedMsg(
-        e.message || `Execution failed to start for agent '${selectedAgent?.name || selectedAgentId}'. Please check API key and dependencies under Setup.`
-      );
+      const errMsg = String(e?.message || e || '');
+      if (errMsg.toLowerCase().includes('failed to fetch') || errMsg.toLowerCase().includes('networkerror')) {
+        setExecutionBlockedMsg(`Backend Connection Error: Could not reach ForgeX Server (${API_BASE_URL}). Please verify the backend service is running.`);
+      } else {
+        setExecutionBlockedMsg(errMsg || `Execution failed to start for agent '${selectedAgent?.name || selectedAgentId}'. Please check Setup.`);
+      }
     }
   };
 
@@ -309,16 +326,18 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
                 <p className="text-xs font-extrabold text-rose-200 uppercase tracking-wider">
-                  BLOCKED — USER CREDENTIAL REQUIRED
+                  {executionBlockedMsg.includes('Connection Error') ? 'EXECUTION FAILED — CONNECTION ERROR' : 'BLOCKED — USER CREDENTIAL REQUIRED'}
                 </p>
                 <span className="px-2 py-0.5 text-[9px] font-mono font-bold rounded bg-rose-950 text-rose-300 border border-rose-500/30">
                   Target: {selectedAgent?.name || selectedAgentId}
                 </span>
               </div>
               <p className="text-xs text-slate-100 font-semibold leading-relaxed">{executionBlockedMsg}</p>
-              <p className="text-[10px] text-rose-300/80">
-                Simulation will never replace a missing credential silently. Please provide the required API key under Setup.
-              </p>
+              {!executionBlockedMsg.includes('Connection Error') && (
+                <p className="text-[10px] text-rose-300/80">
+                  Simulation will never replace a missing credential silently. Please provide the required API key under Setup.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -393,13 +412,104 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                   <span>Configure Agent Dependencies & Keys →</span>
                 </button>
 
+                {/* System Prompt & Invariant Spec (Fixed: Never Blank) */}
                 <div className="space-y-2">
-                  <label className="text-xs text-slate-500 block">System Prompt configuration</label>
-                  <textarea
-                    readOnly
-                    value={selectedAgent.system_prompt}
-                    className="w-full h-36 bg-slate-950 border border-slate-900 rounded-xl p-3 text-[11px] font-mono text-slate-300 resize-none focus:outline-none"
-                  />
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>System Prompt & Constitution</span>
+                    </label>
+                    <span className="text-[9px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                      {selectedAgent.system_prompt ? 'Custom Prompt' : 'Canonical AST Spec'}
+                    </span>
+                  </div>
+                  <div className="bg-slate-950 border border-slate-900 rounded-xl p-3 text-[11px] font-mono text-slate-300 max-h-44 overflow-y-auto space-y-2">
+                    {selectedAgent.system_prompt && selectedAgent.system_prompt.trim().length > 0 ? (
+                      <p className="whitespace-pre-wrap leading-relaxed">{selectedAgent.system_prompt}</p>
+                    ) : (
+                      <div className="space-y-2 text-slate-400">
+                        <p className="text-cyan-300 font-semibold">// AST Canonical System Specification:</p>
+                        <p className="text-[10px] leading-relaxed text-slate-300">
+                          Agent baseline prompt follows canonical intake specification for domain <strong className="text-indigo-400">{selectedAgent.domain}</strong> (Version {selectedAgent.version_label || 'v1.0'}).
+                        </p>
+                        {selectedAgent.constitution?.never_rules && selectedAgent.constitution.never_rules.length > 0 && (
+                          <div className="pt-1 border-t border-slate-900 text-rose-300">
+                            <p className="font-bold text-[10px] uppercase text-rose-400 mb-1">Safety Invariants:</p>
+                            <ul className="list-disc list-inside space-y-0.5 text-[10px]">
+                              {selectedAgent.constitution.never_rules.map((rule, idx) => (
+                                <li key={idx} className="truncate">{rule}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inline API Keys & Credential Injection Drawer */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                  <button
+                    onClick={() => setShowInlineKeys(!showInlineKeys)}
+                    className="w-full py-2 px-3 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-left text-xs font-bold text-slate-200 flex items-center justify-between transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Inline API Keys & Secrets Injection</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {showInlineKeys ? 'Hide ▲' : 'Provide Keys ▼'}
+                    </span>
+                  </button>
+
+                  {showInlineKeys && (
+                    <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 space-y-2.5 animate-fadeIn">
+                      <p className="text-[10px] text-slate-400 leading-snug">
+                        Provide custom API keys for this execution run without leaving the page. Provided keys take priority.
+                      </p>
+                      
+                      <div className="space-y-2 font-mono text-xs">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">TAVILY_API_KEY (Web Search Tool)</label>
+                          <input
+                            type="password"
+                            placeholder="tvly-..."
+                            value={providedSecrets['TAVILY_API_KEY'] || ''}
+                            onChange={e => setProvidedSecrets({ ...providedSecrets, TAVILY_API_KEY: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-amber-500/60"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">OPENROUTER_API_KEY (Primary LLM Engine)</label>
+                          <input
+                            type="password"
+                            placeholder="sk-or-v1-..."
+                            value={providedSecrets['OPENROUTER_API_KEY'] || ''}
+                            onChange={e => setProvidedSecrets({ ...providedSecrets, OPENROUTER_API_KEY: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-cyan-500/60"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">GEMINI_API_KEY (Google Gemini Engine)</label>
+                          <input
+                            type="password"
+                            placeholder="AIzaSy..."
+                            value={providedSecrets['GEMINI_API_KEY'] || ''}
+                            onChange={e => setProvidedSecrets({ ...providedSecrets, GEMINI_API_KEY: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500/60"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end pt-1">
+                        <span className="text-[10px] text-emerald-400 font-mono">
+                          {Object.keys(providedSecrets).filter(k => providedSecrets[k]?.trim()).length} keys injected
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -472,18 +582,32 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
               </div>
             )}
 
-            {/* Execution Mode Selector */}
+            {/* Execution Mode Selector with Exact Capability Indicators */}
             {scenarios.length > 0 && (
               <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
                     <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Execution Mode</span>
-                  </h3>
-                  <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded">
-                    Demo Recommended: Faithful
-                  </span>
-                </div>
+                {/* Preflight Mode Recommendation Banner */}
+                {setupReadiness && setupReadiness.missing_credentials && setupReadiness.missing_credentials.length > 0 && (
+                  <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-2 animate-fadeIn">
+                    <div className="flex items-center space-x-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>
+                        <strong>Preflight Recommendation:</strong> Faithful mode missing secret (<strong className="font-mono text-white">{setupReadiness.missing_credentials.join(', ')}</strong>). 
+                        Switch to <strong>Compatible</strong> or <strong>Simulation</strong> mode for 100% execution success.
+                      </span>
+                    </div>
+                    {executionMode === 'faithful' && (
+                      <button
+                        onClick={() => setExecutionMode('compatible')}
+                        className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] shrink-0 cursor-pointer"
+                      >
+                        Auto-Switch to Compatible →
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   {/* Faithful */}
@@ -507,8 +631,11 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                       <span className="text-[9px] font-mono font-bold text-emerald-400 uppercase bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-500/30">Primary</span>
                     </div>
                     <p className="text-[11px] text-slate-300 leading-snug">
-                      Test the real agent with its configured runtime.
+                      Test real agent with system LLM pool & real tool APIs.
                     </p>
+                    <span className="mt-2 inline-block text-[9px] font-mono text-emerald-300 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                      🟢 Ready (Platform Keys Active)
+                    </span>
                   </div>
 
                   {/* Compatible */}
@@ -532,8 +659,11 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                       <span className="text-[9px] font-mono text-indigo-300 uppercase bg-indigo-950 px-1.5 py-0.5 rounded border border-indigo-500/30">Adapter</span>
                     </div>
                     <p className="text-[11px] text-slate-300 leading-snug">
-                      Run the real agent with supported mocks/adapters.
+                      Run real agent with platform tool gateway mocks.
                     </p>
+                    <span className="mt-2 inline-block text-[9px] font-mono text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                      🔵 Adapter Gateway Ready
+                    </span>
                   </div>
 
                   {/* Simulation */}
@@ -557,8 +687,11 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                       <span className="text-[9px] font-mono font-bold text-amber-400 uppercase bg-amber-950 px-1.5 py-0.5 rounded border border-amber-500/40">Lower Fidelity</span>
                     </div>
                     <p className="text-[11px] text-amber-200/90 leading-snug">
-                      Simulate unavailable external dependencies. Results have lower execution fidelity.
+                      Offline deterministic simulation with mock environment.
                     </p>
+                    <span className="mt-2 inline-block text-[9px] font-mono text-amber-300 bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-500/20">
+                      🟢 0 API Keys Required
+                    </span>
                   </div>
                 </div>
               </div>

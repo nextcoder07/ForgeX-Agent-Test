@@ -76,7 +76,8 @@ async def get_improve_summary(
     # Resolve target evaluation run
     target_run_id = evaluation_run_id
     if not target_run_id:
-        all_jobs = [j for j in store.jobs.values() if getattr(j, "agent_id", None) == agent_id or j.agent_name == agent.name]
+        jobs_list = list(store.jobs.values()) + list(store.execution_jobs.values())
+        all_jobs = [j for j in jobs_list if getattr(j, "agent_id", None) == agent_id or getattr(j, "agent_name", "") == agent.name]
         if all_jobs:
             target_run_id = sorted(all_jobs, key=lambda j: getattr(j, "created_at", ""))[-1].id
         else:
@@ -170,7 +171,8 @@ async def propose_repair(req: ProposeRepairRequest):
 
     target_run_id = req.evaluation_run_id
     if not target_run_id:
-        all_jobs = [j for j in store.jobs.values() if getattr(j, "agent_id", None) == agent.id]
+        jobs_list = list(store.jobs.values()) + list(store.execution_jobs.values())
+        all_jobs = [j for j in jobs_list if getattr(j, "agent_id", None) == agent.id or getattr(j, "agent_name", "") == agent.name]
         if all_jobs:
             target_run_id = sorted(all_jobs, key=lambda j: getattr(j, "created_at", ""))[-1].id
 
