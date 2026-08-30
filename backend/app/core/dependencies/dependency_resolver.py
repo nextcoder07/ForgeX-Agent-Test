@@ -370,9 +370,10 @@ class DependencyResolver:
             if runtime_import_blockers:
                 is_mode_all_fulfilled = False
 
+            executed_prov = "google"
+            executed_mod = "gemini-3.7-flash"
+
             if llm_req and llm_req.provider != "UNKNOWN":
-                executed_prov = "google"
-                executed_mod = "gemini-3.7-flash"
                 llm_sub = orig_provider.lower() not in ["google", "gemini"]
 
                 service_bindings.append(
