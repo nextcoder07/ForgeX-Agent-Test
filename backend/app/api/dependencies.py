@@ -108,3 +108,27 @@ def get_agent_requirements_report(agent_id: str):
 
     return RequirementResolver.resolve_agent_requirements(agent=agent, user_overrides=_USER_SYSTEM_CREDENTIALS)
 
+
+from app.core.dependencies.setup_orchestrator import SetupOrchestrator
+from app.models.execution import SetupReadinessRecord
+
+
+@router.get("/agents/{agent_id}/setup-readiness", response_model=SetupReadinessRecord)
+def get_agent_setup_readiness(agent_id: str):
+    """Retrieve current pre-execution SetupReadinessRecord for an agent."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    return SetupOrchestrator.get_or_create_setup_readiness(agent_id)
+
+
+@router.post("/agents/{agent_id}/run-setup", response_model=SetupReadinessRecord)
+def run_agent_automatic_setup(agent_id: str):
+    """Run full automatic environment setup, dependency package installation, and prerequisite verification."""
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    return SetupOrchestrator.run_automatic_setup(agent_id, provided_secrets=_USER_SYSTEM_CREDENTIALS)
+

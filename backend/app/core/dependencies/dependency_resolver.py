@@ -23,6 +23,8 @@ from app.models.dependency_model import (
     ExecutionModelBinding,
     DependencyRequirement,
     ServiceBindingItem,
+    CredentialSource,
+    CredentialStatus,
     ExecutionDependencyBinding,
     DependencyResolverResult,
     SystemCredentialItem,
@@ -97,7 +99,7 @@ class DependencyResolver:
             )
         )
 
-        # 2. Package / Framework dependencies
+        # 2. Package / Framework & Credential dependencies
         for dep in agent.dependencies:
             dep_type = str(dep.type).lower() if hasattr(dep.type, "value") else str(dep.type).lower()
             if dep_type in ["package", "framework"]:
@@ -109,6 +111,18 @@ class DependencyResolver:
                         required=dep.required,
                         source=dep.detected_from or "requirements_txt",
                         binding_status="FULFILLED"
+                    )
+                )
+            elif dep_type in ["credential", "secret", "key"]:
+                requirements.append(
+                    DependencyRequirement(
+                        id=f"req-cred-{dep.name.lower()}",
+                        type="credential",
+                        provider=dep.name,
+                        credential=dep.name,
+                        required=dep.required,
+                        source=dep.detected_from or "code_analysis",
+                        binding_status="MISSING"
                     )
                 )
 
@@ -617,11 +631,11 @@ class DependencyResolver:
 
         LLM_KEY_NAMES = {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "PLATFORM_SAFETY_LLM", "TEST_AGENT_GEMINI_API_KEY"}
 
-        if mode == ExecutionMode.FAITHFUL or mode == ExecutionMode.COMPATIBLE:
+        if mode in (ExecutionMode.FAITHFUL, ExecutionMode.COMPATIBLE):
             for r in agent_reqs:
-                if r.credential and r.credential.upper() not in LLM_KEY_NAMES and r.type != "llm":
+                if r.credential:
                     sys_item = system_items.get(r.credential)
-                    sys_cfg = getattr(sys_item, "is_configured", False) if sys_item else bool(os.getenv(r.credential))
+                    sys_cfg = getattr(sys_item, "is_configured", False) if sys_item else bool(os.getenv(r.credential) or test_creds.get(r.credential))
                     user_provided = bool(secrets.get(r.credential))
 
                     is_full = bool(user_provided or sys_cfg)

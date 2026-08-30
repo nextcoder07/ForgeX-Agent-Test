@@ -32,7 +32,7 @@ import {
   Check,
 } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
-import type { AgentRecord, Scenario, ExecutionJob, ExecutionTrace, ToolCallRecord, TraceEvent, SecurityEvent, ObservationSummary } from '../api/client';
+import type { AgentRecord, Scenario, ExecutionJob, ExecutionTrace, ToolCallRecord, TraceEvent, SecurityEvent, ObservationSummary, SetupReadinessRecord } from '../api/client';
 import {
   fetchAgents,
   fetchScenarioLibrary,
@@ -41,6 +41,8 @@ import {
   fetchExecutionTraces,
   evaluateExecutionJob,
   fetchLatestExecutionJob,
+  getSetupReadiness,
+  runAutomaticSetup,
 } from '../api/client';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 import { PipelineObservabilityPage } from './PipelineObservabilityPage';
@@ -59,6 +61,7 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenarioIds, setSelectedScenarioIds] = useState<string[]>([]);
+  const [setupReadiness, setSetupReadiness] = useState<SetupReadinessRecord | null>(null);
   
   // Job & Trace Status
   const [executionJob, setExecutionJob] = useState<ExecutionJob | null>(null);
@@ -90,6 +93,13 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     if (!selectedAgentId) return;
     setLoadingScenarios(true);
     setExecutionBlockedMsg(null);
+
+    // Trigger automatic setup preparation on agent selection
+    runAutomaticSetup(selectedAgentId)
+      .then(sr => setSetupReadiness(sr))
+      .catch(() => {
+        getSetupReadiness(selectedAgentId).then(sr => setSetupReadiness(sr)).catch(() => {});
+      });
     
     Promise.all([
       fetchScenarioLibrary(selectedAgentId),

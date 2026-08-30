@@ -79,8 +79,6 @@ def is_module_installed(module_name: str) -> bool:
         return True
 
     clean_key = root_module.replace("-", "_").lower()
-    if clean_key in ("crewai", "autogen", "crewai_tools", "crew"):
-        return True
 
     pip_to_module = {
         "python_dotenv": "dotenv",

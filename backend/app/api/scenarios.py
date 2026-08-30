@@ -189,29 +189,7 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
         else:
             final_scenarios.append(sc)
 
-    if len(final_scenarios) < payload.target_count:
-        logger.warning(
-            "Only %s scenarios remained after validation; padding back to requested count %s.",
-            len(final_scenarios),
-            payload.target_count,
-        )
-        fill_categories = [
-            ScenarioCategory.NORMAL,
-            ScenarioCategory.EDGE,
-            ScenarioCategory.RECOVERY,
-            ScenarioCategory.ADVERSARIAL,
-            ScenarioCategory.SAFETY,
-            ScenarioCategory.SECURITY,
-            ScenarioCategory.STRESS,
-            ScenarioCategory.CHAOS,
-        ]
-        used_ids = {sc.id for sc in final_scenarios}
-        for idx in range(payload.target_count - len(final_scenarios)):
-            category = fill_categories[(len(final_scenarios) + idx) % len(fill_categories)]
-            candidate = _build_unique_padding_scenario(agent, context, category, len(final_scenarios) + idx + 1)
-            while candidate.id in used_ids:
-                candidate = _build_unique_padding_scenario(agent, context, category, len(final_scenarios) + idx + 1 + 1000)
-            used_ids.add(candidate.id)
+    logger.info("Grounded scenario generation produced %s validated scenarios for agent %s.", len(final_scenarios), agent.name)
     if len(final_scenarios) > payload.target_count:
         final_scenarios = final_scenarios[:payload.target_count]
 
@@ -270,34 +248,7 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
             code = v.split(":")[0]
             rejection_reasons[code] = rejection_reasons.get(code, 0) + 1
 
-    if len(valid_candidates) < payload.target_count:
-        logger.warning(
-            "Only %s executable scenarios survived validation; padding to the requested count of %s.",
-            len(valid_candidates),
-            payload.target_count,
-        )
-        fill_categories = [
-            ScenarioCategory.NORMAL,
-            ScenarioCategory.EDGE,
-            ScenarioCategory.RECOVERY,
-            ScenarioCategory.ADVERSARIAL,
-            ScenarioCategory.SAFETY,
-            ScenarioCategory.SECURITY,
-            ScenarioCategory.STRESS,
-            ScenarioCategory.CHAOS,
-        ]
-        used = {sc.id for sc in valid_candidates}
-        for idx in range(payload.target_count - len(valid_candidates)):
-            category = fill_categories[(len(valid_candidates) + idx) % len(fill_categories)]
-            pad = _build_unique_padding_scenario(agent, context, category, len(valid_candidates) + idx + 1)
-            while pad.id in used:
-                pad = _build_unique_padding_scenario(agent, context, category, len(valid_candidates) + idx + 1000)
-            used.add(pad.id)
-            pad.validation_status = "EXECUTABLE"
-            pad.status = "GENERATED"
-            pad.critic_status = "NOT_RUN"
-            pad.critic_passed = False
-            valid_candidates.append(pad)
+
 
     # Replace previous scenarios only if fresh valid ones were produced
     if valid_candidates:

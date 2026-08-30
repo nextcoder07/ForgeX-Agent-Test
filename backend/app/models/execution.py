@@ -25,6 +25,41 @@ class ExecutionLifecycleState(str, Enum):
     READY_FOR_EVALUATION = "READY_FOR_EVALUATION"
 
 
+class SetupState(str, Enum):
+    NOT_STARTED = "NOT_STARTED"
+    ANALYZING = "ANALYZING"
+    PREPARING = "PREPARING"
+    INSTALLING = "INSTALLING"
+    VERIFYING = "VERIFYING"
+    READY = "READY"
+    BLOCKED = "BLOCKED"
+    FAILED = "FAILED"
+
+
+class SetupReadinessRecord(BaseModel):
+    id: str
+    agent_id: str
+    agent_version_id: str = "v1.0"
+    execution_id: Optional[str] = None
+    status: SetupState = SetupState.NOT_STARTED
+    current_step: str = "ANALYZING AGENT"
+    progress_pct: int = 0
+    runtime_status: str = "READY"
+    dependency_status: str = "READY"
+    installed_dependencies: List[str] = Field(default_factory=list)
+    missing_dependencies: List[str] = Field(default_factory=list)
+    credential_status: str = "READY"
+    missing_credentials: List[str] = Field(default_factory=list)
+    model_status: str = "READY"
+    service_status: str = "READY"
+    artifact_status: str = "READY"
+    sandbox_status: str = "READY"
+    execution_mode: str = "faithful"
+    blockers: List[Dict[str, Any]] = Field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class ExecutionFailureState(str, Enum):
     BLOCKED = "BLOCKED"
     FAILED_SETUP = "FAILED_SETUP"

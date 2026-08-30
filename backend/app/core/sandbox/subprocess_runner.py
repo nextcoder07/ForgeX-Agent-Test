@@ -40,17 +40,22 @@ SENSITIVE_ENV_KEYS = {
 }
 
 
+SAFE_SYSTEM_ENV_KEYS = {
+    "PATH", "PYTHONPATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
+    "HOME", "USERPROFILE", "LANG", "LC_ALL", "PYTHONIOENCODING", "PYTHONUTF8", "TERM"
+}
+
 def create_sanitized_environment(
     provided_secrets: Optional[Dict[str, str]] = None,
     agent: Optional[AgentRecord] = None
 ) -> Dict[str, str]:
-    """Creates a sanitized environment dictionary for child sandbox processes, preserving legitimate agent/user keys and stripping backend internal secrets."""
-    env = dict(os.environ)
-
-    # 1. Strip strictly internal platform infrastructure secrets
-    for key in list(env.keys()):
-        if key.upper() in SENSITIVE_ENV_KEYS:
-            env.pop(key, None)
+    """Creates a sanitized environment dictionary using an explicit allowlist for child sandbox processes."""
+    env = {}
+    
+    # 1. Allow only safe system environment variables
+    for key, val in os.environ.items():
+        if key.upper() in SAFE_SYSTEM_ENV_KEYS and key.upper() not in SENSITIVE_ENV_KEYS:
+            env[key] = val
 
     # Set UTF-8 encoding so emojis and unicode strings print cleanly on all platforms (Windows cp1252 fix)
     env["PYTHONIOENCODING"] = "utf-8"

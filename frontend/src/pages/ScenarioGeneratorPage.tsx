@@ -82,15 +82,20 @@ export const ScenarioGeneratorPage: React.FC<{}> = () => {
       const countsToUse = useCategoryCounts ? categoryCounts : undefined;
       const countToRequest = useCategoryCounts ? Object.values(categoryCounts).reduce((a, b) => a + b, 0) : targetCount;
       
-      await generateScenarios(selectedAgentId, countToRequest, undefined, undefined, countsToUse);
+      const newScenarios = await generateScenarios(selectedAgentId, countToRequest, undefined, undefined, countsToUse);
+      if (Array.isArray(newScenarios) && newScenarios.length > 0) {
+        setScenarios(newScenarios);
+      }
       const [updatedScenarios, cov] = await Promise.all([
         fetchScenarioLibrary(selectedAgentId),
         fetchCoverageReport(selectedAgentId),
       ]);
-      setScenarios(updatedScenarios);
+      if (Array.isArray(updatedScenarios) && updatedScenarios.length > 0) {
+        setScenarios(updatedScenarios);
+      }
       setCoverage(cov);
     } catch (e) {
-      console.error(e);
+      console.error('Scenario generation failed:', e);
     } finally {
       setLoadingGenerate(false);
     }
@@ -267,7 +272,7 @@ export const ScenarioGeneratorPage: React.FC<{}> = () => {
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h2 className="text-base font-bold text-slate-100">
-              Scenario Library ({scenarios.filter(s => s.validation_status === 'VALIDATED').length} ready
+              Scenario Library ({scenarios.filter(s => ['VALIDATED', 'EXECUTABLE', 'GENERATED'].includes(s.validation_status || '')).length} ready
               {scenarios.filter(s => s.validation_status === 'FAILED_GENERATION').length > 0 && (
                 <span className="text-rose-400 font-normal text-sm ml-2">
                   · {scenarios.filter(s => s.validation_status === 'FAILED_GENERATION').length} could not be generated

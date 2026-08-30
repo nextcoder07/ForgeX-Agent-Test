@@ -19,22 +19,23 @@ analyzer = RootCauseAnalyzer()
 
 
 @router.get("/agent/{agent_id}", response_model=AgentDiagnosisReport)
-async def get_agent_latest_diagnosis(agent_id: str):
-    """Retrieve the latest diagnosis report for an agent, returning structured status if clean or no runs."""
+async def get_agent_latest_diagnosis(agent_id: str, evaluation_run_id: Optional[str] = Query(None)):
+    """Retrieve diagnosis report for an agent, using explicit evaluation_run_id if provided."""
     agent = store.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # Find latest evaluation run for this agent across scorecards and jobs
-    all_jobs = [j for j in store.jobs.values() if getattr(j, "agent_id", None) == agent.id]
-    all_scorecards = [sc for sc in store.scorecards.values() if getattr(sc, "agent_id", None) == agent.id]
+    target_run_id = evaluation_run_id
+    if not target_run_id:
+        # Fallback to latest evaluation run for this agent if no specific run_id requested
+        all_jobs = [j for j in store.jobs.values() if getattr(j, "agent_id", None) == agent.id]
+        all_scorecards = [sc for sc in store.scorecards.values() if getattr(sc, "agent_id", None) == agent.id]
 
-    target_run_id = None
-    if all_jobs:
-        sorted_jobs = sorted(all_jobs, key=lambda j: getattr(j, "created_at", ""))
-        target_run_id = sorted_jobs[-1].id
-    elif all_scorecards:
-        target_run_id = all_scorecards[-1].evaluation_id
+        if all_jobs:
+            sorted_jobs = sorted(all_jobs, key=lambda j: getattr(j, "created_at", ""))
+            target_run_id = sorted_jobs[-1].id
+        elif all_scorecards:
+            target_run_id = all_scorecards[-1].evaluation_id
 
     if not target_run_id:
         return build_empty_diagnosis_report(

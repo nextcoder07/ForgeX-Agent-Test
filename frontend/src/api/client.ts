@@ -704,6 +704,32 @@ export interface RegressionComparison {
   summary_verdict: string;
 }
 
+export type SetupState = 'NOT_STARTED' | 'ANALYZING' | 'PREPARING' | 'INSTALLING' | 'VERIFYING' | 'READY' | 'BLOCKED' | 'FAILED';
+
+export interface SetupReadinessRecord {
+  id: string;
+  agent_id: string;
+  agent_version_id: string;
+  execution_id?: string | null;
+  status: SetupState;
+  current_step: string;
+  progress_pct: number;
+  runtime_status: string;
+  dependency_status: string;
+  installed_dependencies: string[];
+  missing_dependencies: string[];
+  credential_status: string;
+  missing_credentials: string[];
+  model_status: string;
+  service_status: string;
+  artifact_status: string;
+  sandbox_status: string;
+  execution_mode: string;
+  blockers: { category?: string; message?: string }[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PipelineStage {
   id: string;
   stage_name: string;
@@ -2388,6 +2414,20 @@ export async function generateImproveTrainingDataset(agentId: string, datasetNam
     })
   });
   if (!res.ok) throw new Error(`Failed to generate dataset: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getSetupReadiness(agentId: string): Promise<SetupReadinessRecord> {
+  const res = await fetch(`${API_BASE_URL}/dependencies/agents/${agentId}/setup-readiness`);
+  if (!res.ok) throw new Error(`Failed to get setup readiness: ${res.statusText}`);
+  return res.json();
+}
+
+export async function runAutomaticSetup(agentId: string): Promise<SetupReadinessRecord> {
+  const res = await fetch(`${API_BASE_URL}/dependencies/agents/${agentId}/run-setup`, {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error(`Failed to run automatic setup: ${res.statusText}`);
   return res.json();
 }
 

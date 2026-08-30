@@ -186,20 +186,32 @@ def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List
 
             sc = scenarios_by_id.get(tr.scenario_id)
             if not sc:
-                from app.models.scenario import Scenario, ScenarioCategory
-                sc = Scenario(
-                    id=tr.scenario_id,
-                    category=ScenarioCategory.NORMAL,
-                    title="Executed Test Scenario",
-                    purpose="Standard evaluation scenario",
-                    user_messages=["Execute scenario"],
-                    initial_state={},
-                    required_capabilities=[],
-                    fault_injections=[],
-                    critic_passed=True,
-                    validation_status="VALIDATED",
-                    rationale="Evaluated during batch execution"
+                verdicts.append(
+                    RunVerdict(
+                        id=f"v-err-{uuid.uuid4().hex[:6]}",
+                        run_id=f"run-{tr.id}",
+                        scenario_id=tr.scenario_id,
+                        agent_id=agent.id,
+                        trace_id=tr.id,
+                        passed=False,
+                        status="TRACE_SCENARIO_MISMATCH",
+                        expected_behavior_met=False,
+                        findings=[
+                            FailureFinding(
+                                finding_id=f"find-mismatch-{uuid.uuid4().hex[:6]}",
+                                category="TRACE_SCENARIO_MISMATCH",
+                                severity="high",
+                                title="Trace Scenario Mismatch",
+                                description=f"Execution trace referenced scenario '{tr.scenario_id}' which does not exist in scenario manifest.",
+                                source="EVALUATION_GATEWAY",
+                                explanation="Trace could not be mapped to any known scenario definition.",
+                                evidence=f"Trace ID: {tr.id}, Scenario ID: {tr.scenario_id}",
+                                confidence=1.0
+                            )
+                        ]
+                    )
                 )
+                continue
 
             # Evaluate single trace with dedicated event loop in a safe thread to prevent loop conflicts
             try:
@@ -235,11 +247,27 @@ def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List
                 )
                 verdicts.append(
                     RunVerdict(
-                        trace_id=tr.id,
+                        id=f"v-err-{uuid.uuid4().hex[:6]}",
+                        run_id=f"run-{tr.id}",
                         scenario_id=sc.id,
-                        passed=len(tr.security_events) == 0,
-                        findings=[],
-                        expected_behavior_met=True
+                        agent_id=agent.id,
+                        trace_id=tr.id,
+                        passed=False,
+                        status="EVALUATOR_ERROR",
+                        expected_behavior_met=False,
+                        findings=[
+                            FailureFinding(
+                                finding_id=f"find-err-{uuid.uuid4().hex[:6]}",
+                                category="EVALUATOR_EXCEPTION",
+                                severity="high",
+                                title="Evaluator Processing Failure",
+                                description=f"Trace evaluation encountered an unhandled exception: {tr_exc}",
+                                source="EVALUATION_GATEWAY",
+                                explanation=str(tr_exc),
+                                evidence=f"Trace ID: {tr.id}",
+                                confidence=1.0
+                            )
+                        ]
                     )
                 )
 

@@ -132,6 +132,30 @@ def _run_sandbox_scenarios_task(
                     if conn.model_identifier:
                         secrets[f"{provider_prefix}_MODEL"] = conn.model_identifier
 
+    # Enforce Setup Readiness Invariant: SETUP MUST COMPLETE BEFORE EXECUTION
+    from app.core.dependencies.setup_orchestrator import SetupOrchestrator
+    from app.models.execution import SetupState
+
+    setup_record = SetupOrchestrator.run_automatic_setup(agent_id=agent_id, execution_id=job_id, provided_secrets=secrets)
+
+    if setup_record.status in (SetupState.BLOCKED, SetupState.FAILED):
+        job.status = "blocked" if setup_record.status == SetupState.BLOCKED else "failed"
+        blocker_msg = "; ".join([b.get("message", "") for b in setup_record.blockers]) or setup_record.current_step
+        msg = f"Execution blocked during setup: {blocker_msg}"
+        if hasattr(job, "failure_reason"):
+            job.failure_reason = msg
+        if hasattr(job, "error_message"):
+            setattr(job, "error_message", msg)
+        store.save_execution_job(job)
+        activity_log.emit(
+            category="SANDBOX",
+            action="SETUP_BLOCKED",
+            detail=f"Execution {job_id} blocked during setup: {blocker_msg}",
+            request_summary=f"Agent: {agent.name}",
+            status="failed"
+        )
+        return  # ZERO scenarios start if setup is blocked/failed!
+
     job.status = "running"
     store.save_execution_job(job)
 
@@ -146,9 +170,21 @@ def _run_sandbox_scenarios_task(
         status=ExecutionLifecycleState.RUNNING.value,
         started_at=_now(),
         requested_count=len(scenario_ids),
-        ready_count=len(scenario_ids)
+        ready_count=0
     )
     store.save_execution_run(exec_run)
+
+    # One logical ExecutionSession per execution run job
+    session_id = f"sess-{job_id}"
+    session = ExecutionSession(
+        id=session_id,
+        execution_run_id=job_id,
+        agent_version_id=agent.version_label,
+        scenario_id=scenario_ids[0] if scenario_ids else "sc-0",
+        status=ExecutionLifecycleState.RUNNING.value,
+        started_at=_now()
+    )
+    store.save_execution_session(session)
 
     manager = SandboxManager()
     traces: List[ExecutionTrace] = []
@@ -173,16 +209,8 @@ def _run_sandbox_scenarios_task(
             if getattr(sc, 'validation_status', '') == 'FAILED_GENERATION':
                 continue
 
-            session_id = f"sess-{uuid.uuid4().hex[:8]}"
-            session = ExecutionSession(
-                id=session_id,
-                execution_run_id=job_id,
-                agent_version_id=agent.version_label,
-                scenario_id=sc.id,
-                status=ExecutionLifecycleState.PREFLIGHT.value,
-                started_at=_now()
-            )
-            store.save_execution_session(session)
+            exec_run.ready_count += 1
+            store.save_execution_run(exec_run)
 
             # Preflight
             pf_res = run_scenario_preflight(scenario=sc, agent=agent, execution_run_id=job_id, provided_variables=secrets)
@@ -437,9 +465,7 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
     if missing_ids:
         raise HTTPException(status_code=404, detail=f"Scenarios not found in storage: {missing_ids}")
 
-    # Replace prior execution artifacts for this agent so the newest execution set becomes the canonical one.
-    store.clear_execution_data_for_agent(payload.agent_id)
-
+    # Every execution run gets its own unique job_id and preserves historical run data for comparison.
     job_id = f"exec-{uuid.uuid4().hex[:8]}"
 
     req_mode_enum = None

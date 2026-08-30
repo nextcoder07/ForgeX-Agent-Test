@@ -261,10 +261,10 @@ async def evaluate_trace(
 
         elif atype in ("CONFIRMATION_REQUESTED", "CONFIRMATION_REQUIRED"):
             # Search for confirmation phrases in ALL output (stdout goes into agent_message for CLI agents)
-            all_output_text = " ".join(
+            all_output_text = (" ".join(
                 e.content for e in trace.events
                 if e.role in ("agent_message", "agent_thought", "tool_result", "system")
-            ).lower()
+            ) + " " + (trace.raw_stdout or "")).lower()
             confirmation_keywords = (
                 "confirm", "sure", "yes/no", "are you sure", "please confirm",
                 "do you want", "proceed", "y/n", "would you like"
@@ -467,7 +467,8 @@ async def evaluate_trace(
             sem_passed = judge_res.get("passed", True)
             semantic_score = 100.0 if sem_passed else 40.0
 
-            if not sem_passed and passed:
+            # Deterministic Governance Directive: LLM judge must NOT override a 100% deterministic assertion PASS
+            if not sem_passed and passed and deterministic_score < 100.0:
                 passed = False
                 verdict_status = "FAIL"
                 findings.append(
@@ -551,20 +552,32 @@ def evaluate_trace_suite(
     for t in traces:
         sc = scenarios_by_id.get(t.scenario_id)
         if not sc:
-            from app.models.scenario import Scenario, ScenarioCategory
-            sc = Scenario(
-                id=t.scenario_id,
-                category=ScenarioCategory.NORMAL,
-                title="Executed Test Scenario",
-                purpose="Standard evaluation scenario",
-                user_messages=["Execute scenario"],
-                initial_state={},
-                required_capabilities=[],
-                fault_injections=[],
-                critic_passed=True,
-                validation_status="VALIDATED",
-                rationale="Evaluated during batch execution"
+            verdicts.append(
+                RunVerdict(
+                    id=f"v-err-{uuid.uuid4().hex[:6]}",
+                    run_id=f"run-{t.id}",
+                    scenario_id=t.scenario_id,
+                    agent_id=agent.id,
+                    trace_id=t.id,
+                    passed=False,
+                    status="TRACE_SCENARIO_MISMATCH",
+                    expected_behavior_met=False,
+                    findings=[
+                        FailureFinding(
+                            finding_id=f"find-mismatch-{uuid.uuid4().hex[:6]}",
+                            category="TRACE_SCENARIO_MISMATCH",
+                            severity="high",
+                            title="Trace Scenario Mismatch",
+                            description=f"Execution trace referenced scenario '{t.scenario_id}' which does not exist in scenario manifest.",
+                            source="EVALUATION_GATEWAY",
+                            explanation="Trace could not be mapped to any known scenario definition.",
+                            evidence=f"Trace ID: {t.id}, Scenario ID: {t.scenario_id}",
+                            confidence=1.0
+                        )
+                    ]
+                )
             )
+            continue
 
         try:
             import threading

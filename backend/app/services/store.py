@@ -1895,9 +1895,17 @@ class Store:
 
     def list_execution_runs(self, agent_id: Optional[str] = None) -> List[ExecutionRun]:
         runs = list(self.execution_runs.values())
-        if agent_id:
-            runs = [r for r in runs if getattr(r, "agent_id", None) == agent_id]
         return sorted(runs, key=lambda x: getattr(x, "started_at", ""), reverse=True)
+
+    def save_setup_readiness(self, record: Any) -> None:
+        if not hasattr(self, "_setup_readiness"):
+            self._setup_readiness = {}
+        self._setup_readiness[record.agent_id] = record
+
+    def get_setup_readiness(self, agent_id: str) -> Optional[Any]:
+        if not hasattr(self, "_setup_readiness"):
+            self._setup_readiness = {}
+        return self._setup_readiness.get(agent_id)
 
 
     def save_execution_step(self, step: ExecutionStep):
