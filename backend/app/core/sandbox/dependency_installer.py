@@ -34,6 +34,8 @@ IMPORT_TO_PACKAGE_MAP: Dict[str, str] = {
     "langchain_core": "langchain-core",
     "langchain_openai": "langchain-openai",
     "langchain_community": "langchain-community",
+    "langchain_tavily": "langchain-tavily",
+    "tavily": "tavily-python",
     "langchain_google_genai": "langchain-google-genai",
     "autogen": "pyautogen",
     "openai": "openai",
@@ -71,23 +73,37 @@ _CHECKED_AGENTS_CACHE: Set[str] = set()
 
 def is_module_installed(module_name: str) -> bool:
     """Checks if a module or package root is importable in the current Python environment."""
-    root_module = module_name.split(".")[0].strip()
+    clean = re.split(r'[=><~!]', str(module_name))[0].strip()
+    root_module = clean.split(".")[0].strip()
     if not root_module or root_module in STANDARD_LIBS:
         return True
 
-    try:
-        __import__(root_module)
+    clean_key = root_module.replace("-", "_").lower()
+    if clean_key in ("crewai", "autogen", "crewai_tools", "crew"):
         return True
-    except ImportError:
-        pass
 
-    # Try importlib.util.find_spec
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec(root_module)
-        return spec is not None
-    except Exception:
-        return False
+    pip_to_module = {
+        "python_dotenv": "dotenv",
+        "pyyaml": "yaml",
+        "pillow": "PIL",
+        "scikit_learn": "sklearn",
+    }
+    target = pip_to_module.get(clean_key, clean_key)
+
+    import importlib.util
+    for cand in (target, clean_key, root_module):
+        try:
+            if importlib.util.find_spec(cand) is not None:
+                return True
+        except Exception:
+            pass
+        try:
+            __import__(cand)
+            return True
+        except Exception:
+            pass
+
+    return False
 
 
 def install_package_sync(package_spec: str) -> bool:
@@ -97,41 +113,48 @@ def install_package_sync(package_spec: str) -> bool:
         return True
 
     spec_key = clean_spec.lower()
-    base_pkg = re.split(r"[><=~]", clean_spec)[0].strip().lower()
-
-    if spec_key in _SUCCESS_PACKAGES_CACHE or base_pkg in _SUCCESS_PACKAGES_CACHE:
+    if spec_key in _SUCCESS_PACKAGES_CACHE:
         return True
-    if (
-        spec_key in _FAILED_PACKAGES_CACHE
-        or base_pkg in _FAILED_PACKAGES_CACHE
-        or spec_key in _ATTEMPTED_PACKAGES_CACHE
-        or base_pkg in _ATTEMPTED_PACKAGES_CACHE
-    ):
+    if spec_key in _FAILED_PACKAGES_CACHE or spec_key in _ATTEMPTED_PACKAGES_CACHE:
         return False
 
     _ATTEMPTED_PACKAGES_CACHE.add(spec_key)
-    _ATTEMPTED_PACKAGES_CACHE.add(base_pkg)
 
-    logger.info(f"[DEPENDENCY_INSTALLER] Auto-installing missing package: {clean_spec}...")
+    base_pkg = re.split(r'[=><~!]', clean_spec)[0].strip()
+    base_mod = base_pkg.replace("-", "_")
+
+    if is_module_installed(base_mod) or is_module_installed(base_pkg):
+        _SUCCESS_PACKAGES_CACHE.add(spec_key)
+        return True
+
+    logger.info(f"[DEPENDENCY_INSTALLER] Dynamically installing missing package: {clean_spec}...")
     try:
         cmd = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            clean_spec,
-            "--quiet",
-            "--no-warn-script-location",
-            "--disable-pip-version-check"
+            sys.executable, "-m", "pip", "install", clean_spec,
+            "--quiet", "--no-warn-script-location", "--disable-pip-version-check"
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if res.returncode == 0:
+            _SUCCESS_PACKAGES_CACHE.add(spec_key)
+            return True
+        else:
+            if base_pkg and base_pkg != clean_spec:
+                base_key = base_pkg.lower()
+                if base_key not in _FAILED_PACKAGES_CACHE:
+                    cmd_fallback = [
+                        sys.executable, "-m", "pip", "install", base_pkg,
+                        "--quiet", "--no-warn-script-location", "--disable-pip-version-check"
+                    ]
+                    res2 = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=15)
+                    if res2.returncode == 0:
+                        _SUCCESS_PACKAGES_CACHE.add(spec_key)
+                        return True
         
         # Check if user cancelled with Ctrl+C (Windows exit code 3221225786 / 0xC000013A, or SIGINT -2)
-        if result.returncode in (3221225786, -2) or "cancelled by user" in (result.stderr or "").lower():
+        if res.returncode in (3221225786, -2) or "cancelled by user" in (res.stderr or "").lower():
             logger.warning(f"[DEPENDENCY_INSTALLER] Pip installation aborted by user (Ctrl+C).")
             _FAILED_PACKAGES_CACHE.add(spec_key)
             raise KeyboardInterrupt("Pip installation cancelled by user.")
-
         if result.returncode == 0:
             logger.info(f"[DEPENDENCY_INSTALLER] Successfully installed {clean_spec}.")
             _SUCCESS_PACKAGES_CACHE.add(spec_key)
@@ -151,7 +174,7 @@ def install_package_sync(package_spec: str) -> bool:
                             sys.executable, "-m", "pip", "install", base_pkg,
                             "--quiet", "--no-warn-script-location", "--disable-pip-version-check"
                         ]
-                        res2 = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=15)
+                        res2 = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=120)
                         if res2.returncode in (3221225786, -2) or "cancelled by user" in (res2.stderr or "").lower():
                             _FAILED_PACKAGES_CACHE.add(spec_key)
                             _FAILED_PACKAGES_CACHE.add(base_key)

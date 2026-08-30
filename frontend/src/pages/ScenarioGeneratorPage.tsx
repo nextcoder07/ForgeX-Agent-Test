@@ -118,7 +118,7 @@ export const ScenarioGeneratorPage: React.FC<{}> = () => {
       <div className="flex items-center space-x-1 border-b border-slate-800">
         {([
           { id: 'generate', label: 'Generate & Library', icon: Sparkles },
-          { id: 'adversarial', label: 'Adversarial / Live Attack', icon: Flame },
+          { id: 'adversarial', label: 'Adversarial / Live Attack (Disabled)', icon: Flame },
         ] as const).map(t => (
           <button
             key={t.id}

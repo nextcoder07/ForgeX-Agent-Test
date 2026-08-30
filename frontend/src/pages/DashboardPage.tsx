@@ -101,10 +101,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({}) => {
               </button>
               <button
                 onClick={() => navigate("/live-attack")}
-                className="px-3.5 py-2 rounded-lg bg-rose-950/70 hover:bg-rose-900/80 border border-rose-500/50 text-rose-200 font-bold text-xs sm:text-sm transition flex items-center space-x-1.5"
+                className="px-3.5 py-2 rounded-lg bg-slate-900/90 border border-slate-700 text-slate-400 font-bold text-xs sm:text-sm transition flex items-center space-x-1.5 cursor-pointer"
               >
-                <Flame className="w-3.5 h-3.5" />
-                <span>Live Attack Console</span>
+                <Flame className="w-3.5 h-3.5 text-slate-500" />
+                <span>Live Attack (Disabled)</span>
               </button>
               <button
                 onClick={() => navigate("/pipeline")}

@@ -177,6 +177,7 @@ class NormalizedAgentSpec(BaseModel):
     execution_status: str = "EXECUTION_BLOCKED"
     semantic_status: str = "AI_ANALYSIS_COMPLETED"
     analysis_status: str = "COMPLETE"
+    canonical_intake: Optional[Dict[str, Any]] = None
 
 
 class RegisterSpecRequest(BaseModel):
@@ -203,6 +204,7 @@ class AgentUnderstandingResult(BaseModel):
     pipeline_run_id: Optional[str] = None
     audit_report: Optional[Dict[str, Any]] = None
     evidence_packet: Optional[Dict[str, Any]] = None
+    canonical_intake: Optional[Dict[str, Any]] = None
     semantic_status: str = "AI_ANALYSIS_COMPLETED"
     analysis_status: str = "COMPLETE"
 

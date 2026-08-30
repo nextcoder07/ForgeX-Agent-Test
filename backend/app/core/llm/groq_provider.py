@@ -57,7 +57,8 @@ class GroqProvider(LLMProvider):
             "response_format": {"type": "json_object"}
         }
 
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        timeout_seconds = int(os.getenv("LLM_TIMEOUT_SECONDS", "0") or 0)
+        async with httpx.AsyncClient(timeout=None if timeout_seconds <= 0 else timeout_seconds) as client:
             response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
             if response.status_code >= 400 and "response_format" in payload:
                 # Retry once without response_format constraint if model doesn't support json mode

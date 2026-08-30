@@ -205,33 +205,37 @@ class UnifiedKeyManager:
 
     def _select_from_pool(self, pool: List[AIKey], api_name: Optional[str] = None) -> Optional[AIKey]:
         now = time.time()
-        
+
         # 1. Reset any keys whose cooldown time has expired
         for k in pool:
             if k.cooldown_until > 0 and now >= k.cooldown_until:
                 k.cooldown_until = 0.0
                 k.failure_count = 0
 
-        # 2. Simple sequential traversal: check cloud keys in exact order (1 -> 2 -> 3 -> ... -> N)
-        cloud_keys = [
-            k for k in pool 
-            if k.api_name not in ("ollama", "local") and (api_name is None or k.api_name.lower() == api_name.lower())
+        filtered = [
+            k for k in pool
+            if api_name is None or k.api_name.lower() == api_name.lower()
         ]
-        # Strict user-defined priority: Key 1 is always evaluated before Key 2, Key 3, etc.
-        cloud_keys.sort(key=lambda k: k.priority)
 
-        for k in cloud_keys:
+        # 2. Prefer local Ollama / local models first for offline-first execution.
+        local_keys = [
+            k for k in filtered
+            if k.api_name in ("ollama", "local")
+        ]
+        for k in local_keys:
             if k.is_available:
                 k.last_used_at = now
                 k.total_calls += 1
                 return k
 
-        # 3. If all cloud keys are exhausted/on cooldown, select local Ollama LLM
-        local_keys = [
-            k for k in pool 
-            if k.api_name in ("ollama", "local") and (api_name is None or k.api_name.lower() == api_name.lower())
+        # 3. Next, use API-backed cloud keys as the quality-upgrade path when local is unavailable.
+        cloud_keys = [
+            k for k in filtered
+            if k.api_name not in ("ollama", "local")
         ]
-        for k in local_keys:
+        cloud_keys.sort(key=lambda k: k.priority)
+
+        for k in cloud_keys:
             if k.is_available:
                 k.last_used_at = now
                 k.total_calls += 1
@@ -323,6 +327,20 @@ def is_rotation_eligible(err: Any) -> bool:
     return category in ("RATE_LIMITED", "SERVER_ERROR", "AUTHENTICATION_ERROR", "PARSING_ERROR", "UNKNOWN")
 
 
+def is_ollama_reachable(url: str = "http://localhost:11434") -> bool:
+    """Synchronous fast check to verify whether local Ollama server is listening and reachable."""
+    import urllib.request
+    clean_url = url.rstrip("/")
+    if not clean_url.startswith("http"):
+        clean_url = f"http://{clean_url}"
+    try:
+        req = urllib.request.Request(f"{clean_url}/api/tags", headers={"User-Agent": "ForgeX-Health"})
+        with urllib.request.urlopen(req, timeout=0.8) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
 class TestAgentKeyManager:
     """Provides active AI and tool credentials for sandboxed test agents with multi-provider aliasing and local fallback."""
     def __init__(self):
@@ -377,10 +395,11 @@ class TestAgentKeyManager:
                 creds["OPENAI_API_KEY"] = creds["GROQ_API_KEY"]
                 creds["OPENAI_BASE_URL"] = "https://api.groq.com/openai/v1"
             else:
-                # 5. Local Ollama OpenAI-compatible endpoint fallback (100% offline free execution)
+                # Only use local Ollama if server is actually running & reachable
                 ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-                creds["OPENAI_API_KEY"] = "ollama"
-                creds["OPENAI_BASE_URL"] = f"{ollama_url}/v1"
+                if is_ollama_reachable(ollama_url):
+                    creds["OPENAI_API_KEY"] = "ollama"
+                    creds["OPENAI_BASE_URL"] = f"{ollama_url}/v1"
 
         return creds
 

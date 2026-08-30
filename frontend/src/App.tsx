@@ -38,8 +38,8 @@ function AppContent() {
           {/* Public Landing & Authentication */}
           <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <HomePage />} />
           <Route path="/home" element={<HomePage />} />
-          <Route path="/login" element={user?.emailVerified ? <Navigate to="/agents" replace /> : <LoginPage />} />
-          <Route path="/signup" element={user?.emailVerified ? <Navigate to="/agents" replace /> : <SignupPage />} />
+          <Route path="/login" element={user?.emailVerified ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+          <Route path="/signup" element={user?.emailVerified ? <Navigate to="/dashboard" replace /> : <SignupPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           {/* Protected Workspace Routes */}

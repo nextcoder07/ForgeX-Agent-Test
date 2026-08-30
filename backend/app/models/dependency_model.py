@@ -29,6 +29,21 @@ class EvaluationFidelity(str, Enum):
     TEST_SPECIFIC = "TEST-SPECIFIC"      # Simulation mode
 
 
+class CredentialSource(str, Enum):
+    SUPPORTED_PLATFORM_DEFAULT = "supported_platform_default"
+    USER_CREDENTIAL_PROVIDED = "user_credential_provided"
+    USER_CREDENTIAL_REQUIRED = "user_credential_required"
+    EMULATED = "emulated"
+    UNAVAILABLE = "unavailable"
+
+
+class CredentialStatus(str, Enum):
+    READY = "ready"
+    REQUIRED = "required"
+    MISSING = "missing"
+    BLOCKED = "blocked"
+
+
 class DetectedSecret(BaseModel):
     name: str
     type: str = "secret"                # "secret", "config", "endpoint", "declared_in_template", "referenced_in_code"
@@ -46,6 +61,8 @@ class DependencyRequirement(BaseModel):
     required: bool = True
     source: str                         # "ast_code_scan", "env_template", "requirements_txt"
     binding_status: str = "MISSING"     # "FULFILLED", "MISSING", "SUBSTITUTED", "MOCKED"
+    credential_source: Optional[CredentialSource] = None
+    credential_status: Optional[CredentialStatus] = None
 
 
 class ServiceBindingItem(BaseModel):
@@ -133,6 +150,9 @@ class CredentialRequirement(BaseModel):
     is_optional: bool = False
     provided_by_system: bool = False
     masked_value: Optional[str] = None
+    credential_source: Optional[CredentialSource] = None
+    credential_status: Optional[CredentialStatus] = None
+    is_platform_supported: bool = False
 
 
 class SessionCredentialPrompt(BaseModel):

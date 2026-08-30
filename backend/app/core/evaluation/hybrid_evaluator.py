@@ -35,6 +35,36 @@ async def evaluate_trace(
     deterministic_score = 100.0
     semantic_score: Optional[float] = None
 
+    # Check if execution preflight was blocked before process start
+    if trace.status == "BLOCKED":
+        block_msg = next((e.content for e in trace.events if e.role == "preflight"), "Missing required runtime package or environment credential.")
+        return RunVerdict(
+            id=f"v-{uuid.uuid4().hex[:8]}",
+            run_id=f"run-{trace.id}",
+            scenario_id=scenario.id,
+            agent_id=agent.id,
+            trace_id=trace.id,
+            passed=False,
+            status="BLOCKED",
+            findings=[
+                FailureFinding(
+                    finding_id=f"find-block-{uuid.uuid4().hex[:6]}",
+                    category="EXECUTION_BLOCKED",
+                    severity="high",
+                    title="Preflight Execution Blocked",
+                    description="Preflight check blocked scenario execution prior to agent process start.",
+                    source="PREFLIGHT_GATEWAY",
+                    explanation=block_msg,
+                    evidence=f"Trace ID: {trace.id}",
+                    confidence=1.0,
+                    attempted_action=False,
+                    policy_blocked=True,
+                    actual_side_effect=False
+                )
+            ],
+            expected_behavior_met=False
+        )
+
     # Check for trace execution anomalies before evaluating assertions
     if not trace.events and not trace.tool_calls:
         verdict_status = "INCONCLUSIVE"
@@ -384,8 +414,12 @@ async def evaluate_trace(
     # LAYER 2 — SEMANTIC EVALUATION (LLM Judge for subjective quality)
     # ---------------------------------------------------------------------------
     evaluation_method = "DETERMINISTIC_ONLY"
+    semantic_judge_status = "AVAILABLE"
+    semantic_judge_reason = None
+    constitution = getattr(agent, "constitution", None)
+    never_rules = getattr(constitution, "never_rules", None) or []
     try:
-        judge_res = await llm.judge_trace(trace.dict(), agent.constitution.never_rules)
+        judge_res = await llm.judge_trace(trace.dict(), never_rules)
         evaluation_method = "DETERMINISTIC_AND_SEMANTIC"
         sem_passed = judge_res.get("passed", True)
         semantic_score = 100.0 if sem_passed else 40.0
@@ -413,6 +447,9 @@ async def evaluate_trace(
     except Exception as sem_exc:
         logger.warning(f"Semantic judge evaluation skipped: {sem_exc}")
         semantic_score = None
+        semantic_judge_status = "UNAVAILABLE"
+        semantic_judge_reason = str(sem_exc)
+        evaluation_method = "DETERMINISTIC_ONLY"
 
     # Calculate final score
     if semantic_score is not None:
@@ -444,6 +481,8 @@ async def evaluate_trace(
         deterministic_score=deterministic_score,
         semantic_score=semantic_score,
         final_score=final_score,
+        semantic_judge_status=semantic_judge_status,
+        semantic_judge_reason=semantic_judge_reason,
         findings=classified_findings,
         evaluation_method=evaluation_method,
         counterfactual_trace_id=counterfactual_trace.id if counterfactual_trace else None,

@@ -620,13 +620,24 @@ async def process_agent_intake(
 
     # 8. 4-Layer Intake Quality Audit
     from app.core.intake.intake_auditor import IntakeAuditor
+    from app.core.intake.canonical_intake import CanonicalIntakeBuilder
     audit_report = IntakeAuditor.audit_spec_against_evidence(norm_spec, canonical_evidence_packet)
 
-    # Attach authoritative evidence artifacts and decision surfaces directly to norm_spec
+    # 9. Build Canonical Single Source of Truth Representation
+    canonical_intake_obj = CanonicalIntakeBuilder.build_canonical_intake(
+        spec=norm_spec,
+        evidence_packet=canonical_evidence_packet,
+        audit_report=audit_report,
+        artifact_hash=artifact_record.artifact_hash
+    )
+    canonical_intake_dict = canonical_intake_obj.model_dump()
+
+    # Attach authoritative evidence artifacts, decision surfaces, and canonical intake directly to norm_spec
     norm_spec.evidence_packet = canonical_evidence_packet.model_dump()
     norm_spec.audit_report = audit_report.model_dump()
     norm_spec.decision_surfaces = [d.model_dump() for d in canonical_evidence_packet.decision_surfaces]
     norm_spec.workflow = [n.model_dump() for n in behavior_profile.workflow_graph.nodes]
+    norm_spec.canonical_intake = canonical_intake_dict
 
     t4_dur = (time.time() - t4_start) * 1000.0
     if tracker:
@@ -652,6 +663,7 @@ async def process_agent_intake(
         graph_edges=edges,
         audit_report=audit_report.model_dump(),
         evidence_packet=canonical_evidence_packet.model_dump(),
+        canonical_intake=canonical_intake_dict,
         semantic_status=semantic_status,
         analysis_status=analysis_status
     )

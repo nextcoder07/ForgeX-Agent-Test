@@ -314,17 +314,19 @@ class GeminiProvider(LLMProvider):
         last_error = None
         try:
             from google.genai import types
+            timeout_seconds = int(os.getenv("LLM_TIMEOUT_SECONDS", "0") or 0)
+            config_kwargs = {
+                "system_instruction": system,
+                "temperature": temperature,
+                "response_mime_type": "application/json",
+                "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True),
+            }
+            if timeout_seconds > 0:
+                config_kwargs["http_options"] = types.HttpOptions(timeout=timeout_seconds * 1000)
             res = client.models.generate_content(
                 model=current_model,
                 contents=user,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    temperature=temperature,
-                    response_mime_type="application/json",
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                    http_options=types.HttpOptions(timeout=int(os.getenv("LLM_TIMEOUT_SECONDS", "60")) * 1000),
-                ),
-
+                config=types.GenerateContentConfig(**config_kwargs),
             )
             if res and res.text:
                 res_text = res.text

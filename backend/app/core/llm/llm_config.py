@@ -4,6 +4,7 @@ Central configuration for LLM providers (Gemini, OpenRouter, Ollama) and fallbac
 """
 
 import os
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,5 +20,14 @@ class LLMConfig:
     # Low temperature optimal for code and JSON structured outputs
     DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
     MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "4096"))
-    REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
+    # Default to no timeout so the LLM can run freely unless a caller explicitly sets LLM_TIMEOUT_SECONDS.
+    REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "0") or 0)
+
+    @staticmethod
+    def request_timeout_for_httpx() -> Optional[float]:
+        """Returns None when timeout is disabled; otherwise a positive float in seconds."""
+        timeout = LLMConfig.REQUEST_TIMEOUT_SECONDS
+        if timeout <= 0:
+            return None
+        return float(timeout)
 

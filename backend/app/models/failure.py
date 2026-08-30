@@ -49,6 +49,8 @@ class RunVerdict(BaseModel):
     deterministic_score: float = 100.0
     semantic_score: Optional[float] = None
     final_score: float = 100.0
+    semantic_judge_status: str = "AVAILABLE"
+    semantic_judge_reason: Optional[str] = None
 
     findings: List[FailureFinding] = Field(default_factory=list)
     evaluation_method: str = "DETERMINISTIC_AND_SEMANTIC"

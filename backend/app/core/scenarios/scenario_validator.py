@@ -84,14 +84,29 @@ def subsystem_from_context(category: ScenarioCategory, sc: Scenario, context: Sc
 
 def normalize_assertions(sc: Scenario, context: ScenarioContext) -> None:
     """
-    Normalizes assertions before validation. Converts brittle strings to semantic checks.
-    Also maps error expectations for recovery scenarios to resilience assertions.
+    Normalizes assertions before validation. Converts brittle strings to semantic checks,
+    strictly repairs null expected_values, and guarantees >= 2 concrete assertions.
     """
     cat = sc.category.value if isinstance(sc.category, ScenarioCategory) else str(sc.category)
     new_assertions = []
 
     for assertion in sc.assertions:
         atype = str(assertion.assertion_type).upper()
+        
+        # 1. Fix null or missing expected_values
+        if assertion.expected_value is None:
+            if atype in ("PROCESS_EXIT_CODE", "EXIT_CODE_EQUALS"):
+                assertion.expected_value = 1 if cat in ("adversarial", "security") and "invalid" in sc.title.lower() else 0
+                assertion.description = f"Deterministic exit code {assertion.expected_value}"
+            elif atype in ("NO_UNHANDLED_EXCEPTIONS", "PROCESS_TERMINATES_WITHIN_TIMEOUT", "SAFETY_CONSTRAINT_PRESERVED"):
+                assertion.expected_value = True
+            elif atype == "STDOUT_JSON_VALID":
+                assertion.expected_value = True
+            elif atype == "STDOUT_CONTAINS":
+                assertion.assertion_type = AssertionType.NO_UNHANDLED_EXCEPTIONS.value
+                assertion.expected_value = True
+                assertion.description = "Resilience: Process executes without uncaught traceback"
+
         ev = str(assertion.expected_value) if assertion.expected_value is not None else ""
 
         # Email conversion
@@ -116,13 +131,12 @@ def normalize_assertions(sc: Scenario, context: ScenarioContext) -> None:
         # Recovery conversion
         if not email_converted and atype == "STDOUT_CONTAINS" and cat in ("recovery", "chaos"):
             if "error" in ev.lower() or "timeout" in ev.lower() or "fail" in ev.lower():
-                # For recovery scenarios, we want to measure the resilience, not the print statement
                 assertion.assertion_type = AssertionType.PROCESS_TERMINATES_WITHIN_TIMEOUT.value
                 assertion.expected_value = True
                 assertion.description = "Resilience: bounded termination under fault condition"
-                # Add NO_UNHANDLED_EXCEPTIONS too if not present
                 new_assertions.append(ScenarioAssertion(
                     assertion_type=AssertionType.NO_UNHANDLED_EXCEPTIONS.value,
+                    target="agent_message",
                     expected_value=True,
                     description="Resilience: no crash"
                 ))
@@ -135,16 +149,27 @@ def normalize_assertions(sc: Scenario, context: ScenarioContext) -> None:
 
         new_assertions.append(assertion)
 
-    # Add any synthesized assertions
-    if AssertionType.NO_UNHANDLED_EXCEPTIONS.value in new_assertions:
-        # Avoid duplicate NO_UNHANDLED_EXCEPTIONS
-        has_no_crash = any(a.assertion_type == AssertionType.NO_UNHANDLED_EXCEPTIONS.value for a in sc.assertions)
-        if not has_no_crash:
-            # Replace the string in new_assertions with a real object
-            pass # Simplified for rewrite, just ignoring the extra append if we did it
+    # 2. Guarantee at least 2 concrete assertions per scenario
+    present_types = {str(a.assertion_type).upper() for a in new_assertions if hasattr(a, "assertion_type")}
+    
+    if "PROCESS_EXIT_CODE" not in present_types and "EXIT_CODE_EQUALS" not in present_types:
+        new_assertions.append(ScenarioAssertion(
+            assertion_type="PROCESS_EXIT_CODE",
+            target="exit_code",
+            expected_value=0,
+            description="Process terminates cleanly with exit code 0"
+        ))
+        present_types.add("PROCESS_EXIT_CODE")
 
-    # Clean up the list
-    sc.assertions = [a for a in new_assertions if not isinstance(a, str)]
+    if len(new_assertions) < 2 and "NO_UNHANDLED_EXCEPTIONS" not in present_types:
+        new_assertions.append(ScenarioAssertion(
+            assertion_type="NO_UNHANDLED_EXCEPTIONS",
+            target="agent_message",
+            expected_value=True,
+            description="Process runs without uncaught exceptions or tracebacks"
+        ))
+
+    sc.assertions = [a for a in new_assertions if hasattr(a, "assertion_type") and a.expected_value is not None]
 
 
 def compute_scenario_quality_score(sc: Scenario, context: ScenarioContext) -> float:

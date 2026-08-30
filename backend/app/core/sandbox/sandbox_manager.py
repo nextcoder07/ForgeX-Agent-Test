@@ -84,6 +84,17 @@ def build_sandbox_specification_for_agent(agent: AgentRecord) -> SandboxSpecific
     blockers = []
     status = "READY"
 
+    try:
+        from app.core.dependencies.dependency_resolver import DependencyResolver
+        for d in agent.dependencies:
+            dep_name = getattr(d, "name", "")
+            if getattr(d, "type", "") in ("package", "framework") and dep_name:
+                if not DependencyResolver._package_is_importable(dep_name):
+                    blockers.append(f"Runtime package not importable in sandbox: {dep_name}")
+                    status = "BLOCKED"
+    except Exception:
+        pass
+
     for d in agent.dependencies:
         if d.type == "credential" or "key" in d.name.lower():
             # Check if resolved in environment

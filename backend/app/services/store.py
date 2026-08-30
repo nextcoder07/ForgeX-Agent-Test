@@ -1672,6 +1672,54 @@ class Store:
         if hasattr(self, "_loaded_agent_scenarios"):
             self._loaded_agent_scenarios.add(agent_id)
 
+    def clear_execution_data_for_agent(self, agent_id: str):
+        """Clears previous execution jobs, traces, sessions, and bindings for an agent so a new run replaces the old batch."""
+        execution_job_keys = [k for k, j in self.execution_jobs.items() if getattr(j, 'agent_id', None) == agent_id]
+        execution_run_keys = [k for k, r in self.execution_runs.items() if getattr(r, 'agent_id', None) == agent_id]
+        execution_ids = set(execution_job_keys) | set(execution_run_keys)
+
+        for key in execution_job_keys:
+            if key in self.execution_jobs:
+                del self.execution_jobs[key]
+        for key in execution_run_keys:
+            if key in self.execution_runs:
+                del self.execution_runs[key]
+
+        for key in list(self.traces.keys()):
+            if key in execution_ids:
+                del self.traces[key]
+
+        session_keys_to_delete = []
+        for key, sess in list(self.execution_sessions.items()):
+            if getattr(sess, 'execution_run_id', None) in execution_ids:
+                session_keys_to_delete.append(key)
+        for key in session_keys_to_delete:
+            if key in self.execution_sessions:
+                del self.execution_sessions[key]
+
+        session_ids_to_delete = set(session_keys_to_delete)
+        for key in list(self.execution_steps.keys()):
+            if getattr(self.execution_steps[key], 'execution_session_id', None) in session_ids_to_delete:
+                del self.execution_steps[key]
+        for key in list(self.execution_metrics.keys()):
+            if getattr(self.execution_metrics[key], 'execution_session_id', None) in session_ids_to_delete:
+                del self.execution_metrics[key]
+        for key in list(self.execution_artifacts.keys()):
+            if getattr(self.execution_artifacts[key], 'execution_session_id', None) in session_ids_to_delete:
+                del self.execution_artifacts[key]
+        for key in list(self.execution_actions.keys()):
+            if getattr(self.execution_actions[key], 'execution_session_id', None) in session_ids_to_delete:
+                del self.execution_actions[key]
+
+        for key in list(self.execution_preflights.keys()):
+            if getattr(self.execution_preflights[key], 'execution_run_id', None) in execution_ids:
+                del self.execution_preflights[key]
+
+        if hasattr(self, '_bindings'):
+            for key in list(self._bindings.keys()):
+                if getattr(self._bindings.get(key), 'execution_id', None) in execution_ids:
+                    del self._bindings[key]
+
     def save_verdicts(self, job_id: str, verdicts: List[RunVerdict]):
         import uuid
         self.verdicts[job_id] = verdicts

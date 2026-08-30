@@ -11,14 +11,7 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
   const [errorMsg, setErrorMsg] = useState('');
   const [timedOut, setTimedOut] = useState(false);
 
-  React.useEffect(() => {
-    if (loading) {
-      const t = setTimeout(() => setTimedOut(true), 800);
-      return () => clearTimeout(t);
-    }
-  }, [loading]);
-
-  if (loading && !timedOut && !user) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-[#030712] flex flex-col items-center justify-center space-y-4">
         <div className="relative">

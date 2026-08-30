@@ -80,7 +80,7 @@ export const SignupPage: React.FC = () => {
     try {
       const isVerified = await reloadUser();
       if (isVerified) {
-        navigate('/agents', { replace: true });
+        navigate('/dashboard', { replace: true });
       } else {
         setVerificationError(`Email not verified yet. Please check your inbox (and spam folder) for the verification link sent to ${email}, click it, and try again.`);
       }
@@ -96,7 +96,7 @@ export const SignupPage: React.FC = () => {
     setLoading(true);
     try {
       await signInWithGoogle();
-      navigate('/agents', { replace: true });
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       console.error('Google sign up error:', err);
       setError(err.message || 'Failed to authenticate with Google.');

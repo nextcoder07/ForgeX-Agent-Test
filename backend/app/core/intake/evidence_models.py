@@ -24,10 +24,23 @@ class CertaintyLevel(str, Enum):
 
 class ProvenanceType(str, Enum):
     CODE_PROVEN = "CODE_PROVEN"          # Found directly in executable AST / signatures
+    CONFIG_PROVEN = "CONFIG_PROVEN"      # Extracted from requirements.txt, .env, pyproject.toml, config.json
     PROMPT_DECLARED = "PROMPT_DECLARED"  # Declared in system prompts / prompt templates
     DOC_DECLARED = "DOC_DECLARED"        # Declared in README, docstrings, or metadata files
+    RUNTIME_OBSERVED = "RUNTIME_OBSERVED"# Observed during sandbox execution
+    SEMANTIC_INFERENCE = "SEMANTIC_INFERENCE" # Inferred by LLM semantic analysis
     INFERRED = "INFERRED"                # Deduced from contextual operations
     UNKNOWN = "UNKNOWN"                  # Cannot be proven
+
+
+class DependencyState(str, Enum):
+    READY = "READY"
+    USER_REQUIRED = "USER_REQUIRED"
+    MISSING = "MISSING"
+    INCOMPATIBLE = "INCOMPATIBLE"
+    RUNTIME_BLOCKED = "RUNTIME_BLOCKED"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+    UNKNOWN = "UNKNOWN"
 
 
 class SideEffectType(str, Enum):
@@ -222,3 +235,64 @@ class EvidencePacket(BaseModel):
 
     def get_evidence_by_category(self, cat: EvidenceCategory) -> List[EvidenceItem]:
         return [item for item in self.evidence_items if item.category == cat]
+
+
+class CanonicalCredentialDependency(BaseModel):
+    name: str
+    provider: str
+    required: bool = True
+    state: DependencyState = DependencyState.UNKNOWN
+    requires_user_value: bool = True
+    platform_has_compatible_default: bool = False
+    substitution_safe: bool = False
+    evidence_item_ids: List[str] = Field(default_factory=list)
+    source_file: Optional[str] = None
+    line_number: int = 1
+
+
+class CanonicalIntake(BaseModel):
+    artifact_id: str
+    artifact_hash: str
+    agent_id: str
+    agent_name: str
+    domain: str
+    description: str
+    entrypoint: str
+    interface_type: str                  # "CLI", "HTTP", "CHAT", "FUNCTION", "UNKNOWN"
+    
+    # 1. Inputs & Outputs Contract (Public vs Internal State)
+    public_inputs: List[Dict[str, Any]] = Field(default_factory=list)
+    public_outputs: List[Dict[str, Any]] = Field(default_factory=list)
+    intermediate_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    # 2. Executable User Tools vs Framework Primitives
+    user_tools: List[Dict[str, Any]] = Field(default_factory=list)
+    framework_primitives: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    # 3. LLM & Model Detection
+    detected_models: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    # 4. First-Class Dependency & Credential Catalog
+    package_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
+    credentials: List[CanonicalCredentialDependency] = Field(default_factory=list)
+    
+    # 5. Workflow Execution Graph
+    workflow_nodes: List[Dict[str, Any]] = Field(default_factory=list)
+    workflow_edges: List[Dict[str, Any]] = Field(default_factory=list)
+    orchestration_mode: str = "sequential" # "sequential", "state_graph", "multi_agent", "reactive"
+    
+    # 6. Side Effects & Surfaces
+    side_effects: List[Dict[str, Any]] = Field(default_factory=list)
+    security_surfaces: List[Dict[str, Any]] = Field(default_factory=list)
+    decision_surfaces: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    # 7. Consistency, Completeness & Quality Gate
+    field_confidences: List[FieldConfidenceScore] = Field(default_factory=list)
+    contradictions: List[Dict[str, Any]] = Field(default_factory=list)
+    known_unknowns: List[str] = Field(default_factory=list)
+    completeness_score: float = 0.0
+    overall_quality_score: float = 0.0
+    quality_gate_passed: bool = False
+    
+    created_at: str = Field(default_factory=_now)
+

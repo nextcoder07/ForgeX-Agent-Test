@@ -40,6 +40,48 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/evaluations", tags=["Evaluations"])
 
 
+def normalize_execution_binding(binding: Any) -> Any:
+    """Normalize an execution binding into a safe, explicit evaluation contract."""
+    if binding is None:
+        return type("Binding", (), {
+            "status": "EVALUATION_BLOCKED",
+            "mode": "unknown",
+            "provider": "unknown",
+            "model": "unknown",
+            "model_substitution": False,
+            "confidence": "LOW",
+            "reason": "INCOMPLETE_EXECUTION_BINDING",
+        })()
+
+    mode = getattr(binding, "mode", None)
+    provider = getattr(binding, "executed_provider", None) or getattr(binding, "provider", None) or "unknown"
+    model = getattr(binding, "executed_model", None) or getattr(binding, "model", None) or "unknown"
+    confidence = getattr(binding, "confidence", None) or "LOW"
+    substitution = getattr(binding, "model_substitution", False)
+
+    if mode is None or provider in (None, "") or model in (None, ""):
+        return type("Binding", (), {
+            "status": "EVALUATION_BLOCKED",
+            "mode": getattr(mode, "value", "unknown") if mode is not None else "unknown",
+            "provider": provider,
+            "model": model,
+            "model_substitution": substitution,
+            "confidence": str(confidence).upper(),
+            "reason": "INCOMPLETE_EXECUTION_BINDING",
+        })()
+
+    mode_value = getattr(mode, "value", mode)
+    return type("Binding", (), {
+        "status": "READY",
+        "mode": mode_value,
+        "provider": provider,
+        "model": model,
+        "model_substitution": bool(substitution),
+        "confidence": str(confidence).upper(),
+        "reason": "OK",
+    })()
+
+
 def _now() -> str:
     return dt.datetime.utcnow().isoformat() + "Z"
 
@@ -65,6 +107,21 @@ def _process_traces_evaluation_job_task(job_id: str, agent_id: str, traces: List
     job = store.jobs.get(job_id)
     if not agent or not job:
         logger.error("[EVAL TRACE] job_id=%s ABORT: agent=%s job=%s", job_id, bool(agent), bool(job))
+        return
+
+    binding = normalize_execution_binding(binding)
+    if getattr(binding, "status", "READY") == "EVALUATION_BLOCKED":
+        job.status = "blocked"
+        job.error_message = getattr(binding, "reason", "INCOMPLETE_EXECUTION_BINDING")
+        job.current_step = "Evaluation blocked: incomplete execution binding"
+        job.finished_at = _now()
+        store.jobs[job_id] = job
+        activity_log.emit(
+            category="EVALUATION",
+            action="JOB_BLOCKED",
+            detail=f"Evaluation job {job_id} was blocked before start: {job.error_message}",
+            status="error"
+        )
         return
 
     try:
@@ -298,7 +355,7 @@ async def evaluate_execution_job(payload: EvaluateExecutionRequest, background_t
     job_id = f"eval-{uuid.uuid4().hex[:8]}"
 
     res_result = DependencyResolver.resolve_mode(agent=agent, execution_id=job_id)
-    binding = res_result.active_binding
+    binding = normalize_execution_binding(res_result.active_binding)
     store.save_execution_model_binding(binding)
 
     job = EvaluationJob(
@@ -343,6 +400,9 @@ async def start_evaluation_run(payload: EvaluationRequest, background_tasks: Bac
         raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_id}' not found")
 
     job_id = f"eval-{uuid.uuid4().hex[:8]}"
+
+    if not payload.scenario_batch_size or payload.scenario_batch_size <= 0:
+        raise HTTPException(status_code=422, detail="scenario_batch_size must be a positive integer")
 
     agent_scenarios = [
         s for s in store.list_scenarios(payload.agent_id)
@@ -421,8 +481,59 @@ def get_evaluation_job(job_id: str):
             "[EVAL 404] job_id=%s in_local_data=%s supabase_configured=%s scorecard_engine=%s",
             job_id, in_local, bool(store.jobs._sb), _sc_mod.__file__
         )
-        raise HTTPException(status_code=404, detail=f"Evaluation job '{job_id}' not found")
     return job
+
+
+@router.delete("/jobs/{job_id}")
+def delete_evaluation_job(job_id: str):
+    """Completely deletes a single evaluation run attempt and all associated verdicts, traces, and scorecards."""
+    job = store.jobs.get(job_id)
+    
+    if job_id in store.jobs:
+        del store.jobs[job_id]
+
+    if hasattr(store, "scorecards") and job_id in store.scorecards:
+        try:
+            del store.scorecards[job_id]
+        except Exception:
+            pass
+
+    if hasattr(store, "reports") and job_id in store.reports:
+        try:
+            del store.reports[job_id]
+        except Exception:
+            pass
+
+    if hasattr(store, "verdicts") and job_id in store.verdicts:
+        try:
+            del store.verdicts[job_id]
+        except Exception:
+            pass
+
+    if hasattr(store, "traces") and job_id in store.traces:
+        try:
+            del store.traces[job_id]
+        except Exception:
+            pass
+
+    if hasattr(store, "clusters") and job_id in store.clusters:
+        try:
+            del store.clusters[job_id]
+        except Exception:
+            pass
+
+    activity_log.emit(
+        category="EVALUATION",
+        action="JOB_DELETE",
+        detail=f"Evaluation run '{job_id}' deleted completely.",
+        status="info"
+    )
+
+    return {
+        "status": "success",
+        "message": f"Evaluation run '{job_id}' completely deleted.",
+        "deleted_job_id": job_id
+    }
 
 
 @router.get("/jobs/{job_id}/debug", response_model=Dict[str, Any])

@@ -21,7 +21,8 @@ import {
   AlertOctagon,
   Eye,
   X,
-  Database
+  Database,
+  Trash2
 } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
 import type { AgentRecord, ReliabilityScorecard, FailureCluster, FailureFinding } from '../api/client';
@@ -35,6 +36,7 @@ import {
   fetchEvaluationVerdicts,
   fetchEvaluationTracesDetails,
   fetchEvaluationReport,
+  deleteEvaluationJob,
 } from '../api/client';
 import { TwoAxisQuadrant } from '../components/TwoAxisQuadrant';
 import { FailureClustersView } from '../components/FailureClustersView';
@@ -135,6 +137,34 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
         setRunning(true);
         startPolling(target.id);
       }
+    }
+  };
+
+  const handleDeleteEvaluationRun = async (id: string, label: string) => {
+    if (!window.confirm(`Are you sure you want to delete evaluation run '${label}'? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      await deleteEvaluationJob(id);
+      const updatedJobs = evaluationJobs.filter(j => j.id !== id);
+      setEvaluationJobs(updatedJobs);
+
+      if (selectedJobId === id) {
+        if (updatedJobs.length > 0) {
+          const nextJob = updatedJobs[updatedJobs.length - 1];
+          handleSelectJob(nextJob.id);
+        } else {
+          setSelectedJobId('');
+          setEvalJob(null);
+          setScorecard(null);
+          setReport(null);
+          setVerdicts([]);
+          setTraces([]);
+          setClusters([]);
+        }
+      }
+    } catch (err: any) {
+      alert(`Failed to delete evaluation run: ${err.message || err}`);
     }
   };
 
@@ -359,28 +389,44 @@ export const EvaluationRunPage: React.FC<EvaluationRunPageProps> = ({}) => {
               const isSelected = selectedJobId === j.id;
               const isLatest = idx === evaluationJobs.length - 1;
               const evalNum = idx + 1;
+              const runLabel = `${selectedAgent?.name || 'agent'} eval${evalNum}`;
               return (
-                <button
-                  key={j.id}
-                  onClick={() => handleSelectJob(j.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold font-mono transition flex items-center space-x-2 cursor-pointer shrink-0 ${
-                    isSelected
-                      ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white border border-cyan-400 shadow-md shadow-cyan-500/20 scale-[1.02]'
-                      : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
-                  }`}
-                >
-                  <span>{selectedAgent?.name || 'agent'} eval{evalNum}</span>
-                  {isLatest && (
-                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
-                      isSelected ? 'bg-white/20 text-white' : 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
-                    }`}>
-                      Latest
+                <div key={j.id} className="relative group flex items-center shrink-0">
+                  <button
+                    onClick={() => handleSelectJob(j.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold font-mono transition flex items-center space-x-2 cursor-pointer pr-7 ${
+                      isSelected
+                        ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white border border-cyan-400 shadow-md shadow-cyan-500/20 scale-[1.02]'
+                        : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
+                    }`}
+                  >
+                    <span>{runLabel}</span>
+                    {isLatest && (
+                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                        isSelected ? 'bg-white/20 text-white' : 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
+                      }`}>
+                        Latest
+                      </span>
+                    )}
+                    <span className={`text-[10px] ${isSelected ? 'text-cyan-100' : 'text-slate-500'}`}>
+                      ({j.total_scenarios || 0} Scenarios)
                     </span>
-                  )}
-                  <span className={`text-[10px] ${isSelected ? 'text-cyan-100' : 'text-slate-500'}`}>
-                    ({j.total_scenarios || 0} Scenarios)
-                  </span>
-                </button>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteEvaluationRun(j.id, runLabel);
+                    }}
+                    title={`Delete ${runLabel} run`}
+                    className={`absolute right-1.5 p-1 rounded-lg transition-all cursor-pointer ${
+                      isSelected
+                        ? 'text-cyan-200 hover:text-rose-300 hover:bg-rose-950/60'
+                        : 'text-slate-500 hover:text-rose-400 hover:bg-rose-950/60 opacity-60 group-hover:opacity-100'
+                    }`}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
               );
             })}
           </div>

@@ -99,9 +99,13 @@ class DependencyDetector:
                                     )
                                 )
 
-        # 3. Model SDK usage implies required credentials (e.g. ChatOpenAI -> OPENAI_API_KEY)
+        # 3. Model SDK usage implies required credentials ONLY when actual SDK imports or class constructors exist
         code_lower = code_text.lower()
-        if "openai" in code_lower and "OPENAI_API_KEY" not in seen:
+        has_openai_sdk = any(term in code_lower for term in ["import openai", "from openai", "langchain_openai", "chatopenai"])
+        has_gemini_sdk = any(term in code_lower for term in ["google.generativeai", "chatgooglegenerativeai", "genai.generativemodel"])
+        has_anthropic_sdk = any(term in code_lower for term in ["import anthropic", "from anthropic", "chatanthropic"])
+
+        if has_openai_sdk and "OPENAI_API_KEY" not in seen:
             seen.add("OPENAI_API_KEY")
             detected.append(
                 DetectedSecret(
@@ -111,7 +115,7 @@ class DependencyDetector:
                     masked_sample="********"
                 )
             )
-        if ("genai" in code_lower or "gemini" in code_lower) and "GEMINI_API_KEY" not in seen:
+        if has_gemini_sdk and "GEMINI_API_KEY" not in seen:
             seen.add("GEMINI_API_KEY")
             detected.append(
                 DetectedSecret(
@@ -121,7 +125,7 @@ class DependencyDetector:
                     masked_sample="********"
                 )
             )
-        if "anthropic" in code_lower and "ANTHROPIC_API_KEY" not in seen:
+        if has_anthropic_sdk and "ANTHROPIC_API_KEY" not in seen:
             seen.add("ANTHROPIC_API_KEY")
             detected.append(
                 DetectedSecret(

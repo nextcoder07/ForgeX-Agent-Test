@@ -1220,6 +1220,40 @@ export async function fetchEvaluationJobDetails(jobId: string): Promise<any> {
   return res.json();
 }
 
+export async function deleteEvaluationJob(jobId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/evaluations/jobs/${jobId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Failed to delete evaluation run: ${res.statusText}`);
+  return res.json();
+}
+
+export async function runPreflightPingTest(agentId: string): Promise<{
+  agent_id: string;
+  agent_name: string;
+  success: boolean;
+  status: string;
+  latency_ms: number;
+  checks: { name: string; status: string; detail: string }[];
+}> {
+  const res = await fetch(`${API_BASE_URL}/execution/ping-test/${encodeURIComponent(agentId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Ping test failed: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchLatestExecutionJob(agentId: string): Promise<{ job: ExecutionJob | null; traces: ExecutionTrace[] }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/executions/latest/${encodeURIComponent(agentId)}`);
+    if (!res.ok) return { job: null, traces: [] };
+    return res.json();
+  } catch (e) {
+    return { job: null, traces: [] };
+  }
+}
+
 export async function fetchEvaluationVerdicts(jobId: string): Promise<any[]> {
   const res = await fetch(`${API_BASE_URL}/evaluations/jobs/${jobId}/verdicts`);
   if (!res.ok) throw new Error(`Failed to fetch evaluation verdicts: ${res.statusText}`);

@@ -23,8 +23,8 @@ export const LoginPage: React.FC = () => {
   const [resetSuccess, setResetSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Return to intended page or default to agents workspace
-  const from = (location.state as any)?.from?.pathname || '/agents';
+  // Return to intended page or default to dashboard workspace
+  const from = (location.state as any)?.from?.pathname || '/dashboard';
 
   const handleForgotPassword = async () => {
     if (!email) {

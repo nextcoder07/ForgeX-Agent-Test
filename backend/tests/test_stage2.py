@@ -20,7 +20,9 @@ from app.core.llm.fallback_mock import FallbackMockEngine
 from app.core.scenarios.scenario_generator import deduplicate_scenarios, generate_scenarios_for_agent
 from app.core.scenarios.strategy_planner import build_test_strategy
 from app.models.agent import AgentConstitution, AgentRecord, ToolDefinition, ToolRisk
-from app.models.scenario import Scenario, ScenarioCategory
+from app.models.scenario import Scenario, ScenarioCategory, ScenarioGenerationRequest
+from app.api.scenarios import execute_scenario_generation_run
+from app.services.store import store
 
 
 class CorruptLLM(LLMProvider):
@@ -171,6 +173,28 @@ class Stage2Tests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(scenario.expected_behavior)
                 self.assertTrue(scenario.failure_conditions)
                 self.assertTrue(scenario.risk_level)
+
+    async def test_8_generation_fills_to_requested_count_when_llm_returns_too_few(self):
+        agent = _agent([ToolDefinition(name="email", description="Mailer")])
+
+        class SparseLLM(CorruptLLM):
+            async def generate_scenarios(self, agent_spec: Dict[str, Any], strategy_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+                return [FallbackMockEngine.mock_scenario_generation(agent_spec, strategy_plan)[0]]
+
+        request = ScenarioGenerationRequest(agent_id=agent.id, target_count=5)
+        plan = build_test_strategy(agent, desired_count=5)
+        scenarios = await generate_scenarios_for_agent(agent, strategy=plan, llm=SparseLLM(), request=request)
+
+        self.assertGreaterEqual(len(scenarios), request.target_count)
+
+    async def test_9_execute_generation_run_returns_requested_count(self):
+        agent = _agent([ToolDefinition(name="email", description="Mailer")])
+        store.save_agent(agent)
+
+        request = ScenarioGenerationRequest(agent_id=agent.id, target_count=20)
+        run = await execute_scenario_generation_run(request)
+
+        self.assertGreaterEqual(len(run.scenarios), request.target_count)
 
 
 if __name__ == "__main__":

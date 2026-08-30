@@ -32,10 +32,16 @@ export const CoverageGapWidget: React.FC<CoverageGapWidgetProps> = ({ report, on
           <p className="text-base font-extrabold text-slate-100 font-mono">
             {report.exercised_tools} / {report.total_tools} Tools
           </p>
-          {report.unexercised_tools.length > 0 && (
-            <p className="text-[10px] text-amber-300/80 font-mono">
-              Unexercised: {report.unexercised_tools.join(', ')}
+          {report.total_tools === 0 ? (
+            <p className="text-[10px] text-slate-500 font-mono">
+              No agent tools detected.
             </p>
+          ) : (
+            report.unexercised_tools.length > 0 && (
+              <p className="text-[10px] text-amber-300/80 font-mono truncate">
+                Unexercised: {report.unexercised_tools.join(', ')}
+              </p>
+            )
           )}
         </div>
 

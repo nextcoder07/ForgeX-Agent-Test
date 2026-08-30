@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import uuid
 import datetime as dt
+import importlib.util
 from typing import Dict, List, Optional, Any
 from app.models.agent import AgentRecord
 from app.models.dependency_model import (
@@ -38,6 +39,40 @@ def _now() -> str:
 
 
 class DependencyResolver:
+    @staticmethod
+    def _package_is_importable(package_name: str) -> bool:
+        """Returns True only when a declared runtime package is actually importable in this Python runtime."""
+        dep = (package_name or "").strip()
+        if not dep:
+            return True
+
+        # Strip version constraints and extras.
+        clean = dep.split(";", 1)[0].strip()
+        clean = clean.split("[", 1)[0].strip()
+        clean = clean.replace("==", "").replace(">=", "").replace("<=", "").replace("~=", "").replace(">", "").replace("<", "").strip()
+        if not clean:
+            return True
+
+        candidates = []
+        base = clean.split("=", 1)[0].strip()
+        for raw in {base, base.replace("-", "_"), base.replace("_", "-")}:
+            if raw and raw not in candidates:
+                candidates.append(raw)
+
+        for candidate in candidates:
+            try:
+                if importlib.util.find_spec(candidate) is not None:
+                    return True
+            except Exception:
+                pass
+            try:
+                __import__(candidate)
+                return True
+            except Exception:
+                pass
+
+        return False
+
     # -------------------------------------------------------------------------
     # LAYER 1: Requirement Extractor
     # -------------------------------------------------------------------------
@@ -161,6 +196,12 @@ class DependencyResolver:
         # Extract strict requirements
         requirements = DependencyResolver.extract_requirements(agent)
 
+        runtime_import_blockers = [
+            r.provider
+            for r in requirements
+            if r.type in ("package", "framework") and r.provider and not DependencyResolver._package_is_importable(r.provider)
+        ]
+
         # Separate requirements by type
         llm_req = next((r for r in requirements if r.type == "llm"), None)
         service_reqs = [r for r in requirements if r.type == "service"]
@@ -215,7 +256,7 @@ class DependencyResolver:
                 # Sandbox adapters and mock generators auto-fulfill missing service keys
                 s.binding_status = "FULFILLED"
                 
-        faithful_available = has_orig_llm_key and has_all_service_keys
+        faithful_available = has_orig_llm_key and has_all_service_keys and not runtime_import_blockers
 
         # Check Compatible Provider availability
         has_test_gemini_key = bool(
@@ -225,8 +266,8 @@ class DependencyResolver:
             test_creds.get("GEMINI_API_KEY") or 
             has_any_platform_ai
         )
-        compatible_available = has_test_gemini_key or has_bound_connection or (agent_category == AgentCategory.RULE_BASED) or True
-        simulation_available = True  # Always available via MockLLM
+        compatible_available = (has_test_gemini_key or has_bound_connection or (agent_category == AgentCategory.RULE_BASED) or True) and not runtime_import_blockers
+        simulation_available = not runtime_import_blockers  # Prefer real runtime execution; simulation only after import verification is clear.
 
         # Default recommended mode based on availability
         if requested_mode:
@@ -245,6 +286,8 @@ class DependencyResolver:
 
         if target_mode == ExecutionMode.FAITHFUL:
             # Faithful: Original provider and models
+            if runtime_import_blockers:
+                is_mode_all_fulfilled = False
             if llm_req and llm_req.provider != "UNKNOWN":
                 llm_bound = bool(
                     secrets.get(llm_req.credential) or 
@@ -290,15 +333,23 @@ class DependencyResolver:
                 execution_id=exec_id,
                 mode=ExecutionMode.FAITHFUL,
                 service_bindings=service_bindings,
-                all_fulfilled=True,
+                all_fulfilled=not runtime_import_blockers,
                 fidelity=EvaluationFidelity.HIGH,
-                reason="Faithful execution with platform-managed model bindings and sandbox adapters",
+                reason=(
+                    "Faithful execution blocked: required runtime packages are not importable in the active Python environment: "
+                    + ", ".join(runtime_import_blockers)
+                    if runtime_import_blockers else
+                    "Faithful execution with platform-managed model bindings and sandbox adapters"
+                ),
                 created_at=_now()
             )
 
         elif target_mode == ExecutionMode.COMPATIBLE:
             # Compatible: Explicit substitution to Gemini
             executed_prov = "google"
+
+            if runtime_import_blockers:
+                is_mode_all_fulfilled = False
 
             executed_mod = "gemini-3.7-flash"
             llm_sub = orig_provider.lower() not in ["google", "gemini"]
@@ -340,9 +391,15 @@ class DependencyResolver:
                 execution_id=exec_id,
                 mode=ExecutionMode.COMPATIBLE,
                 service_bindings=service_bindings,
-                all_fulfilled=is_mode_all_fulfilled,
+                all_fulfilled=is_mode_all_fulfilled and not runtime_import_blockers,
                 fidelity=EvaluationFidelity.MEDIUM,
-                reason=f"Compatible execution: model substituted with {executed_mod}" if is_mode_all_fulfilled else "Compatible execution blocked: missing required credentials",
+                reason=(
+                    f"Compatible execution blocked: required runtime packages are not importable in the sandbox: {', '.join(runtime_import_blockers)}"
+                    if runtime_import_blockers
+                    else f"Compatible execution: model substituted with {executed_mod}"
+                    if is_mode_all_fulfilled
+                    else "Compatible execution blocked: missing required credentials"
+                ),
                 created_at=_now()
             )
 
@@ -379,9 +436,12 @@ class DependencyResolver:
                 execution_id=exec_id,
                 mode=ExecutionMode.SIMULATION,
                 service_bindings=service_bindings,
-                all_fulfilled=True,
+                all_fulfilled=not runtime_import_blockers,
                 fidelity=EvaluationFidelity.TEST_SPECIFIC,
-                reason="Simulation execution: deterministic offline mock LLM and tool gateway",
+                reason=(
+                    "Simulation execution is blocked until runtime packages are importable and dependencies are fixed: " + ", ".join(runtime_import_blockers)
+                    if runtime_import_blockers else "Simulation execution: deterministic offline mock LLM and tool gateway"
+                ),
                 created_at=_now()
             )
 
@@ -558,7 +618,23 @@ class DependencyResolver:
                     user_provided = bool(secrets.get(r.credential))
 
                     is_full = bool(user_provided or sys_cfg)
-                    sys_masked = secrets.get(r.credential) or (getattr(sys_item, "masked_value", None) if sys_item else f"mock-{r.credential.lower()}")
+                    sys_masked = (
+                        f"***{str(secrets.get(r.credential))[-4:]}***" if user_provided
+                        else (getattr(sys_item, "masked_value", None) if sys_cfg else None)
+                    )
+
+                    prov_upper = (r.provider or "").upper()
+                    is_plat_supp = prov_upper in ("OPENAI", "OPENROUTER", "GEMINI", "GOOGLE", "GROQ", "OLLAMA")
+
+                    if user_provided:
+                        c_source = CredentialSource.USER_CREDENTIAL_PROVIDED
+                        c_status = CredentialStatus.READY
+                    elif sys_cfg:
+                        c_source = CredentialSource.SUPPORTED_PLATFORM_DEFAULT
+                        c_status = CredentialStatus.READY
+                    else:
+                        c_source = CredentialSource.USER_CREDENTIAL_REQUIRED
+                        c_status = CredentialStatus.REQUIRED
 
                     requirements.append(
                         CredentialRequirement(
@@ -566,9 +642,12 @@ class DependencyResolver:
                             provider=r.provider or "Agent Service",
                             description=f"{r.capability or r.type} credential for {agent.name}",
                             is_fulfilled=is_full,
-                            is_optional=True,
+                            is_optional=False,
                             provided_by_system=sys_cfg,
-                            masked_value=sys_masked
+                            masked_value=sys_masked,
+                            credential_source=c_source,
+                            credential_status=c_status,
+                            is_platform_supported=is_plat_supp
                         )
                     )
 
@@ -580,7 +659,7 @@ class DependencyResolver:
             msg = f"All required credentials for {mode.value.upper()} execution are fulfilled. Ready for execution."
         else:
             missing_names = ", ".join([r.key_name for r in unfulfilled])
-            msg = f"{mode.value.upper()} execution blocked. Missing required API keys: {missing_names}."
+            msg = f"{mode.value.upper()} execution blocked. Missing required user credentials: {missing_names}."
 
         return SessionCredentialPrompt(
             session_id=session_id or f"sess-{uuid.uuid4().hex[:8]}",

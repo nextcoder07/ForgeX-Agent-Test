@@ -198,6 +198,7 @@ def _run_sandbox_scenarios_task(
                 store.save_execution_run(exec_run)
 
                 # Record blocked trace so UI displays scenario finding immediately
+                blocker_msgs = [f.message for f in pf_res.findings if not f.passed] or ([pf_res.summary] if pf_res.summary else ["Missing required credentials/packages"])
                 blocked_trace = ExecutionTrace(
                     id=f"trc-{uuid.uuid4().hex[:10]}",
                     scenario_id=sc.id,
@@ -205,7 +206,7 @@ def _run_sandbox_scenarios_task(
                     agent_version=agent.version_label,
                     status="BLOCKED",
                     events=[
-                        TraceEvent(timestamp=_now(), role="preflight", content=f"Preflight blocked: {', '.join(getattr(pf_res, 'blockers', []) or ['Missing required dependencies'])}"),
+                        TraceEvent(timestamp=_now(), role="preflight", content=f"Preflight blocked: {'; '.join(blocker_msgs)}"),
                     ],
                     is_counterfactual=False
                 )
@@ -436,6 +437,9 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
     if missing_ids:
         raise HTTPException(status_code=404, detail=f"Scenarios not found in storage: {missing_ids}")
 
+    # Replace prior execution artifacts for this agent so the newest execution set becomes the canonical one.
+    store.clear_execution_data_for_agent(payload.agent_id)
+
     job_id = f"exec-{uuid.uuid4().hex[:8]}"
 
     req_mode_enum = None
@@ -520,6 +524,17 @@ async def start_execution_job(payload: RunExecutionRequest, background_tasks: Ba
             payload.secrets
         )
         return job
+
+
+@router.get("/latest/{agent_id}")
+def get_latest_execution_job_for_agent(agent_id: str):
+    """Retrieve the latest execution job and traces for a specific agent."""
+    jobs = [j for j in store.list_execution_jobs() if j.agent_id == agent_id]
+    if not jobs:
+        return {"job": None, "traces": []}
+    latest_job = jobs[-1]
+    traces = store.traces.get(latest_job.id, [])
+    return {"job": latest_job, "traces": traces}
 
 
 @router.get("/jobs", response_model=List[ExecutionJob])

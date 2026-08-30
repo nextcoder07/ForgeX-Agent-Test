@@ -8,7 +8,7 @@ interface AgentMapGraphProps {
 }
 
 export const AgentMapGraph: React.FC<AgentMapGraphProps> = ({ nodes, edges }) => {
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(nodes[0] || null);
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
 
   const modelAndPlanningNodes = nodes.filter(n => n.type === 'agent' || n.type === 'subagent');
   const toolNodes = nodes.filter(n => n.type === 'tool');
@@ -16,11 +16,11 @@ export const AgentMapGraph: React.FC<AgentMapGraphProps> = ({ nodes, edges }) =>
   const backendNodes = nodes.filter(n => n.type === 'api' || n.type === 'backend');
 
   return (
-    <div className="p-6 rounded-2xl glass-panel border border-cyan-500/30 bg-slate-950/90 shadow-2xl space-y-6">
+    <div className="p-6 rounded-2xl glass-panel border border-slate-800 bg-slate-950/90 shadow-xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center space-x-2">
-            <Network className="w-5 h-5 text-cyan-400" />
+            <Network className="w-5 h-5 text-slate-300" />
             <h3 className="text-base font-bold text-slate-100">Discovered Architecture & Execution Flow Map</h3>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -29,7 +29,7 @@ export const AgentMapGraph: React.FC<AgentMapGraphProps> = ({ nodes, edges }) =>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono">
-          <span className="flex items-center space-x-1"><span className="w-2 h-2 rounded-full bg-cyan-400"></span><span className="text-slate-400">Model Role</span></span>
+          <span className="flex items-center space-x-1"><span className="w-2 h-2 rounded-full bg-slate-400"></span><span className="text-slate-400">Model Role</span></span>
           <span className="flex items-center space-x-1"><span className="w-2 h-2 rounded-full bg-indigo-400"></span><span className="text-slate-400">Planning</span></span>
           <span className="flex items-center space-x-1"><span className="w-2 h-2 rounded-full bg-amber-400"></span><span className="text-slate-400">Memory/RAG</span></span>
           <span className="flex items-center space-x-1"><span className="w-2 h-2 rounded-full bg-rose-500"></span><span className="text-slate-400">Critical Tool</span></span>
@@ -41,7 +41,7 @@ export const AgentMapGraph: React.FC<AgentMapGraphProps> = ({ nodes, edges }) =>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-900/60 border border-slate-800 relative">
         {/* Tier 1: Model Roles & Planning */}
         <div className="space-y-3">
-          <span className="text-[10px] font-mono uppercase text-cyan-400 font-bold block border-b border-slate-800 pb-1">
+          <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block border-b border-slate-800 pb-1">
             1. Model Roles & Planning ({modelAndPlanningNodes.length})
           </span>
           <div className="space-y-2">
@@ -51,7 +51,7 @@ export const AgentMapGraph: React.FC<AgentMapGraphProps> = ({ nodes, edges }) =>
                 onClick={() => setSelectedNode(node)}
                 className={`p-3 rounded-xl border cursor-pointer transition-all ${
                   selectedNode?.id === node.id
-                    ? 'bg-cyan-950/60 border-cyan-500 text-cyan-200 shadow-lg shadow-cyan-500/20'
+                    ? 'bg-slate-800 border-slate-700 text-slate-100'
                     : 'bg-slate-900 border-slate-800 hover:border-slate-700 text-slate-300'
                 }`}
               >

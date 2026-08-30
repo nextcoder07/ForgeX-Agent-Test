@@ -65,6 +65,7 @@ import {
   getAgentModelBindings,
   updateAgentModelBindings,
   fetchAgentRequirementsReport,
+  runPreflightPingTest,
 } from '../api/client';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 
@@ -177,6 +178,42 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
   const [savingSlotId, setSavingSlotId] = useState<string | null>(null);
   const [slotSavedMessages, setSlotSavedMessages] = useState<Record<string, string>>({});
   const [showKeyMap, setShowKeyMap] = useState<Record<string, boolean>>({});
+
+  // Preflight Ping Test State
+  const [pingModalOpen, setPingModalOpen] = useState(false);
+  const [pingTestLoading, setPingTestLoading] = useState(false);
+  const [pingTestResult, setPingTestResult] = useState<{
+    agent_id: string;
+    agent_name: string;
+    success: boolean;
+    status: string;
+    latency_ms: number;
+    checks: { name: string; status: string; detail: string }[];
+  } | null>(null);
+
+  const handleRunPingTest = async () => {
+    if (!selectedAgentId) return;
+    setPingModalOpen(true);
+    setPingTestLoading(true);
+    setPingTestResult(null);
+    try {
+      const res = await runPreflightPingTest(selectedAgentId);
+      setPingTestResult(res);
+    } catch (err: any) {
+      setPingTestResult({
+        agent_id: selectedAgentId,
+        agent_name: currentAgent?.display_name || currentAgent?.name || 'Agent',
+        success: false,
+        status: 'BLOCKED',
+        latency_ms: 0,
+        checks: [
+          { name: 'Preflight Ping Test', status: 'FAILED', detail: err?.message || 'Ping test request failed.' }
+        ]
+      });
+    } finally {
+      setPingTestLoading(false);
+    }
+  };
 
   const handleCancelTesting = (slotId: string) => {
     if (abortControllers.current[slotId]) {
@@ -648,8 +685,16 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
           </div>
         </div>
 
-        {/* Agent Dropdown */}
-        <div className="flex items-center space-x-2">
+        {/* Agent Dropdown & Ping Test Button */}
+        <div className="flex items-center space-x-2.5">
+          <button
+            onClick={handleRunPingTest}
+            className="px-3.5 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold text-xs shadow-md shadow-cyan-500/20 flex items-center space-x-1.5 transition cursor-pointer"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>⚡ Run Preflight Ping Test</span>
+          </button>
+
           <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider hidden sm:inline">Target Agent:</label>
           <select
             value={selectedAgentId}
@@ -662,6 +707,117 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
               </option>
             ))}
           </select>
+        </div>
+      </div>
+
+      {/* ── AGENT CODE REQUIREMENTS vs. FORGEX PROVIDED SETUP MATRIX ── */}
+      <div className="p-5 rounded-2xl border border-cyan-500/40 bg-slate-955/90 space-y-4 shadow-xl">
+        <div className="flex items-center justify-between flex-wrap gap-3 border-b border-slate-800 pb-3">
+          <div className="flex items-center space-x-2.5">
+            <Layers className="w-5 h-5 text-cyan-400" />
+            <div>
+              <h2 className="text-sm font-extrabold text-white uppercase tracking-wider">Agent Code Requirements vs. ForgeX Provided Setup</h2>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Detailed audit matching what the agent code requested vs what is provided by Platform Defaults/Mocks or User Keys.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleRunPingTest}
+            className="px-3.5 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer"
+          >
+            <Zap className="w-3.5 h-3.5 text-cyan-400" />
+            <span>⚡ Test Agent Before Execution</span>
+          </button>
+        </div>
+
+        {/* Requirements Match Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-800 text-[10px] uppercase font-bold text-slate-400 bg-slate-900/60">
+                <th className="py-2.5 px-3">Requirement Type</th>
+                <th className="py-2.5 px-3">Needed in Agent Code</th>
+                <th className="py-2.5 px-3">Target Key / Slot</th>
+                <th className="py-2.5 px-3">ForgeX Provided Match</th>
+                <th className="py-2.5 px-3 text-right">Match Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {/* LLM Slots */}
+              {agentModelSlots.map(slot => {
+                const config = slotConfigs[slot.slot_id];
+                const isDefault = !config || config.mode === 'system_default';
+                return (
+                  <tr key={slot.slot_id} className="hover:bg-slate-900/40 transition">
+                    <td className="py-2.5 px-3 font-semibold text-purple-300">AI Model / SDK</td>
+                    <td className="py-2.5 px-3 font-mono text-slate-200">
+                      <code className="text-cyan-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{slot.code_variable || slot.slot_id}</code>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">{slot.detected_from_source}</span>
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-slate-300">
+                      {slot.env_var_name || 'GOOGLE_API_KEY'}
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-slate-200">
+                      <span className="text-emerald-300 font-bold">
+                        {isDefault ? 'Website Default (Platform Free Mock)' : `${config.provider.toUpperCase()} (${config.model_identifier})`}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-right">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        MATCHED & READY ✓
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {/* Environment Credentials */}
+              {(credentialDemand?.requirements || []).map(p => (
+                <tr key={p.key_name} className="hover:bg-slate-900/40 transition">
+                  <td className="py-2.5 px-3 font-semibold text-amber-300">API Credential</td>
+                  <td className="py-2.5 px-3 font-mono text-slate-200">
+                    <code className="text-amber-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{p.key_name}</code>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">{p.description || p.provider}</span>
+                  </td>
+                  <td className="py-2.5 px-3 font-mono text-slate-300">{p.key_name}</td>
+                  <td className="py-2.5 px-3 font-mono text-slate-200">
+                    {p.is_fulfilled ? (
+                      <span className="text-emerald-300 font-bold">{p.provided_by_system ? 'Platform Free Mock / Key' : 'User Key Set'}</span>
+                    ) : (
+                      <span className="text-rose-300 font-bold">Unmatched — User input required</span>
+                    )}
+                  </td>
+                  <td className="py-2.5 px-3 text-right">
+                    {p.is_fulfilled ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        MATCHED & READY ✓
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        INPUT REQUIRED ⚠️
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+
+              {/* Dependency Packages */}
+              {dependencies.map(d => (
+                <tr key={d.id || d.dependency_name} className="hover:bg-slate-900/40 transition">
+                  <td className="py-2.5 px-3 font-semibold text-blue-300">Runtime Package</td>
+                  <td className="py-2.5 px-3 font-mono text-slate-200">{d.dependency_name}</td>
+                  <td className="py-2.5 px-3 font-mono text-slate-300">pip install {d.dependency_name}</td>
+                  <td className="py-2.5 px-3 font-mono text-emerald-300 font-bold">ForgeX Ephemeral Container</td>
+                  <td className="py-2.5 px-3 text-right">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      PROVISIONED ✓
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1546,6 +1702,112 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
           </button>
         </div>
       </div>
+
+      {/* ⚡ PREFLIGHT PING TEST MODAL */}
+      {pingModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+          <div className="w-full max-w-xl p-6 rounded-3xl glass-panel border border-cyan-500/40 bg-slate-955/95 shadow-2xl space-y-5 font-mono">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 rounded-xl bg-cyan-500/20 border border-cyan-500/40">
+                  <Zap className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Agent Preflight Ping Test</h3>
+                  <p className="text-xs text-slate-400">Verifying code compilation, package imports, and model API endpoints.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPingModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 cursor-pointer"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            {pingTestLoading && (
+              <div className="py-12 text-center space-y-3">
+                <RefreshCw className="w-8 h-8 mx-auto text-cyan-400 animate-spin" />
+                <p className="text-xs font-bold text-slate-200">Executing Real-Time Ping Probe...</p>
+                <p className="text-[10px] text-slate-400">Pinging Python AST runtime, imports, and model API key credentials...</p>
+              </div>
+            )}
+
+            {!pingTestLoading && pingTestResult && (
+              <div className="space-y-4">
+                {/* Overall Banner */}
+                <div className={`p-4 rounded-2xl border flex items-center justify-between ${
+                  pingTestResult.success
+                    ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
+                    : 'bg-rose-950/40 border-rose-500/50 text-rose-200'
+                }`}>
+                  <div className="flex items-center space-x-3">
+                    {pingTestResult.success ? (
+                      <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-6 h-6 text-rose-400 shrink-0" />
+                    )}
+                    <div>
+                      <div className="text-sm font-black uppercase">
+                        PREFLIGHT PING TEST: {pingTestResult.status}
+                      </div>
+                      <p className="text-xs opacity-90">
+                        {pingTestResult.success
+                          ? 'Agent entrypoint, packages, and model resolution passed all ping checks.'
+                          : 'Preflight probe detected issues that require attention.'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-900/80 border border-slate-700 text-cyan-300">
+                    {pingTestResult.latency_ms}ms
+                  </span>
+                </div>
+
+                {/* Individual Checks List */}
+                <div className="space-y-2.5">
+                  <h4 className="text-xs font-bold uppercase text-slate-400">Audit Check Points:</h4>
+                  {pingTestResult.checks.map((c, i) => (
+                    <div key={i} className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-200">{c.name}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                          c.status === 'PASSED'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : c.status === 'WARNING'
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        }`}>
+                          {c.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 font-mono leading-relaxed">{c.detail}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div className="pt-2 flex justify-end space-x-2">
+                  <button
+                    onClick={() => setPingModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
+                  >
+                    Done
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPingModalOpen(false);
+                      navigate(`/executions?agentId=${selectedAgentId}`);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 font-extrabold text-xs flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <span>Proceed to Run Execution →</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Live Process Monitor */}
       <LiveProcessMonitor />

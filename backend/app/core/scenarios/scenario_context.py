@@ -160,7 +160,7 @@ def build_scenario_context(agent) -> "ScenarioContext":
     for attr in ["inputs", "outputs", "tools", "capabilities", "workflow", "dependencies", "side_effects", "security_surfaces", "constitution"]:
         if attr not in spec or not spec[attr]:
             val = getattr(agent, attr, None)
-            if val is not None:
+            if val:
                 spec[attr] = val
 
     # Evidence packet: prefer spec["evidence_packet"] then agent.evidence_packet

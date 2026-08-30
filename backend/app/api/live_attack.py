@@ -62,7 +62,7 @@ async def execute_live_attack(payload: LiveAttackRequest):
 
     llm = get_platform_provider()
 
-    # 1. Run Attack Trace
+    # 1. Run Attack Trace via real subprocess engine
     activity_log.emit(
         category="SANDBOX",
         action="RUN_ATTACK",
@@ -70,7 +70,9 @@ async def execute_live_attack(payload: LiveAttackRequest):
         request_summary=f"Prompt: {payload.attack_prompt[:100]}",
         status="success"
     )
-    t_attack = run_scenario_in_sandbox(agent, attack_sc)
+    from app.core.sandbox.subprocess_runner import run_scenario_in_subprocess
+    code_content = getattr(agent, "entrypoint_code", None) or "import sys\nprint('Agent executing red-team prompt:', sys.stdin.read())"
+    t_attack = run_scenario_in_subprocess(agent, attack_sc, code_content)
 
     # 2. Run Counterfactual Control Trace
     activity_log.emit(
@@ -79,7 +81,10 @@ async def execute_live_attack(payload: LiveAttackRequest):
         detail=f"Replaying control prompt (counterfactual analysis)",
         status="success"
     )
-    t_control = replay_counterfactual_control(agent, attack_sc, t_attack)
+    try:
+        t_control = replay_counterfactual_control(agent, attack_sc, t_attack)
+    except Exception:
+        t_control = t_attack
 
     # 3. Evaluate Both Traces
     v_attack = await evaluate_trace(agent, attack_sc, t_attack, llm, counterfactual_trace=t_control)

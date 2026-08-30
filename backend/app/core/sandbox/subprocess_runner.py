@@ -25,16 +25,18 @@ def _now() -> str:
     return dt.datetime.utcnow().isoformat() + "Z"
 
 
-# Environment variables to explicitly strip from child sandbox environment
+# Environment variables that are strictly internal backend secrets and must never leak to child sandbox
 SENSITIVE_ENV_KEYS = {
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
     "SUPABASE_KEY",
     "SUPABASE_URL",
+    "SUPABASE_SERVICE_KEY",
     "DATABASE_URL",
     "SECRET_KEY",
+    "JWT_SECRET",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
+    "STRIPE_SECRET_KEY",
+    "ADMIN_PASSWORD",
 }
 
 
@@ -42,12 +44,12 @@ def create_sanitized_environment(
     provided_secrets: Optional[Dict[str, str]] = None,
     agent: Optional[AgentRecord] = None
 ) -> Dict[str, str]:
-    """Creates a sanitized environment dictionary for child sandbox processes, preserving test agent keys, user secrets, and auto-mocking missing tool credentials."""
+    """Creates a sanitized environment dictionary for child sandbox processes, preserving legitimate agent/user keys and stripping backend internal secrets."""
     env = dict(os.environ)
+
+    # 1. Strip strictly internal platform infrastructure secrets
     for key in list(env.keys()):
-        if any(s in key.upper() for s in ["KEY", "SECRET", "TOKEN", "PASS", "CREDENTIAL"]):
-            env.pop(key, None)
-        elif key.upper() in SENSITIVE_ENV_KEYS:
+        if key.upper() in SENSITIVE_ENV_KEYS:
             env.pop(key, None)
 
     # Set UTF-8 encoding so emojis and unicode strings print cleanly on all platforms (Windows cp1252 fix)
@@ -55,17 +57,28 @@ def create_sanitized_environment(
     env["PYTHONUTF8"] = "1"
     env["LANG"] = "en_US.UTF-8"
 
-    # 1. Inject active dedicated Test Agent keys (OPENAI_API_KEY, GEMINI_API_KEY, etc.)
+    # 2. Inject active dedicated Test Agent keys (OPENAI_API_KEY, GEMINI_API_KEY, TAVILY_API_KEY, etc.)
     try:
         from app.core.llm.key_manager import TestAgentKeyManager
         test_creds = TestAgentKeyManager().get_active_test_credentials()
         for k, v in test_creds.items():
-            if v:
+            if v and not v.startswith("your_"):
                 env[k] = v
     except Exception as e:
         pass
 
-    # 1.5 Inject Agent-Specific Bound Model & Slot Credentials (from runtime_manifest or model_connections)
+    # 2.5. Inject configuration secrets extracted from uploaded agent repository files (.env, config.json)
+    if agent and agent.source_files:
+        try:
+            from app.core.dependencies.runtime_smoke_tester import RuntimeSmokeTester
+            file_sec = RuntimeSmokeTester.extract_secrets_from_source_files(agent.source_files)
+            for k, v in file_sec.items():
+                if v and not v.startswith("your_"):
+                    env[k] = v
+        except Exception:
+            pass
+
+    # 3. Inject Agent-Specific Bound Model & Slot Credentials (from runtime_manifest or model_connections)
     if agent:
         raw_manifest = agent.runtime_manifest or {}
         slot_configs = raw_manifest.get("slot_configs", {})
@@ -77,7 +90,7 @@ def create_sanitized_environment(
                 provider = str(cfg.get("provider", "")).lower()
                 api_key = str(cfg.get("api_key", "")).strip()
                 base_url = str(cfg.get("base_url", "")).strip()
-                if api_key:
+                if api_key and not api_key.startswith("your_"):
                     if provider == "openai":
                         env["OPENAI_API_KEY"] = api_key
                     elif provider == "openrouter":
@@ -138,37 +151,25 @@ def create_sanitized_environment(
         except Exception:
             pass
 
-    # 1.8 Ensure ChatOpenAI / LangChain always has a valid key if OpenRouter/Gemini is present
-    if "OPENAI_API_KEY" not in env or not env["OPENAI_API_KEY"]:
+    # 4. Ensure ChatOpenAI / LangChain routes to OpenRouter/Groq/Ollama if no direct OpenAI key
+    # langchain-openai uses OPENAI_BASE_URL (openai SDK >=1.x) AND legacy OPENAI_API_BASE
+    if "OPENAI_API_KEY" not in env or not env["OPENAI_API_KEY"] or env.get("OPENAI_API_KEY") == "ollama":
         if "OPENROUTER_API_KEY" in env and env["OPENROUTER_API_KEY"]:
             env["OPENAI_API_KEY"] = env["OPENROUTER_API_KEY"]
-            env.setdefault("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
-            env.setdefault("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+            env["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
+            env["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+        elif "GROQ_API_KEY" in env and env["GROQ_API_KEY"]:
+            env["OPENAI_API_KEY"] = env["GROQ_API_KEY"]
+            env["OPENAI_API_BASE"] = "https://api.groq.com/openai/v1"
+            env["OPENAI_BASE_URL"] = "https://api.groq.com/openai/v1"
         elif "GEMINI_API_KEY" in env and env["GEMINI_API_KEY"]:
             env["OPENAI_API_KEY"] = env["GEMINI_API_KEY"]
 
-    # 2. Inject explicit user-provided secrets
+    # 5. Inject explicit user-provided secrets (highest priority)
     if provided_secrets:
         for k, v in provided_secrets.items():
-            if v:
-                env[k] = str(v)
-
-    # 3. Auto-mock any missing agent tool credentials (e.g. WHO_CLINICAL_API_KEY, NEWS_API_KEY)
-    if agent and agent.dependencies:
-        for d in agent.dependencies:
-            dep_type = getattr(d, "type", "")
-            dep_type_str = dep_type.value if hasattr(dep_type, "value") else str(dep_type).lower()
-            if dep_type_str in ["credential", "service", "tool"]:
-                clean_name = d.name.strip()
-                if clean_name.isidentifier() and clean_name not in env:
-                    env[clean_name] = f"mock-{clean_name.lower().replace('_', '-')}"
-
-    # Also check detected secrets for tool mocking
-    raw_manifest = (agent.runtime_manifest or {}) if agent else {}
-    for sec in raw_manifest.get("detected_secrets", []):
-        sec_name = sec.get("name") if isinstance(sec, dict) else getattr(sec, "name", "")
-        if sec_name and sec_name.isidentifier() and sec_name not in env:
-            env[sec_name] = f"mock-{sec_name.lower().replace('_', '-')}"
+            if v and isinstance(v, str):
+                env[k] = v
 
     # Final cleanup: ensure all env keys are valid identifier strings with no '=' or illegal characters
     cleaned_env = {}
@@ -198,6 +199,31 @@ def run_scenario_in_subprocess(
     events: List[TraceEvent] = []
     tool_calls: List[ToolCallRecord] = []
     sanitized_env = create_sanitized_environment(provided_secrets=provided_secrets, agent=agent)
+
+    # 0. Enforce Preflight Smoke Test Verification
+    from app.core.dependencies.runtime_smoke_tester import RuntimeSmokeTester
+    smoke_res = RuntimeSmokeTester.run_smoke_test(agent, provided_secrets=provided_secrets)
+    if not smoke_res.is_executable:
+        block_msg = f"PRE-FLIGHT / DEPENDENCY_BLOCK: {smoke_res.blocking_reason}"
+        if smoke_res.blockers:
+            block_msg += f" — {'; '.join(smoke_res.blockers)}"
+        events.append(TraceEvent(
+            timestamp=_now(),
+            role="preflight",
+            content=block_msg
+        ))
+        return ExecutionTrace(
+            id=trace_id,
+            scenario_id=scenario.id,
+            agent_id=agent.id,
+            agent_version=scenario.agent_version_id or "v1.0",
+            status="BLOCKED",
+            termination_reason=smoke_res.blocking_reason,
+            events=events,
+            tool_calls=[],
+            total_latency_ms=0.0,
+            trajectory_hash=None
+        )
 
     interface = (scenario.interface_type or "CHAT").upper()
     manifest = agent.runtime_manifest or {}
@@ -233,186 +259,220 @@ def run_scenario_in_subprocess(
         with open(agent_script_path, "w", encoding="utf-8") as f:
             f.write(code_content)
 
-        # 2.5 Write Sandbox Compatibility Shims (e.g. LangChain 0.3 compatibility & OpenAI endpoint routing)
+        # 2.5 Write Sandbox Compatibility Shims (LangChain 0.3, OpenAI endpoint routing, TavilySearch fallback)
+        # Determine if we have a real Tavily key to inject into shim
+        _tavily_key_for_shim = sanitized_env.get("TAVILY_API_KEY", "")
+        _openai_base_for_shim = sanitized_env.get("OPENAI_BASE_URL") or sanitized_env.get("OPENAI_API_BASE") or ""
+        _openai_key_for_shim = sanitized_env.get("OPENAI_API_KEY", "")
         sitecustomize_path = os.path.join(sandbox_dir, "sitecustomize.py")
         with open(sitecustomize_path, "w", encoding="utf-8") as f:
-            f.write("""import os
+            f.write(f"""import os
 import sys
 
-# Shim LangChain 0.3 globals
+# --- ForgeX Sandbox Compatibility Shim ---
+
+# 1. Shim LangChain 0.3 globals
 try:
     import langchain
-    if not hasattr(langchain, "verbose"):
+    if not hasattr(langchain, 'verbose'):
         langchain.verbose = False
-    if not hasattr(langchain, "debug"):
+    if not hasattr(langchain, 'debug'):
         langchain.debug = False
-    if not hasattr(langchain, "llm_cache"):
+    if not hasattr(langchain, 'llm_cache'):
         langchain.llm_cache = None
 except Exception:
     pass
 
-# Ensure OpenAI SDK routes to OpenRouter if base url is provided
-if os.getenv("OPENAI_BASE_URL") and not os.getenv("OPENAI_API_BASE"):
-    os.environ["OPENAI_API_BASE"] = os.getenv("OPENAI_BASE_URL")
+# 2. Ensure both OPENAI_API_BASE and OPENAI_BASE_URL are always in sync
+#    (openai SDK >=1.x reads OPENAI_BASE_URL; LangChain 0.x reads OPENAI_API_BASE)
+openai_base = os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE')
+if openai_base:
+    os.environ['OPENAI_API_BASE'] = openai_base
+    os.environ['OPENAI_BASE_URL'] = openai_base
+
+# 3. Patch langchain_openai.ChatOpenAI to route through platform gateway when no real OpenAI key
+_PLATFORM_BASE = {_openai_base_for_shim!r}
+_PLATFORM_KEY = {_openai_key_for_shim!r}
+if _PLATFORM_BASE:
+    try:
+        from langchain_openai import ChatOpenAI as _OrigChatOpenAI
+        _orig_chat_init = _OrigChatOpenAI.__init__
+        def _patched_chat_init(self, *args, **kwargs):
+            # Redirect to platform gateway unless caller provides their own base_url
+            if 'openai_api_base' not in kwargs and 'base_url' not in kwargs:
+                kwargs['openai_api_base'] = _PLATFORM_BASE
+                kwargs['base_url'] = _PLATFORM_BASE
+            if 'openai_api_key' not in kwargs and 'api_key' not in kwargs and _PLATFORM_KEY:
+                kwargs['openai_api_key'] = _PLATFORM_KEY
+            _orig_chat_init(self, *args, **kwargs)
+        _OrigChatOpenAI.__init__ = _patched_chat_init
+    except Exception:
+        pass
+
+# 4. Patch TavilySearch to use a no-network stub when TAVILY_API_KEY is absent / invalid
+_TAVILY_KEY = os.getenv('TAVILY_API_KEY', '')
+if not _TAVILY_KEY or _TAVILY_KEY.startswith('your_') or _TAVILY_KEY.endswith('_here'):
+    try:
+        import langchain_tavily as _lt
+        class _StubTavilySearch:
+            def __init__(self, *args, **kwargs):
+                self.max_results = kwargs.get('max_results', 3)
+            def invoke(self, query):
+                return {{'results': [{{
+                    'url': 'https://example.com/stub',
+                    'title': f'[STUB] Search result for: {{query}}',
+                    'content': f'ForgeX sandbox stub result. No TAVILY_API_KEY provided. Query: {{query}}'
+                }}]}}
+            def run(self, query):
+                return self.invoke(query)
+        _lt.TavilySearch = _StubTavilySearch
+        import sys
+        if 'langchain_tavily' in sys.modules:
+            sys.modules['langchain_tavily'].TavilySearch = _StubTavilySearch
+    except Exception:
+        pass
 """)
         sanitized_env["PYTHONPATH"] = f"{sandbox_dir}{os.pathsep}{sanitized_env.get('PYTHONPATH', '')}"
 
-        if interface == "CLI":
-            # --- CLI EXECUTION PATH ---
-            invocation = scenario.invocation or {}
-            raw_args = invocation.get("args", [])
-            # If args are empty, check command string
-            if not raw_args and "command" in invocation:
-                parts = invocation["command"].split()
-                # strip python and script name if present
-                if len(parts) > 1 and "python" in parts[0]:
-                    raw_args = parts[2:] if parts[1].endswith(".py") else parts[1:]
-                elif len(parts) > 1 and parts[0].endswith(".py"):
-                    raw_args = parts[1:]
+        # --- UNIFIED REAL AGENT SUBPROCESS EXECUTION ---
+        invocation = scenario.invocation or {}
+        raw_args = invocation.get("args", [])
+        if not raw_args and "command" in invocation:
+            parts = invocation["command"].split()
+            if len(parts) > 1 and "python" in parts[0]:
+                raw_args = parts[2:] if parts[1].endswith(".py") else parts[1:]
+            elif len(parts) > 1 and parts[0].endswith(".py"):
+                raw_args = parts[1:]
 
-            # Resolve relative artifact paths in args to sandbox_dir
-            resolved_args = []
-            for arg in raw_args:
-                potential_file = os.path.join(sandbox_dir, arg)
-                if os.path.exists(potential_file):
-                    resolved_args.append(potential_file)
-                else:
-                    resolved_args.append(arg)
+        # Resolve relative artifact paths in args to sandbox_dir
+        resolved_args = []
+        for arg in raw_args:
+            potential_file = os.path.join(sandbox_dir, arg)
+            if os.path.exists(potential_file):
+                resolved_args.append(potential_file)
+            else:
+                resolved_args.append(arg)
 
-            # Auto-ensure agent dependencies are installed
-            try:
-                from app.core.sandbox.dependency_installer import ensure_agent_dependencies, auto_install_missing_module_from_error
-                installed = ensure_agent_dependencies(agent, sandbox_dir=sandbox_dir)
-                if installed:
-                    events.append(TraceEvent(
-                        timestamp=_now(),
-                        role="sandbox",
-                        content=f"PACKAGES_AUTO_INSTALLED: Installed {', '.join(installed)} dynamically for execution."
-                    ))
-            except Exception:
-                pass
+        # Auto-ensure agent dependencies are installed
+        try:
+            from app.core.sandbox.dependency_installer import ensure_agent_dependencies
+            installed = ensure_agent_dependencies(agent, sandbox_dir=sandbox_dir)
+            if installed:
+                events.append(TraceEvent(
+                    timestamp=_now(),
+                    role="sandbox",
+                    content=f"PACKAGES_AUTO_INSTALLED: Installed {', '.join(installed)} dynamically for execution."
+                ))
+        except Exception:
+            pass
 
-            cmd = [sys.executable, agent_script_path] + resolved_args
+        cmd = [sys.executable, agent_script_path] + resolved_args
+        events.append(TraceEvent(
+            timestamp=_now(),
+            role="system",
+            content=f"PROCESS_STARTED: Command '{' '.join([os.path.basename(sys.executable), entrypoint_filename] + resolved_args)}'"
+        ))
+
+        stdin_data = "\n".join(scenario.user_messages) if scenario.user_messages else (scenario.user_input or "")
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE if stdin_data else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=sandbox_dir,
+                env=sanitized_env
+            )
+            stdout_str, stderr_str = proc.communicate(input=stdin_data if stdin_data else None, timeout=timeout_seconds)
+            exit_code = proc.returncode
+
+            # Auto-recovery if ModuleNotFoundError occurred
+            if exit_code != 0 and stderr_str and ("ModuleNotFoundError" in stderr_str or "No module named" in stderr_str or "ImportError" in stderr_str):
+                try:
+                    from app.core.sandbox.dependency_installer import auto_install_missing_module_from_error
+                    pkg_installed = auto_install_missing_module_from_error(stderr_str)
+                    if pkg_installed:
+                        events.append(TraceEvent(
+                            timestamp=_now(),
+                            role="sandbox",
+                            content=f"AUTO_RECOVERY: Installed missing package '{pkg_installed}' on-the-fly. Retrying execution..."
+                        ))
+                        proc2 = subprocess.Popen(
+                            cmd,
+                            stdin=subprocess.PIPE if stdin_data else None,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            cwd=sandbox_dir,
+                            env=sanitized_env
+                        )
+                        stdout_str, stderr_str = proc2.communicate(input=stdin_data if stdin_data else None, timeout=timeout_seconds)
+                        exit_code = proc2.returncode
+                except Exception:
+                    pass
+
+            if stdout_str:
+                events.append(TraceEvent(
+                    timestamp=_now(),
+                    role="agent_message",
+                    content=f"STDOUT_CHUNK: {stdout_str.strip()}"
+                ))
+
+                # Parse JSON stdout output for tool call invocations
+                for line in stdout_str.strip().splitlines():
+                    line_clean = line.strip()
+                    if line_clean.startswith("{") and line_clean.endswith("}"):
+                        try:
+                            parsed_data = json.loads(line_clean)
+                            if isinstance(parsed_data, dict):
+                                tool_name = parsed_data.get("tool") or parsed_data.get("action") or parsed_data.get("function")
+                                if tool_name:
+                                    targs = {k: v for k, v in parsed_data.items() if k not in ["tool", "action", "function", "result"]}
+                                    tool_calls.append(ToolCallRecord(
+                                        id=f"tc-{uuid.uuid4().hex[:6]}",
+                                        tool_name=str(tool_name),
+                                        arguments=targs,
+                                        result=parsed_data.get("result"),
+                                        status="SUCCESS",
+                                        latency_ms=12.0
+                                    ))
+                        except Exception:
+                            pass
+            if stderr_str:
+                events.append(TraceEvent(
+                    timestamp=_now(),
+                    role="agent_thought",
+                    content=f"STDERR_CHUNK: {stderr_str.strip()}"
+                ))
+
             events.append(TraceEvent(
                 timestamp=_now(),
                 role="system",
-                content=f"PROCESS_STARTED: Command '{' '.join([os.path.basename(sys.executable), entrypoint_filename] + resolved_args)}'"
+                content=f"PROCESS_EXITED: Exit code {exit_code}"
             ))
 
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    cwd=sandbox_dir,
-                    env=sanitized_env
-                )
-                stdout_str, stderr_str = proc.communicate(timeout=timeout_seconds)
-                exit_code = proc.returncode
-
-                # Auto-recovery if ModuleNotFoundError occurred
-                if exit_code != 0 and stderr_str and ("ModuleNotFoundError" in stderr_str or "No module named" in stderr_str or "ImportError" in stderr_str):
-                    try:
-                        from app.core.sandbox.dependency_installer import auto_install_missing_module_from_error
-                        pkg_installed = auto_install_missing_module_from_error(stderr_str)
-                        if pkg_installed:
-                            events.append(TraceEvent(
-                                timestamp=_now(),
-                                role="sandbox",
-                                content=f"AUTO_RECOVERY: Installed missing package '{pkg_installed}' on-the-fly. Retrying execution..."
-                            ))
-                            # Retry process
-                            proc2 = subprocess.Popen(
-                                cmd,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                encoding="utf-8",
-                                errors="replace",
-                                cwd=sandbox_dir,
-                                env=sanitized_env
-                            )
-                            stdout_str, stderr_str = proc2.communicate(timeout=timeout_seconds)
-                            exit_code = proc2.returncode
-                    except Exception as retry_err:
-                        pass
-
-
-                if stdout_str:
-                    events.append(TraceEvent(
-                        timestamp=_now(),
-                        role="agent_message",
-                        content=f"STDOUT_CHUNK: {stdout_str.strip()}"
-                    ))
-                if stderr_str:
-                    events.append(TraceEvent(
-                        timestamp=_now(),
-                        role="agent_thought",
-                        content=f"STDERR_CHUNK: {stderr_str.strip()}"
-                    ))
-
-                events.append(TraceEvent(
-                    timestamp=_now(),
-                    role="system",
-                    content=f"PROCESS_EXITED: Exit code {exit_code}"
-                ))
-
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout_str, stderr_str = proc.communicate()
-                exit_code = -1
-                events.append(TraceEvent(
-                    timestamp=_now(),
-                    role="fault_injected",
-                    content=f"PROCESS_TIMEOUT: Subprocess timed out after {timeout_seconds}s"
-                ))
-            except Exception as e:
-                exit_code = -1
-                events.append(TraceEvent(
-                    timestamp=_now(),
-                    role="security_alert",
-                    content=f"PROCESS_ERROR: {e}"
-                ))
-
-        else:
-            # --- CHAT / TOOL HARNESS PATH ---
-            fault_map = {f.target_tool.lower(): f.fault_type for f in scenario.fault_injections}
-            for user_msg in scenario.user_messages or ["Hello"]:
-                events.append(TraceEvent(timestamp=_now(), role="user", content=user_msg))
-                msg_lower = user_msg.lower()
-                target_tool = next((t for t in agent.tools if t.name.lower() in msg_lower), None)
-                if not target_tool and agent.tools:
-                    target_tool = agent.tools[0]
-
-                if target_tool:
-                    tname = target_tool.name
-                    injected_fault = fault_map.get(tname.lower())
-                    mock_args = {"query": user_msg, "amount": 5000.0}
-                    tool_res = gateway.execute_tool_call(tname, mock_args, injected_fault=injected_fault)
-                    tc_rec = gateway.call_history[-1] if gateway.call_history else None
-
-                    events.append(TraceEvent(
-                        timestamp=_now(),
-                        role="tool_call",
-                        content=f"{tname}({', '.join(f'{k}={v!r}' for k, v in mock_args.items())})",
-                        tool_call=tc_rec
-                    ))
-                    events.append(TraceEvent(
-                        timestamp=_now(),
-                        role="tool_result",
-                        content=str(tool_res)
-                    ))
-                    if tc_rec:
-                        tool_calls.append(tc_rec)
-
-                    events.append(TraceEvent(
-                        timestamp=_now(),
-                        role="agent_message",
-                        content=f"Processed request using tool {tname}."
-                    ))
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout_str, stderr_str = proc.communicate()
+            exit_code = -1
+            events.append(TraceEvent(
+                timestamp=_now(),
+                role="fault_injected",
+                content=f"PROCESS_TIMEOUT: Subprocess timed out after {timeout_seconds}s"
+            ))
+        except Exception as e:
+            exit_code = -1
+            events.append(TraceEvent(
+                timestamp=_now(),
+                role="security_alert",
+                content=f"PROCESS_ERROR: {e}"
+            ))
 
         events.append(TraceEvent(
             timestamp=_now(),
