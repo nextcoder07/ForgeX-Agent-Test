@@ -105,16 +105,36 @@ def _infer_interface_contract(
     if endpoint_url or runtime_manifest.get("runtime") == "endpoint":
         interface_type = "HTTP"
     else:
-        has_argparse = any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "argparse"
-            and node.func.attr == "ArgumentParser"
-            for tree in ast_trees.values()
-            for node in ast.walk(tree)
-        )
-        interface_type = "CLI" if has_argparse else "FUNCTION"
+        has_cli_ast = False
+        for tree in ast_trees.values():
+            for node in ast.walk(tree):
+                # Check argparse.ArgumentParser
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "argparse"
+                    and node.func.attr == "ArgumentParser"
+                ):
+                    has_cli_ast = True
+                    break
+                # Check sys.argv
+                if (
+                    isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "sys"
+                    and node.attr == "argv"
+                ):
+                    has_cli_ast = True
+                    break
+                # Check import click / typer / fire
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    names = [alias.name for alias in node.names]
+                    if any(m in names for m in ["argparse", "click", "typer", "fire"]):
+                        has_cli_ast = True
+                        break
+
+        interface_type = "CLI" if has_cli_ast else "FUNCTION"
 
     arguments: List[Dict[str, Any]] = []
     for tree in ast_trees.values():

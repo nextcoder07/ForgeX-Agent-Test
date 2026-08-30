@@ -317,7 +317,11 @@ def build_scenario_context(agent) -> "ScenarioContext":
         execution_limits = {"timeout_seconds": 30}
 
     # --- Destructive / monetary ---
-    has_destructive_tools = any(getattr(t, "is_destructive", False) for t in agent_tools)
+    has_destructive_tools = (
+        any(getattr(t, "is_destructive", False) for t in agent_tools)
+        or any(any(k in str(getattr(t, "name", "")).lower() for k in ["delete", "drop", "destroy", "purge", "payout", "cancel"]) for t in agent_tools)
+        or any(any(k in str(wf).lower() for k in ["delete", "drop", "destroy", "purge", "payout"]) for wf in workflow_nodes)
+    )
     has_monetary_caps = any(
         any(kw in rule.lower() for kw in ["₹", "$", "refund", "monetary", "payment", "charge"])
         for rule in (getattr(agent, "constitution", None) and agent.constitution.never_rules or [])

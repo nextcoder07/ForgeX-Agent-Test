@@ -25,9 +25,18 @@ async def get_agent_latest_diagnosis(agent_id: str):
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # Find latest scorecard/evaluation for this agent
-    all_scorecards = [sc for sc in store.scorecards.values() if sc.agent_id == agent.id]
-    if not all_scorecards:
+    # Find latest evaluation run for this agent across scorecards and jobs
+    all_jobs = [j for j in store.jobs.values() if getattr(j, "agent_id", None) == agent.id]
+    all_scorecards = [sc for sc in store.scorecards.values() if getattr(sc, "agent_id", None) == agent.id]
+
+    target_run_id = None
+    if all_jobs:
+        sorted_jobs = sorted(all_jobs, key=lambda j: getattr(j, "created_at", ""))
+        target_run_id = sorted_jobs[-1].id
+    elif all_scorecards:
+        target_run_id = all_scorecards[-1].evaluation_id
+
+    if not target_run_id:
         return build_empty_diagnosis_report(
             agent_id=agent.id,
             agent_name=agent.name,
@@ -35,8 +44,7 @@ async def get_agent_latest_diagnosis(agent_id: str):
             summary=f"No evaluated execution runs exist for agent '{agent.name}'. Execute scenarios in Sandbox first."
         )
 
-    latest_sc = all_scorecards[-1]
-    return await get_or_generate_diagnosis(latest_sc.evaluation_id)
+    return await get_or_generate_diagnosis(target_run_id)
 
 
 @router.get("/{id_param}", response_model=AgentDiagnosisReport)

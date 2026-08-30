@@ -36,6 +36,19 @@ def _now() -> str:
 def _find_agent_code(agent: AgentRecord) -> Optional[str]:
     """Finds raw Python source code for an agent from memory or test-agents directory."""
     if agent.source_files:
+        # 1. Check entrypoint specified in runtime manifest
+        manifest = agent.runtime_manifest or {}
+        entry = manifest.get("entrypoint")
+        if entry and entry in agent.source_files and agent.source_files[entry].strip():
+            return agent.source_files[entry]
+
+        # 2. Check standard python file entrypoints
+        for priority_name in ["agent.py", "main.py", "run.py", "app.py", "cli.py"]:
+            for fname, content in agent.source_files.items():
+                if fname.lower().endswith(priority_name) and content.strip():
+                    return content
+
+        # 3. Fallback to any python file
         for fname, content in agent.source_files.items():
             if fname.endswith(".py") and content.strip():
                 return content

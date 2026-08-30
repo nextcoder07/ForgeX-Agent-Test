@@ -353,6 +353,32 @@ if not _TAVILY_KEY or _TAVILY_KEY.startswith('your_') or _TAVILY_KEY.endswith('_
             else:
                 resolved_args.append(arg)
 
+        # Auto-inject CLI flag and scenario user prompt for CLI agents when args are missing or bare
+        # e.g. [] or ['search laptops'] → ['--request', 'search laptops']
+        primary_flag = None
+        agent_inputs = getattr(agent, "inputs", None) or []
+        for inp in agent_inputs:
+            if isinstance(inp, dict):
+                flag = inp.get("flag") or f"--{inp.get('name', 'request').replace('_', '-')}"
+                primary_flag = flag
+                break
+        if not primary_flag:
+            manifest = getattr(agent, "runtime_manifest", None) or {}
+            for cli_arg in manifest.get("cli_arguments", []):
+                if isinstance(cli_arg, dict):
+                    flags = cli_arg.get("flags", [])
+                    if flags:
+                        primary_flag = flags[0]
+                        break
+        if not primary_flag:
+            primary_flag = "--request"
+
+        if not resolved_args:
+            prompt_text = scenario.user_messages[0] if scenario.user_messages else (scenario.user_input or "Execute default request")
+            resolved_args = [primary_flag, prompt_text]
+        elif not any(str(a).startswith("-") for a in resolved_args):
+            resolved_args = [primary_flag] + resolved_args
+
         # Auto-ensure agent dependencies are installed
         try:
             from app.core.sandbox.dependency_installer import ensure_agent_dependencies
@@ -438,13 +464,28 @@ if not _TAVILY_KEY or _TAVILY_KEY.startswith('your_') or _TAVILY_KEY.endswith('_
                                     tool_name = parsed_data.get("tool") or parsed_data.get("action") or parsed_data.get("function")
                                     if tool_name:
                                         targs = {k: v for k, v in parsed_data.items() if k not in ["tool", "action", "function", "result"]}
-                                        tool_calls.append(ToolCallRecord(
+                                        res_data = parsed_data.get("result")
+                                        if not targs and isinstance(res_data, dict):
+                                            targs = {k: v for k, v in res_data.items()}
+                                        tc_record = ToolCallRecord(
                                             id=f"tc-{uuid.uuid4().hex[:6]}",
                                             tool_name=str(tool_name),
                                             arguments=targs,
-                                            result=parsed_data.get("result"),
+                                            result=res_data,
                                             status="SUCCESS",
                                             latency_ms=12.0
+                                        )
+                                        tool_calls.append(tc_record)
+                                        events.append(TraceEvent(
+                                            timestamp=_now(),
+                                            role="tool_call",
+                                            content=f"{tool_name}({', '.join(f'{k}={v!r}' for k, v in targs.items())})",
+                                            tool_call=tc_record
+                                        ))
+                                        events.append(TraceEvent(
+                                            timestamp=_now(),
+                                            role="tool_result",
+                                            content=str(res_data)
                                         ))
                             except Exception:
                                 pass

@@ -127,6 +127,9 @@ class EvaluationReport(BaseModel):
     tool_calls: List[Dict[str, Any]] = Field(default_factory=list)
     evidence_summary: List[Dict[str, Any]] = Field(default_factory=list)
     dimension_breakdown: Dict[str, Any] = Field(default_factory=dict)
+    predicted_failure_risks: List[Dict[str, Any]] = Field(default_factory=list)
+    top_fixes_roadmap: List[Dict[str, Any]] = Field(default_factory=list)
+    evaluation_integrity: Dict[str, Any] = Field(default_factory=dict)
 
     evaluator_version: str = "v2.0"
     created_at: str

@@ -55,45 +55,64 @@ export const TwoAxisQuadrant: React.FC<TwoAxisQuadrantProps> = ({ scorecard }) =
       </div>
 
       {/* 2D Scatter Quadrant */}
-      <div className="relative w-full h-64 bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-        {/* Quadrant Lines */}
-        <div className="absolute inset-0 flex flex-col">
-          <div className="h-1/2 border-b border-slate-700/60 flex">
-            <div className="w-1/2 border-r border-slate-700/60 flex items-center justify-center">
-              <span className="text-[10px] font-mono text-slate-500 text-center px-2">Safe but<br/>Limited</span>
+      <div className="relative w-full h-64 bg-slate-900/90 rounded-xl border border-slate-800 p-4">
+        {/* Inner Grid Container */}
+        <div className="relative w-full h-full border border-slate-700/60 rounded-lg overflow-hidden">
+          {/* Quadrant Lines */}
+          <div className="absolute inset-0 flex flex-col pointer-events-none">
+            <div className="h-1/2 border-b border-slate-700/60 flex">
+              <div className="w-1/2 border-r border-slate-700/60 flex items-center justify-center">
+                <span className="text-[10px] font-mono text-slate-500 text-center px-2">Safe but<br/>Limited</span>
+              </div>
+              <div className="w-1/2 flex items-center justify-center">
+                <span className="text-[10px] font-mono text-emerald-400/80 font-bold text-center px-2">⭐ Production<br/>Ready</span>
+              </div>
             </div>
-            <div className="w-1/2 flex items-center justify-center">
-              <span className="text-[10px] font-mono text-emerald-500/60 text-center px-2">⭐ Production<br/>Ready</span>
+            <div className="h-1/2 flex">
+              <div className="w-1/2 border-r border-slate-700/60 flex items-center justify-center">
+                <span className="text-[10px] font-mono text-rose-400/80 text-center px-2">Needs<br/>Work</span>
+              </div>
+              <div className="w-1/2 flex items-center justify-center">
+                <span className="text-[10px] font-mono text-amber-400/80 text-center px-2">Capable but<br/>Unsafe</span>
+              </div>
             </div>
           </div>
-          <div className="h-1/2 flex">
-            <div className="w-1/2 border-r border-slate-700/60 flex items-center justify-center">
-              <span className="text-[10px] font-mono text-rose-500/60 text-center px-2">Needs<br/>Work</span>
-            </div>
-            <div className="w-1/2 flex items-center justify-center">
-              <span className="text-[10px] font-mono text-amber-500/60 text-center px-2">Capable but<br/>Unsafe</span>
-            </div>
+
+          {/* Axis Labels */}
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-slate-400 font-bold">
+            ← Safety Axis (0 to 100%) →
           </div>
-        </div>
+          <div className="absolute left-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-slate-400 font-bold rotate-[-90deg]">
+            ← Capability (0 to 100%) →
+          </div>
 
-        {/* Axis Labels */}
-        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-slate-500">
-          ← Safety Axis →
-        </div>
-        <div className="absolute left-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-slate-500 rotate-[-90deg]">
-          ← Capability →
-        </div>
+          {/* Inset Position Calculation (6% to 94% mapping so dot sits inside grid cleanly) */}
+          {(() => {
+            const clampLeft = 6 + (Math.max(0, Math.min(100, safetyPct)) / 100) * 88;
+            const clampTop = 6 + ((100 - Math.max(0, Math.min(100, capabilityPct))) / 100) * 88;
+            return (
+              <div
+                className="absolute flex items-center gap-2 -translate-x-1/2 -translate-y-1/2 z-20"
+                style={{
+                  left: `${clampLeft}%`,
+                  top: `${clampTop}%`,
+                }}
+              >
+                {/* Glowing Agent Position Marker */}
+                <div className="relative flex items-center justify-center">
+                  <span className="absolute w-6 h-6 rounded-full bg-cyan-400/30 animate-ping" />
+                  <div className="w-5 h-5 rounded-full border-2 border-white bg-cyan-500 shadow-lg shadow-cyan-500/50 flex items-center justify-center z-10">
+                    <span className="w-2 h-2 rounded-full bg-white" />
+                  </div>
+                </div>
 
-        {/* Agent Position Dot */}
-        <div
-          className="absolute w-5 h-5 rounded-full border-2 border-white bg-indigo-500 shadow-lg shadow-indigo-500/50 flex items-center justify-center -translate-x-1/2 -translate-y-1/2 z-10"
-          style={{
-            left: `${safetyPct}%`,
-            top: `${100 - capabilityPct}%`,
-          }}
-          title={`Safety: ${safetyPct}% | Capability: ${capabilityPct}%`}
-        >
-          <span className="text-[9px] font-bold text-white">●</span>
+                {/* Score Position Tooltip Badge */}
+                <div className="px-2 py-1 rounded bg-slate-950/95 border border-cyan-500/40 text-[10px] font-mono text-cyan-300 shadow-xl whitespace-nowrap hidden sm:block">
+                  <strong>Safety:</strong> {safetyPct}% · <strong>Capability:</strong> {capabilityPct}%
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

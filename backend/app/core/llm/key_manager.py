@@ -217,25 +217,9 @@ class UnifiedKeyManager:
             if api_name is None or k.api_name.lower() == api_name.lower()
         ]
 
-        # 2. Prefer local Ollama / local models first for offline-first execution.
-        local_keys = [
-            k for k in filtered
-            if k.api_name in ("ollama", "local")
-        ]
-        for k in local_keys:
-            if k.is_available:
-                k.last_used_at = now
-                k.total_calls += 1
-                return k
-
-        # 3. Next, use API-backed cloud keys as the quality-upgrade path when local is unavailable.
-        cloud_keys = [
-            k for k in filtered
-            if k.api_name not in ("ollama", "local")
-        ]
-        cloud_keys.sort(key=lambda k: k.priority)
-
-        for k in cloud_keys:
+        # 2. Strict sequential priority selection (Priority 1 -> Priority 2 -> ... -> Fallbacks)
+        sorted_keys = sorted(filtered, key=lambda k: k.priority)
+        for k in sorted_keys:
             if k.is_available:
                 k.last_used_at = now
                 k.total_calls += 1

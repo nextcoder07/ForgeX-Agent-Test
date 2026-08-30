@@ -133,22 +133,8 @@ class DependencyResolver:
                     )
                 )
         else:
-            # Check agent category
-            cat = raw_manifest.get("agent_category", AgentCategory.RULE_BASED.value)
-            if cat not in [AgentCategory.RULE_BASED.value, AgentCategory.LOCAL_MODEL.value]:
-                # Unknown model
-                requirements.append(
-                    DependencyRequirement(
-                        id=f"req-llm-{agent.id}-unk",
-                        type="llm",
-                        provider="UNKNOWN",
-                        capability="LLM_INFERENCE",
-                        model="UNKNOWN",
-                        required=False,
-                        source="ast_code_scan",
-                        binding_status="MISSING"
-                    )
-                )
+            # If no model dependencies were detected in source code, do not inject phantom LLM requirements.
+            pass
 
         # 4. External Services & Tool Credentials from detected secrets
         detected_secrets = raw_manifest.get("detected_secrets", [])

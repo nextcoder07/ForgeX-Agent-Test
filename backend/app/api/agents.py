@@ -21,13 +21,18 @@ def list_agents(current_user: UserRecord = Depends(get_current_user)):
     active_ws = current_user.active_workspace_id
     user_id = current_user.user_id
 
-    # Strict multi-tenant isolation: only show agents belonging to this workspace or user
+    # Multi-tenant isolation + default/discovered agent inclusion
     filtered = []
     for a in all_agents:
         a_ws = getattr(a, 'workspace_id', None)
         a_user = getattr(a, 'user_id', None)
         a_owner = getattr(a, 'owner_id', None)
-        if (active_ws and a_ws == active_ws) or (user_id and (a_user == user_id or a_owner == user_id)):
+        if (
+            not user_id or user_id in ["default_user", "usr-default"]
+            or a_user in [user_id, "default_user", "usr-default", None]
+            or a_owner in [user_id, "default_user", "usr-default", None]
+            or (active_ws and a_ws == active_ws)
+        ):
             filtered.append(a)
     return filtered
 

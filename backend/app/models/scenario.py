@@ -18,6 +18,7 @@ class ScenarioCategory(str, Enum):
     SECURITY = "security"
     STRESS = "stress"
     CHAOS = "chaos"
+    DESTRUCTIVE_GUARDRAIL = "destructive_guardrail"
 
 
 class TargetSubsystem(str, Enum):

@@ -5,7 +5,7 @@ Agent Intake, Universal Ingestion, and Normalized Specification Models.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.models.agent import ToolDefinition, DependencyDefinition, AgentConstitution
 
 
@@ -33,7 +33,28 @@ class AgentAnalysisResponse(BaseModel):
     invariants: List[Dict[str, Any]] = Field(default_factory=list)
     transformations: List[Dict[str, Any]] = Field(default_factory=list)
     conflicts: List[Dict[str, Any]] = Field(default_factory=list)
-    readiness: Dict[str, Any] = Field(default_factory=dict)
+    readiness: Any = Field(default_factory=dict)
+
+    @field_validator("capabilities", "archetypes", "goals", "instructions", "never_rules", "always_rules", "escalation_rules", "data_policies", "risks", "architecture_components", mode="before")
+    @classmethod
+    def _normalize_string_list(cls, v: Any) -> List[str]:
+        if not v:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append(item)
+                elif isinstance(item, dict):
+                    # Pick first string value in dict
+                    vals = [str(val) for val in item.values() if isinstance(val, str)]
+                    res.append(vals[0] if vals else str(item))
+                else:
+                    res.append(str(item))
+            return res
+        if isinstance(v, str):
+            return [v]
+        return [str(v)]
 
 
 class CanonicalAgentInput(BaseModel):

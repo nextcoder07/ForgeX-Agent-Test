@@ -212,7 +212,8 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
             while candidate.id in used_ids:
                 candidate = _build_unique_padding_scenario(agent, context, category, len(final_scenarios) + idx + 1 + 1000)
             used_ids.add(candidate.id)
-            final_scenarios.append(candidate)
+    if len(final_scenarios) > payload.target_count:
+        final_scenarios = final_scenarios[:payload.target_count]
 
     # 6. Save all scenarios (including rejected) to Store
     ready_count = 0

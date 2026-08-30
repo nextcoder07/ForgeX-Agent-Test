@@ -375,15 +375,27 @@ async def evaluate_execution_job(payload: EvaluateExecutionRequest, background_t
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{execution_job.agent_id}' not found")
 
+    target_count = getattr(execution_job, "requested_scenario_count", 0) or getattr(execution_job, "total_scenarios", 0) or 10
+    valid_scenario_ids = getattr(execution_job, "scenario_ids", []) or []
+
     traces = store.traces.get(payload.execution_job_id, [])
+    if valid_scenario_ids:
+        traces = [t for t in traces if getattr(t, "scenario_id", None) in valid_scenario_ids]
+
     if not traces:
-        # Fall back to creating traces if execution traces were transient
-        from app.models.scenario import Scenario, ScenarioCategory
-        scenarios = store.list_scenarios(agent.id)[:execution_job.total_scenarios]
+        # Fall back to creating traces for exact selected scenarios
+        scenarios = store.list_scenarios(agent.id)
+        if valid_scenario_ids:
+            scenarios = [s for s in scenarios if s.id in valid_scenario_ids]
+        scenarios = scenarios[:target_count]
         for sc in scenarios:
             t = run_scenario_in_sandbox(agent, sc)
             traces.append(t)
         store.traces[payload.execution_job_id] = traces
+
+    # Enforce strict scenario count matching
+    if target_count > 0 and len(traces) > target_count:
+        traces = traces[:target_count]
 
     job_id = f"eval-{uuid.uuid4().hex[:8]}"
 

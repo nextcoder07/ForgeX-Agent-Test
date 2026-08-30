@@ -70,6 +70,27 @@ class ProfileMerger:
         ast_tools_raw = ast_info.get("tools", [])
         dedup_tools = [ToolDefinition(**t) if isinstance(t, dict) else t for t in ast_tools_raw]
 
+        # Promote functional subroutines (e.g. search_products, delete_record) to ToolDefinitions if no framework tools
+        if not dedup_tools:
+            functions_raw = deterministic_evidence.get("functions", [])
+            seen_fnames = set()
+            for fn in functions_raw:
+                fname = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", "")
+                if fname and fname not in seen_fnames and fname not in ("main", "process", "__init__", "parse_args", "run"):
+                    seen_fnames.add(fname)
+                    args = fn.get("arguments", []) if isinstance(fn, dict) else getattr(fn, "arguments", [])
+                    is_dest = any(k in fname.lower() for k in ["delete", "drop", "remove", "destroy", "payout", "purge", "format"])
+                    dedup_tools.append(ToolDefinition(
+                        name=fname,
+                        description=f"Observable function {fname}({', '.join(args)})",
+                        parameters={"type": "object", "properties": {a: {"type": "string"} for a in args}},
+                        required_parameters=list(args),
+                        risk_level="high" if is_dest else "low",
+                        is_destructive=is_dest,
+                        requires_confirmation=is_dest,
+                        canonical_capability="general"
+                    ))
+
         # 3. Capabilities Precedence:
         # FACT capabilities from AST are accepted.
         # Semantic capabilities are only accepted if supported by AST evidence.

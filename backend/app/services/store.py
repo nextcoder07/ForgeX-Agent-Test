@@ -1377,42 +1377,47 @@ class Store:
             except Exception as e:
                 logger.warning(f"Could not persist agent_behavior_profile to Supabase: {e}")
 
-    def delete_agent(self, agent_id: str) -> None:
-        """Completely deletes an agent and all associated scenarios, runs, and artifacts from memory, database, and local snapshots."""
-        if agent_id in self.agents:
-            del self.agents[agent_id]
-
-        valid_agent_ids = set(self.agents.keys())
-        to_del_scenarios = [s_id for s_id, sc in list(self.scenarios.items()) if getattr(sc, 'agent_id', None) not in valid_agent_ids]
-        for s_id in to_del_scenarios:
-            del self.scenarios[s_id]
-
-        to_del_jobs = [j_id for j_id, j in list(self.jobs.items()) if getattr(j, 'agent_id', None) == agent_id]
-        for j_id in to_del_jobs:
-            del self.jobs[j_id]
-
-        to_del_specs = [s_id for s_id, spec in list(self.agent_test_specs.items()) if getattr(spec, 'agent_id', None) == agent_id]
-        for s_id in to_del_specs:
-            del self.agent_test_specs[s_id]
-
-        to_del_sandbox = [s_id for s_id, spec in list(self.sandbox_specs.items()) if getattr(spec, 'agent_id', None) == agent_id]
-        for s_id in to_del_sandbox:
-            del self.sandbox_specs[s_id]
-
     def purge_all_agents(self) -> None:
-        """Purges all agents, scenarios, jobs, and deletes snapshot files from disk for clean multi-user reset."""
-        self.agents._local_data.clear()
-        self.agents._save_local_snapshot()
-        self.scenarios._local_data.clear()
-        self.scenarios._save_local_snapshot()
-        self.jobs._local_data.clear()
-        self.jobs._save_local_snapshot()
+        """Purges all agents, scenarios, jobs, scorecards, verdicts, traces, profiles, datasets, and deletes snapshot files for a clean reset."""
+        self.agents.clear()
+        self.scenarios.clear()
+        self.jobs.clear()
+        self.scorecards.clear()
+        self.verdicts.clear()
+        self.traces.clear()
+        self.clusters.clear()
+        self.agent_dependencies.clear()
+        self.dependency_bindings.clear()
+        self.execution_jobs.clear()
+        self.agent_behavior_profiles.clear()
+        self.sandbox_specs.clear()
+        self.pipeline_runs.clear()
+        self.repair_sessions.clear()
+        self.training_datasets.clear()
+        self.training_jobs.clear()
+        self.model_versions.clear()
+        self._local_artifacts.clear()
 
+        # Delete all snapshot json files from disk
         snapshot_dir = os.path.dirname(__file__)
         for fname in os.listdir(snapshot_dir):
             if fname.startswith("__snapshot_") and fname.endswith(".json"):
                 try:
                     os.remove(os.path.join(snapshot_dir, fname))
+                except Exception:
+                    pass
+
+        # Delete from Supabase tables if connected
+        if self.agents._sb:
+            tables_to_purge = [
+                "agent_files", "agent_artifacts", "agent_versions", "agent_dependencies",
+                "dependency_bindings", "sandbox_specifications", "agent_behavior_profiles",
+                "scenarios", "evaluation_results", "evaluation_runs", "pipeline_runs",
+                "repair_sessions", "training_datasets", "training_jobs", "agents"
+            ]
+            for t_name in tables_to_purge:
+                try:
+                    self.agents._sb.table(t_name).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
                 except Exception:
                     pass
 
