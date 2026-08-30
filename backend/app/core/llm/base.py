@@ -9,6 +9,10 @@ from typing import Any, Dict, Optional
 
 
 class LLMProvider(ABC):
+    def __init__(self):
+        self.is_available: bool = True
+        self.last_error_reason: Optional[str] = None
+
     @abstractmethod
     async def generate(self, system: str, user: str, temperature: float = 0.2) -> str:
         """Generic structured text / JSON generation."""

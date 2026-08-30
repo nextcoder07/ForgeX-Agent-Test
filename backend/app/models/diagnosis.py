@@ -72,3 +72,24 @@ class AgentDiagnosisReport(BaseModel):
     defect_breakdown: Dict[str, int] = Field(default_factory=dict)
     primary_repair_recommendation: str = "CODE_PATCH"
     created_at: str = Field(default_factory=_now)
+
+
+def build_empty_diagnosis_report(
+    agent_id: str,
+    agent_name: str,
+    evaluation_run_id: str,
+    summary: str = "No evaluation failures detected for this agent."
+) -> AgentDiagnosisReport:
+    """Canonical factory that constructs a 100% complete empty AgentDiagnosisReport."""
+    return AgentDiagnosisReport(
+        id=f"diag-empty-{evaluation_run_id or agent_id}",
+        agent_id=agent_id or "unknown",
+        agent_name=agent_name or "Unknown Agent",
+        evaluation_run_id=evaluation_run_id or "",
+        total_failures=0,
+        critical_failures=0,
+        diagnoses=[],
+        defect_breakdown={},
+        primary_repair_recommendation=summary,
+        created_at=_now()
+    )

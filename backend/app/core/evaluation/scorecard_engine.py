@@ -259,11 +259,16 @@ def generate_explainable_evaluation_report(
 ) -> EvaluationReport:
     dimensions = compute_ten_dimension_scores(verdicts)
 
-    mode_str = binding.mode.value if binding else "faithful"
-    sub_bool = binding.model_substitution if binding else False
-    conf_str = binding.confidence.upper() if binding else "HIGH"
-    orig_m = binding.original_model if binding else "openai/gpt-5"
-    exec_m = binding.executed_model if binding else "google/gemini-3.7-flash"
+    mode_raw = getattr(binding, "mode", "faithful") if binding else "faithful"
+    mode_str = mode_raw.value if hasattr(mode_raw, "value") else str(mode_raw or "faithful")
+
+    sub_bool = bool(getattr(binding, "model_substitution", False)) if binding else False
+
+    conf_raw = getattr(binding, "confidence", "HIGH") if binding else "HIGH"
+    conf_str = (conf_raw.value if hasattr(conf_raw, "value") else str(conf_raw or "HIGH")).upper()
+
+    orig_m = getattr(binding, "original_model", "user_configured") if binding else "user_configured"
+    exec_m = getattr(binding, "executed_model", "google/gemini-3.7-flash") if binding else "ForgeX Test Model"
 
     explainability = [
         f"Overall Score: {dimensions.overall_score}/100 computed using formula {FORMULA_VERSION}.",

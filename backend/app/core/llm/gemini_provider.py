@@ -249,6 +249,7 @@ def safe_json_loads(text: str) -> Any:
 
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str = "", model_name: str = ""):
+        super().__init__()
         self.api_key = api_key or os.getenv("AI_API_KEY_1", "") or os.getenv("GEMINI_API_KEY", "")
         self.model_name = model_name or os.getenv("AI_MODEL_1", "") or os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
@@ -275,12 +276,23 @@ class GeminiProvider(LLMProvider):
         conversation_id: Optional[str] = None,
         stage: str = "UNKNOWN"
     ) -> str:
+        if not self.is_available:
+            raise LLMGenerationError(
+                message=f"Gemini provider is marked unavailable: {self.last_error_reason}",
+                code=LLMErrorCode.AUTHENTICATION_ERROR,
+                provider="gemini",
+                model=self.model_name,
+                retryable=False
+            )
+
         start_time = time.time()
         self.last_input_tokens = 0
         self.last_output_tokens = 0
         req_summary = f"System: {system[:80]}... | User: {user[:120]}... | Temp: {temperature}"
 
         if not self.api_key:
+            self.is_available = False
+            self.last_error_reason = "No Gemini API key provided"
             raise LLMGenerationError(
                 message="No Gemini API key provided",
                 code=LLMErrorCode.NO_API_KEY,
@@ -292,6 +304,8 @@ class GeminiProvider(LLMProvider):
         client, key_id = self._get_client_for_request()
 
         if not client:
+            self.is_available = False
+            self.last_error_reason = "Failed to initialize Gemini client"
             raise LLMGenerationError(
                 message="Failed to initialize Gemini client",
                 code=LLMErrorCode.NO_API_KEY,
@@ -349,6 +363,10 @@ class GeminiProvider(LLMProvider):
         except Exception as e:
             last_error = e
             logger.warning(f"Gemini model '{current_model}' failed ({e}).")
+            err_str = str(e).lower()
+            if "api_key_invalid" in err_str or "api key not valid" in err_str or ("400" in err_str and "key" in err_str):
+                self.is_available = False
+                self.last_error_reason = f"Invalid API Key: {e}"
         finally:
             # Record AI Generation Run to store (both success and failure)
             import uuid
@@ -371,6 +389,15 @@ class GeminiProvider(LLMProvider):
                 pass
 
         if not res_text and last_error:
+            if not self.is_available:
+                raise LLMGenerationError(
+                    message=f"Gemini API key invalid: {last_error}",
+                    code=LLMErrorCode.AUTHENTICATION_ERROR,
+                    provider="gemini",
+                    model=self.model_name,
+                    key_id=key_id,
+                    retryable=False
+                )
             raise last_error
 
         if res_text:

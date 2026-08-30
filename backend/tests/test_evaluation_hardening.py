@@ -73,3 +73,71 @@ def test_compute_reliability_scorecard_handles_empty_verdicts_as_inconclusive():
     assert scorecard.failed == 0
     assert scorecard.provenance["evaluation_status"] == "INCONCLUSIVE"
     assert scorecard.provenance["warning"] == "No evaluable scenarios produced"
+
+
+def test_generate_explainable_evaluation_report_with_string_binding_mode():
+    from app.core.evaluation.scorecard_engine import generate_explainable_evaluation_report
+    agent = _build_agent()
+    binding_duck = SimpleNamespace(
+        mode="faithful",
+        model_substitution=False,
+        confidence="HIGH",
+        original_model="gpt-4o-mini",
+        executed_model="gemini-3.7-flash"
+    )
+    report = generate_explainable_evaluation_report("eval-str-mode", agent, [], binding_duck)
+    assert report.evaluation_id == "eval-str-mode"
+    assert "FAITHFUL" in report.explainability[1]
+
+
+def test_agent_diagnosis_report_fallback_instantiation():
+    from app.models.diagnosis import AgentDiagnosisReport
+    report = AgentDiagnosisReport(
+        id="diag-empty-test",
+        evaluation_run_id="exec-123",
+        agent_id="unknown",
+        agent_name="Unknown Agent",
+        total_failures=0,
+        critical_failures=0,
+        diagnoses=[],
+        defect_breakdown={},
+        primary_repair_recommendation="No evaluation records found for run ID 'exec-123'."
+    )
+    assert report.total_failures == 0
+    assert report.critical_failures == 0
+    assert report.agent_id == "unknown"
+
+
+def test_normalize_enum_value_utility():
+    from app.models.enums import normalize_enum_value
+    from enum import Enum
+    class Mode(Enum):
+        FAITHFUL = "faithful"
+    
+    assert normalize_enum_value(Mode.FAITHFUL) == "faithful"
+    assert normalize_enum_value("faithful") == "faithful"
+    assert normalize_enum_value(None, default="faithful") == "faithful"
+    assert normalize_enum_value(123) == "123"
+
+
+def test_build_empty_diagnosis_report_factory():
+    from app.models.diagnosis import build_empty_diagnosis_report
+    report = build_empty_diagnosis_report("agent-123", "Test Agent", "eval-123", "No failures")
+    assert report.total_failures == 0
+    assert report.critical_failures == 0
+    assert report.agent_id == "agent-123"
+    assert report.agent_name == "Test Agent"
+    assert report.evaluation_run_id == "eval-123"
+
+
+@pytest.mark.asyncio
+async def test_gemini_provider_unusable_key_circuit_breaker():
+    from app.core.llm.gemini_provider import GeminiProvider, LLMGenerationError
+    provider = GeminiProvider(api_key="INVALID_TEST_KEY")
+    provider.is_available = False
+    provider.last_error_reason = "API key invalid (AUTHENTICATION_ERROR)"
+    
+    with pytest.raises(LLMGenerationError) as exc_info:
+        await provider.generate("system", "user")
+    
+    assert "Gemini provider is marked unavailable" in str(exc_info.value)
