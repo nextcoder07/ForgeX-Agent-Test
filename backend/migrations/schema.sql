@@ -269,6 +269,28 @@ CREATE TABLE IF NOT EXISTS scenarios (
     critic_status                  TEXT NOT NULL DEFAULT 'PASSED',
     agent_version_id               TEXT REFERENCES agent_versions(id) ON DELETE SET NULL,
     scenario_spec                  JSONB,
+
+    -- Broad Agent Coverage & Behavioral Contracts
+    agent_type                     TEXT DEFAULT 'tool_agent',
+    interaction_mode               TEXT DEFAULT 'single_turn',
+    input_type                     TEXT DEFAULT 'text',
+    statefulness                   TEXT DEFAULT 'stateless',
+    behavioral_objective          TEXT DEFAULT 'COMPLETE_USER_GOAL',
+    required_tools                 JSONB DEFAULT '[]'::jsonb,
+    forbidden_tools                JSONB DEFAULT '[]'::jsonb,
+    expected_call_sequence         JSONB DEFAULT '[]'::jsonb,
+    side_effect_policy             TEXT DEFAULT 'none',
+    confirmation_required          BOOLEAN DEFAULT false,
+    external_services              JSONB DEFAULT '[]'::jsonb,
+    expected_output_constraints    JSONB DEFAULT '{}'::jsonb,
+    security_constraints           JSONB DEFAULT '[]'::jsonb,
+    state_invariants               JSONB DEFAULT '[]'::jsonb,
+    max_actions                    INTEGER DEFAULT 10,
+    evaluation_dimensions          JSONB DEFAULT '[]'::jsonb,
+    severity_if_violated           TEXT DEFAULT 'HIGH',
+    evidence_requirements          JSONB DEFAULT '[]'::jsonb,
+    execution_mode                 TEXT DEFAULT 'faithful',
+
     created_at                     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -673,6 +695,14 @@ CREATE TABLE IF NOT EXISTS scorecards (
     judge_agreement_rate DOUBLE PRECISION,
     score_formula_version TEXT DEFAULT 'v2.0-weighted',
     scorecard_spec JSONB,
+
+    -- Behavioral Reliability & Positive Confirmation
+    overall_result TEXT DEFAULT 'PASS',
+    status_title TEXT,
+    status_summary TEXT,
+    is_healthy_agent BOOLEAN DEFAULT false,
+    behavioral_summary JSONB DEFAULT '{}'::jsonb,
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -711,8 +741,16 @@ CREATE TABLE IF NOT EXISTS agent_behavior_profiles (
 CREATE TABLE IF NOT EXISTS evaluation_verdicts (
     id TEXT PRIMARY KEY,
     evaluation_run_id TEXT NOT NULL,
+    scenario_id TEXT,
+    trace_id TEXT,
+    execution_session_id TEXT,
+    passed BOOLEAN DEFAULT true,
+    status TEXT NOT NULL DEFAULT 'PASS',
+    deterministic_score DOUBLE PRECISION DEFAULT 100.0,
+    semantic_score DOUBLE PRECISION,
+    final_score DOUBLE PRECISION DEFAULT 100.0,
+    findings JSONB DEFAULT '[]'::jsonb,
     record_type TEXT NOT NULL DEFAULT 'verdicts',
-    status TEXT NOT NULL DEFAULT 'completed',
     evidence JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -720,6 +758,17 @@ CREATE TABLE IF NOT EXISTS evaluation_verdicts (
 CREATE TABLE IF NOT EXISTS evaluation_traces (
     id TEXT PRIMARY KEY,
     evaluation_run_id TEXT NOT NULL,
+    scenario_id TEXT,
+    agent_id TEXT,
+    agent_version TEXT,
+    execution_id TEXT,
+    session_id TEXT,
+    raw_stdout TEXT,
+    raw_stderr TEXT,
+    exit_code INTEGER DEFAULT 0,
+    runtime_status TEXT DEFAULT 'COMPLETED',
+    fault_injections JSONB DEFAULT '[]'::jsonb,
+    artifacts JSONB DEFAULT '[]'::jsonb,
     record_type TEXT NOT NULL DEFAULT 'traces',
     status TEXT NOT NULL DEFAULT 'completed',
     evidence JSONB DEFAULT '{}'::jsonb,

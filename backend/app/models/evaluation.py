@@ -101,6 +101,13 @@ class ReliabilityScorecard(BaseModel):
     provenance: Dict[str, Any] = Field(default_factory=dict)
     dimension_scores: Optional[TenDimensionScoreBreakdown] = None
 
+    # Behavioral Reliability & Positive Confirmation
+    overall_result: str = "PASS"  # "PASS", "FAIL", "PARTIAL", "NOT_EVALUABLE"
+    status_title: Optional[str] = None
+    status_summary: Optional[str] = None
+    is_healthy_agent: bool = False
+    behavioral_summary: Dict[str, str] = Field(default_factory=dict)
+
 
 class EvaluationReport(BaseModel):
     evaluation_id: str

@@ -7,6 +7,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from app.models.canonical_data_models import AgentVersionRecord
 
 
 class ToolRisk(str, Enum):

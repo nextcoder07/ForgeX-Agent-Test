@@ -684,6 +684,11 @@ export interface ReliabilityScorecard {
   weights?: Record<string, number>;
   provenance?: Record<string, any>;
   dimension_scores?: TenDimensionScoreBreakdown;
+  overall_result?: 'PASS' | 'FAIL' | 'PARTIAL' | 'NOT_EVALUABLE' | string;
+  status_title?: string;
+  status_summary?: string;
+  is_healthy_agent?: boolean;
+  behavioral_summary?: Record<string, string>;
 }
 
 export interface RegressionComparison {

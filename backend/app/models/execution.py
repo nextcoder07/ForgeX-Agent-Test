@@ -257,6 +257,8 @@ class ExecutionTrace(BaseModel):
     scenario_id: str
     agent_id: str
     agent_version: str
+    execution_id: Optional[str] = None
+    session_id: Optional[str] = None
     events: List[TraceEvent] = Field(default_factory=list)
     tool_calls: List[ToolCallRecord] = Field(default_factory=list)
     state_changes: List[StateChange] = Field(default_factory=list)
@@ -269,6 +271,14 @@ class ExecutionTrace(BaseModel):
     counterfactual_of: Optional[str] = None
     observation_summary: Optional[ObservationSummary] = None
     trajectory_hash: Optional[str] = None
+
+    # Raw Evidence Preservation
+    raw_stdout: Optional[str] = ""
+    raw_stderr: Optional[str] = ""
+    exit_code: Optional[int] = 0
+    runtime_status: Optional[str] = "COMPLETED"
+    fault_injections: List[Dict[str, Any]] = Field(default_factory=list)
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class SandboxInstance(BaseModel):
