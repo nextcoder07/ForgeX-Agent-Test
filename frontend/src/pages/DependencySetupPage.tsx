@@ -279,6 +279,22 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
       setCredentialDemand(credPrompt);
       setModelConnections(conns);
       setRequirementsReport(reqReport);
+
+      // Synchronize with stored user secrets from localStorage
+      try {
+        const userJson = localStorage.getItem('forgex_active_user_session');
+        const uid = userJson ? JSON.parse(userJson).uid : null;
+        const key = uid ? `forgex_user_secrets_${uid}` : 'forgex_user_secrets';
+        const stored = localStorage.getItem(key) || localStorage.getItem('forgex_user_secrets');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && typeof parsed === 'object') {
+            setSystemCredInputs(prev => ({ ...parsed, ...prev }));
+          }
+        }
+      } catch (err) {
+        console.debug('Error loading secrets from localStorage in DependencySetupPage', err);
+      }
       
       if (agentBindingsData) {
         const slots = agentBindingsData.slots || [];
@@ -611,6 +627,19 @@ export const DependencySetupPage: React.FC<DependencySetupPageProps> = ({ agent:
       setSystemCredentials(updated);
       setSystemCredSaveSuccess(true);
       setTimeout(() => setSystemCredSaveSuccess(false), 3000);
+
+      // Synchronize with localStorage for cross-page persistence
+      try {
+        const userJson = localStorage.getItem('forgex_active_user_session');
+        const uid = userJson ? JSON.parse(userJson).uid : null;
+        const key = uid ? `forgex_user_secrets_${uid}` : 'forgex_user_secrets';
+        const stored = localStorage.getItem(key) || localStorage.getItem('forgex_user_secrets');
+        const existing = stored ? JSON.parse(stored) : {};
+        const merged = { ...existing, ...systemCredInputs };
+        localStorage.setItem(key, JSON.stringify(merged));
+      } catch (err) {
+        console.debug('Error saving secrets to localStorage in DependencySetupPage', err);
+      }
       
       if (selectedAgentId) {
         const credPrompt = await getAgentRequiredCredentials(selectedAgentId, selectedExecutionMode);

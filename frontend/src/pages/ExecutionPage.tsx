@@ -19,6 +19,9 @@ import {
   CheckCircle2,
   XCircle,
   Eye,
+  EyeOff,
+  Save,
+  Key,
   Terminal,
   FileText,
   ShieldAlert,
@@ -32,7 +35,7 @@ import {
   Check,
 } from 'lucide-react';
 import type { PageId } from '../components/Navbar';
-import type { AgentRecord, Scenario, ExecutionJob, ExecutionTrace, ToolCallRecord, TraceEvent, SecurityEvent, ObservationSummary, SetupReadinessRecord } from '../api/client';
+import type { AgentRecord, Scenario, ExecutionJob, ExecutionTrace, ToolCallRecord, TraceEvent, SecurityEvent, ObservationSummary, SetupReadinessRecord, SystemCredentialItem } from '../api/client';
 import {
   API_BASE_URL,
   fetchAgents,
@@ -44,6 +47,15 @@ import {
   fetchLatestExecutionJob,
   getSetupReadiness,
   runAutomaticSetup,
+  getSystemCredentials,
+  updateSystemCredentials,
+  getAgentCredentials,
+  saveAgentCredential,
+  deleteAgentCredential,
+  validateAgentCredential,
+  getAgentConfiguration,
+  updateAgentConfiguration,
+  CredentialStatusItem,
 } from '../api/client';
 import { LiveProcessMonitor } from '../components/LiveProcessMonitor';
 import { PipelineObservabilityPage } from './PipelineObservabilityPage';
@@ -76,8 +88,135 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
   const [executionBlockedMsg, setExecutionBlockedMsg] = useState<string | null>(null);
   const [providedSecrets, setProvidedSecrets] = useState<Record<string, string>>({});
   const [showInlineKeys, setShowInlineKeys] = useState(false);
+  const [savingSecrets, setSavingSecrets] = useState(false);
+  const [secretsSavedToast, setSecretsSavedToast] = useState(false);
+  const [systemCredentials, setSystemCredentials] = useState<SystemCredentialItem[]>([]);
+  const [agentCredentialsList, setAgentCredentialsList] = useState<CredentialStatusItem[]>([]);
+  const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
+  const [validatingKeyMap, setValidatingKeyMap] = useState<Record<string, boolean>>({});
+  const [validationResultMap, setValidationResultMap] = useState<Record<string, { status: string; message: string }>>({});
 
   const pollIntervalRef = useRef<number | null>(null);
+
+  const getSecretsStorageKey = () => {
+    try {
+      const userJson = localStorage.getItem('forgex_active_user_session');
+      if (userJson) {
+        const uid = JSON.parse(userJson).uid;
+        if (uid) return `forgex_user_secrets_${uid}`;
+      }
+    } catch (e) {}
+    return 'forgex_user_secrets';
+  };
+
+  // Load system credentials & local storage on mount
+  useEffect(() => {
+    try {
+      const key = getSecretsStorageKey();
+      const stored = localStorage.getItem(key) || localStorage.getItem('forgex_user_secrets');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object') {
+          setProvidedSecrets(prev => ({ ...parsed, ...prev }));
+        }
+      }
+    } catch (e) {
+      console.debug('Error loading secrets from localStorage', e);
+    }
+
+    getSystemCredentials().then(creds => {
+      setSystemCredentials(creds || []);
+    }).catch(() => {});
+  }, []);
+
+  const handleSaveSecrets = async () => {
+    setSavingSecrets(true);
+    try {
+      const activeSecretsToSave: Record<string, string> = {};
+      const savePromises: Promise<any>[] = [];
+
+      Object.keys(providedSecrets).forEach(k => {
+        const val = providedSecrets[k]?.trim();
+        if (val) {
+          activeSecretsToSave[k] = val;
+          if (selectedAgentId) {
+            savePromises.push(saveAgentCredential(selectedAgentId, k, val).catch(console.error));
+          }
+        }
+      });
+
+      await Promise.all(savePromises);
+
+      // 1. Save to backend system credentials (scoped to active user & Supabase)
+      const updatedCreds = await updateSystemCredentials(activeSecretsToSave);
+      setSystemCredentials(updatedCreds);
+
+      // 2. Refresh agent credentials from Supabase
+      if (selectedAgentId) {
+        const agCreds = await getAgentCredentials(selectedAgentId);
+        setAgentCredentialsList(agCreds || []);
+      }
+
+      // 3. Save to user-scoped localStorage for cross-page persistence
+      const key = getSecretsStorageKey();
+      localStorage.setItem(key, JSON.stringify(activeSecretsToSave));
+      localStorage.setItem('forgex_user_secrets', JSON.stringify(activeSecretsToSave));
+
+      // 4. Refresh agent setup readiness
+      if (selectedAgentId) {
+        runAutomaticSetup(selectedAgentId).then(sr => setSetupReadiness(sr)).catch(() => {});
+      }
+
+      setSecretsSavedToast(true);
+      setTimeout(() => setSecretsSavedToast(false), 3500);
+    } catch (err) {
+      console.error('Failed to save API keys:', err);
+    } finally {
+      setSavingSecrets(false);
+    }
+  };
+
+  const handleValidateSingleKey = async (keyName: string) => {
+    if (!selectedAgentId) return;
+    setValidatingKeyMap(prev => ({ ...prev, [keyName]: true }));
+    try {
+      const val = providedSecrets[keyName]?.trim();
+      const res = await validateAgentCredential(selectedAgentId, keyName, val);
+      setValidationResultMap(prev => ({
+        ...prev,
+        [keyName]: { status: res.status, message: res.message }
+      }));
+      // Refresh credentials list
+      const agCreds = await getAgentCredentials(selectedAgentId);
+      setAgentCredentialsList(agCreds || []);
+    } catch (e: any) {
+      setValidationResultMap(prev => ({
+        ...prev,
+        [keyName]: { status: 'INVALID', message: e?.message || 'Validation failed' }
+      }));
+    } finally {
+      setValidatingKeyMap(prev => ({ ...prev, [keyName]: false }));
+    }
+  };
+
+  const handleClearSecrets = async () => {
+    try {
+      const cleared: Record<string, string> = {};
+      Object.keys(providedSecrets).forEach(k => {
+        cleared[k] = '';
+      });
+      await updateSystemCredentials(cleared);
+      const key = getSecretsStorageKey();
+      localStorage.removeItem(key);
+      localStorage.removeItem('forgex_user_secrets');
+      setProvidedSecrets({});
+      if (selectedAgentId) {
+        runAutomaticSetup(selectedAgentId).then(sr => setSetupReadiness(sr)).catch(() => {});
+      }
+    } catch (e) {
+      console.error('Error clearing secrets', e);
+    }
+  };
 
   useEffect(() => {
     // Load agents
@@ -96,6 +235,19 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
     if (!selectedAgentId) return;
     setLoadingScenarios(true);
     setExecutionBlockedMsg(null);
+
+    // Fetch agent-specific credentials, configuration, and setup readiness from Supabase
+    getAgentCredentials(selectedAgentId)
+      .then(creds => setAgentCredentialsList(creds || []))
+      .catch(() => {});
+
+    getAgentConfiguration(selectedAgentId)
+      .then(cfg => {
+        if (cfg && cfg.execution_mode) {
+          setExecutionMode(cfg.execution_mode as any);
+        }
+      })
+      .catch(() => {});
 
     // Trigger automatic setup preparation on agent selection
     runAutomaticSetup(selectedAgentId)
@@ -457,15 +609,22 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                       <Zap className="w-3.5 h-3.5 text-amber-400" />
                       <span>Inline API Keys & Secrets Injection</span>
                     </span>
-                    <span className="text-[10px] font-mono text-slate-400">
-                      {showInlineKeys ? 'Hide ▲' : 'Provide Keys ▼'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {Object.keys(providedSecrets).filter(k => providedSecrets[k]?.trim()).length > 0 && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+                          {Object.keys(providedSecrets).filter(k => providedSecrets[k]?.trim()).length} Active
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {showInlineKeys ? 'Hide ▲' : 'Provide Keys ▼'}
+                      </span>
+                    </div>
                   </button>
 
                   {showInlineKeys && (
                     <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 space-y-3 animate-fadeIn">
                       <p className="text-[10px] text-slate-400 leading-snug">
-                        Dynamically detected API keys for target agent <strong>{selectedAgent?.display_name || selectedAgent?.name}</strong>. Provided keys take priority.
+                        Dynamically detected API keys for target agent <strong>{selectedAgent?.display_name || selectedAgent?.name}</strong>. Saved keys are persisted and synchronized across Setup and Execution.
                       </p>
                       
                       {(() => {
@@ -487,6 +646,16 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
                             if (d.provider === 'gemini') detectedEnvKeys.push('GEMINI_API_KEY');
                           });
                         }
+                        const manifest = (selectedAgent as any)?.runtime_manifest || spec?.runtime_manifest;
+                        if (manifest?.slot_configs) {
+                          Object.values(manifest.slot_configs).forEach((cfg: any) => {
+                            if (cfg?.provider === 'openrouter') detectedEnvKeys.push('OPENROUTER_API_KEY');
+                            if (cfg?.provider === 'openai') detectedEnvKeys.push('OPENAI_API_KEY');
+                            if (cfg?.provider === 'gemini') detectedEnvKeys.push('GEMINI_API_KEY');
+                            if (cfg?.provider === 'anthropic') detectedEnvKeys.push('ANTHROPIC_API_KEY');
+                            if (cfg?.provider === 'groq') detectedEnvKeys.push('GROQ_API_KEY');
+                          });
+                        }
 
                         const missing = setupReadiness?.missing_credentials || [];
                         const allKeys = Array.from(new Set([...missing, ...detectedEnvKeys])).filter(k => k && k.trim());
@@ -494,38 +663,127 @@ export const ExecutionPage: React.FC<ExecutionPageProps> = ({ onExecutionEvaluat
 
                         return (
                           <div className="space-y-2.5 font-mono text-xs">
-                            {finalKeys.map(keyName => (
-                              <div key={keyName} className="p-2 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                                <div className="flex items-center justify-between text-[10px]">
-                                  <label className="text-cyan-300 font-bold">{keyName}</label>
-                                  <span className="text-slate-500 text-[9px]">
-                                    {providedSecrets[keyName] ? '✓ Key Injected' : 'Default Pool Active'}
-                                  </span>
+                            {finalKeys.map(keyName => {
+                              const isUserSet = Boolean(providedSecrets[keyName]?.trim());
+                              const sysItem = systemCredentials.find(c => c.key_name === keyName);
+                              const isPlatformConfigured = Boolean(sysItem?.is_configured);
+                              const isPasswordVisible = showPasswordMap[keyName] || false;
+
+                              return (
+                                <div key={keyName} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <label className="text-cyan-300 font-bold flex items-center gap-1">
+                                      <Key className="w-3 h-3 text-cyan-400" />
+                                      {keyName}
+                                    </label>
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                                      (isUserSet || isPlatformConfigured)
+                                        ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/30'
+                                        : 'bg-amber-950/80 text-amber-400 border border-amber-500/30'
+                                    }`}>
+                                      {isUserSet
+                                        ? '✓ Key Injected & Saved'
+                                        : isPlatformConfigured
+                                        ? `✓ Saved & Active (${sysItem?.masked_value || 'Vault Active'})`
+                                        : 'Missing / Required'}
+                                    </span>
+                                  </div>
+
+                                  {isPlatformConfigured && !providedSecrets[keyName] && (
+                                    <div className="flex items-center justify-between px-2.5 py-1.5 bg-emerald-950/30 border border-emerald-500/30 rounded-md text-[10px] text-emerald-300">
+                                      <div className="flex items-center gap-1.5">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                        <span>Active Vault Key: <strong className="font-mono text-emerald-200">{sysItem?.masked_value}</strong></span>
+                                      </div>
+                                      <span className="text-[9px] text-emerald-400/80 font-mono">Synced from Setup</span>
+                                    </div>
+                                  )}
+
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="relative flex-1 flex items-center">
+                                      <input
+                                        type={isPasswordVisible ? 'text' : 'password'}
+                                        placeholder={
+                                          isPlatformConfigured && !providedSecrets[keyName]
+                                            ? `Enter new value to override (${sysItem?.masked_value})...`
+                                            : `Enter custom ${keyName}...`
+                                        }
+                                        value={providedSecrets[keyName] || ''}
+                                        onChange={e => setProvidedSecrets({ ...providedSecrets, [keyName]: e.target.value })}
+                                        className="w-full bg-slate-900 border border-slate-700/80 rounded-md pl-2.5 pr-8 py-1.5 text-slate-200 focus:outline-none focus:border-cyan-500/60 text-xs font-mono"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowPasswordMap(prev => ({ ...prev, [keyName]: !prev[keyName] }))}
+                                        className="absolute right-2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                                        title={isPasswordVisible ? 'Hide Key' : 'Show Key'}
+                                      >
+                                        {isPasswordVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                      </button>
+                                    </div>
+
+                                    {(providedSecrets[keyName] || isPlatformConfigured) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleValidateSingleKey(keyName)}
+                                        disabled={validatingKeyMap[keyName]}
+                                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all disabled:opacity-50 shrink-0"
+                                      >
+                                        {validatingKeyMap[keyName] ? (
+                                          <RefreshCw className="w-3 h-3 animate-spin text-cyan-400" />
+                                        ) : (
+                                          <Zap className="w-3 h-3 text-cyan-400" />
+                                        )}
+                                        {validatingKeyMap[keyName] ? 'Testing...' : 'Test'}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {validationResultMap[keyName] && (
+                                    <div className={`px-2 py-1 rounded text-[10px] flex items-center justify-between font-mono ${
+                                      validationResultMap[keyName].status === 'VALID'
+                                        ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/30'
+                                        : 'bg-rose-950/60 text-rose-300 border border-rose-500/30'
+                                    }`}>
+                                      <span>{validationResultMap[keyName].status === 'VALID' ? '✓ Validated' : '✕ Test Failed'}: {validationResultMap[keyName].message}</span>
+                                    </div>
+                                  )}
                                 </div>
-                                <input
-                                  type="password"
-                                  placeholder={`Enter custom ${keyName}...`}
-                                  value={providedSecrets[keyName] || ''}
-                                  onChange={e => setProvidedSecrets({ ...providedSecrets, [keyName]: e.target.value })}
-                                  className="w-full bg-slate-900 border border-slate-700/80 rounded-md px-2.5 py-1 text-slate-200 focus:outline-none focus:border-cyan-500/60 text-xs font-mono"
-                                />
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         );
                       })()}
 
-                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-800">
+                      {/* Action Bar with Save Button */}
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-800 flex-wrap gap-2">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={handleSaveSecrets}
+                            disabled={savingSecrets}
+                            className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-[11px] flex items-center space-x-1.5 shadow-md shadow-emerald-500/20 transition cursor-pointer disabled:opacity-50"
+                          >
+                            {savingSecrets ? (
+                              <><RefreshCw className="w-3 h-3 animate-spin" /><span>Saving...</span></>
+                            ) : (
+                              <><Save className="w-3 h-3" /><span>Save & Sync Keys</span></>
+                            )}
+                          </button>
+                          {secretsSavedToast && (
+                            <span className="text-[10px] text-emerald-400 font-bold animate-pulse">
+                              ✓ Saved & Synced Across Platform!
+                            </span>
+                          )}
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => setProvidedSecrets({})}
+                          onClick={handleClearSecrets}
                           className="text-[10px] text-slate-400 hover:text-rose-400 underline font-mono cursor-pointer"
                         >
                           Clear Injected Keys
                         </button>
-                        <span className="text-[10px] text-emerald-400 font-mono font-bold">
-                          {Object.keys(providedSecrets).filter(k => providedSecrets[k]?.trim()).length} keys active
-                        </span>
                       </div>
                     </div>
                   )}

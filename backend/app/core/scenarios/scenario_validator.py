@@ -363,7 +363,11 @@ def _hard_validate_scenario(
 
     # Rule 9: Duplicate invocation within same category
     cat_val = sc.category.value if isinstance(sc.category, ScenarioCategory) else str(sc.category)
-    sig = (cat_val, str(sorted(sc.invocation.get("args", []) if isinstance(sc.invocation, dict) else [])))
+    args_list = sc.invocation.get("args", []) if isinstance(sc.invocation, dict) else []
+    if not args_list and isinstance(sc.invocation, dict) and "command" in sc.invocation:
+        cmd_parts = str(sc.invocation["command"]).split()
+        args_list = cmd_parts[1:] if len(cmd_parts) > 1 else [sc.invocation["command"]]
+    sig = (cat_val, str(sorted(args_list)))
     if sig in seen_invocation_sigs:
         violations.append("RULE9_DUPLICATE_INVOCATION: identical CLI invocation already present for this category.")
     seen_invocation_sigs.add(sig)

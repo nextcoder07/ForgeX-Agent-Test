@@ -49,8 +49,9 @@ IMPORT_TO_PACKAGE_MAP: Dict[str, str] = {
     "aiohttp": "aiohttp",
     "numpy": "numpy",
     "pandas": "pandas",
-    "pkg_resources": "setuptools",
-    "pkg-resources": "setuptools",
+    "pkg_resources": "setuptools<70.0.0",
+    "pkg-resources": "setuptools<70.0.0",
+    "setuptools": "setuptools<70.0.0",
     "faker": "faker",
 }
 
@@ -62,8 +63,7 @@ STANDARD_LIBS: Set[str] = {
     "urllib", "http", "shutil", "traceback", "copy", "hashlib",
     "dataclasses", "enum", "asyncio", "socket", "threading", "multiprocessing",
     "base64", "csv", "sqlite3", "unittest", "contextlib", "glob", "heapq",
-    "operator", "secrets", "string", "struct", "warnings", "xml", "zipfile",
-    "pkg_resources", "setuptools", "pkg-resources", "distutils", "site"
+    "operator", "secrets", "string", "struct", "warnings", "xml", "zipfile", "site"
 }
 
 

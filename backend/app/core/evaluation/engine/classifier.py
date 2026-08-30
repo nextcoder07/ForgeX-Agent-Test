@@ -45,25 +45,10 @@ class RuleBasedFailureClassifier(FailureClassifier):
         classified_findings: List[FailureFinding] = []
 
         for f in raw_findings:
-            category_lower = f.category.lower().strip().replace(" ", "_")
-            
-            # Direct match
-            if category_lower in VALID_TAXONOMY:
-                f.category = category_lower
-            # Mapped match
-            elif category_lower in CATEGORY_MAP:
-                f.category = CATEGORY_MAP[category_lower]
-            # Check substrings
+            if not f.category:
+                f.category = "INCORRECT_TASK_COMPLETION"
             else:
-                resolved = False
-                for key, val in CATEGORY_MAP.items():
-                    if key in category_lower or category_lower in key:
-                        f.category = val
-                        resolved = True
-                        break
-                if not resolved:
-                    f.category = "incorrect_task_completion"
-
+                f.category = f.category.upper().strip().replace(" ", "_")
             classified_findings.append(f)
 
         return classified_findings

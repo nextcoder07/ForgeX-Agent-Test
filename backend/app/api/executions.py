@@ -118,6 +118,19 @@ def _run_sandbox_scenarios_task(
     if not agent or not job:
         return
 
+    # Automatically hydrate user-saved encrypted credentials for this agent
+    try:
+        from app.core.security.crypto import decrypt_credential
+        owner_id = getattr(agent, "owner_id", None) or "default_user"
+        saved_creds = store.list_agent_credentials(user_id=owner_id, agent_id=agent_id)
+        for c in saved_creds:
+            if c.is_active and c.credential_name.upper() not in secrets:
+                decrypted = decrypt_credential(c.encrypted_value)
+                if decrypted:
+                    secrets[c.credential_name.upper()] = decrypted
+    except Exception as e:
+        logger.debug(f"Could not hydrate agent_credentials: {e}")
+
     # Automatically resolve user-selected AI model connections from Setup screen
     if agent.runtime_manifest and "model_bindings" in agent.runtime_manifest:
         model_bindings = agent.runtime_manifest.get("model_bindings", {})
@@ -126,7 +139,8 @@ def _run_sandbox_scenarios_task(
                 conn = store.get_model_connection(conn_id)
                 if conn and conn.api_key:
                     provider_prefix = conn.provider.upper() if conn.provider else "OPENAI"
-                    secrets[f"{provider_prefix}_API_KEY"] = conn.api_key
+                    if f"{provider_prefix}_API_KEY" not in secrets:
+                        secrets[f"{provider_prefix}_API_KEY"] = conn.api_key
                     if conn.base_url:
                         secrets[f"{provider_prefix}_BASE_URL"] = conn.base_url
                     if conn.model_identifier:

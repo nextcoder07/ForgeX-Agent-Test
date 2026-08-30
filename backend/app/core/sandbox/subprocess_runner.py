@@ -62,6 +62,15 @@ def create_sanitized_environment(
     env["PYTHONUTF8"] = "1"
     env["LANG"] = "en_US.UTF-8"
 
+    # 1.5 Ensure PYTHONPATH contains all active sys.path entries so installed packages (crewai, setuptools, etc.) are available
+    python_paths = [p for p in sys.path if p and os.path.exists(p)]
+    existing_ppath = env.get("PYTHONPATH", "")
+    if existing_ppath:
+        for p in existing_ppath.split(os.path.pathsep):
+            if p and p not in python_paths:
+                python_paths.append(p)
+    env["PYTHONPATH"] = os.path.pathsep.join(python_paths)
+
     # 2. Inject active dedicated Test Agent keys (OPENAI_API_KEY, GEMINI_API_KEY, TAVILY_API_KEY, etc.)
     try:
         from app.core.llm.key_manager import TestAgentKeyManager
@@ -185,6 +194,18 @@ def create_sanitized_environment(
         for k, v in provided_secrets.items():
             if v and isinstance(v, str):
                 env[k] = v
+
+    # 6. Apply OpenAI-compatible bridges for OpenRouter, Groq, or local gateways
+    if env.get("OPENROUTER_API_KEY") and (not env.get("OPENAI_API_KEY") or env.get("OPENAI_API_KEY").startswith("sk-or-")):
+        env["OPENAI_API_KEY"] = env["OPENROUTER_API_KEY"]
+        env["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
+        env["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+        env["OPENAI_MAX_TOKENS"] = "1024"
+        env["MAX_TOKENS"] = "1024"
+    elif env.get("GROQ_API_KEY") and not env.get("OPENAI_API_KEY"):
+        env["OPENAI_API_KEY"] = env["GROQ_API_KEY"]
+        env["OPENAI_API_BASE"] = "https://api.groq.com/openai/v1"
+        env["OPENAI_BASE_URL"] = "https://api.groq.com/openai/v1"
 
     # Final cleanup: ensure all env keys are valid identifier strings with no '=' or illegal characters
     cleaned_env = {}

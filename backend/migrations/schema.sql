@@ -352,9 +352,11 @@ CREATE TABLE IF NOT EXISTS dependency_bindings (
 -- 16. model_connections — registered cloud API keys & local ML servers
 CREATE TABLE IF NOT EXISTS model_connections (
     id                       TEXT PRIMARY KEY,
+    workspace_id             TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id                  TEXT REFERENCES user_profiles(id) ON DELETE CASCADE,
     name                     TEXT NOT NULL,
     provider                 TEXT NOT NULL,
-    base_url                 TEXT NOT NULL,
+    base_url                 TEXT NOT NULL DEFAULT '',
     model_identifier         TEXT NOT NULL,
     api_key                  TEXT,
     role                     TEXT NOT NULL DEFAULT 'general',
@@ -367,7 +369,10 @@ CREATE TABLE IF NOT EXISTS model_connections (
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 17. system_credentials — encrypted platform credential vault
+CREATE INDEX IF NOT EXISTS idx_model_connections_user ON model_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_model_connections_ws ON model_connections(workspace_id);
+
+-- 17. system_credentials — platform credential vault
 CREATE TABLE IF NOT EXISTS system_credentials (
     key_name        TEXT PRIMARY KEY,
     masked_value    TEXT NOT NULL,
@@ -375,6 +380,94 @@ CREATE TABLE IF NOT EXISTS system_credentials (
     is_set          BOOLEAN NOT NULL DEFAULT true,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 18. user_credentials — multi-tenant user API keys and secrets vault
+CREATE TABLE IF NOT EXISTS user_credentials (
+    id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id            TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    workspace_id       TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+    key_name           TEXT NOT NULL,
+    provider           TEXT NOT NULL DEFAULT 'custom',
+    masked_value       TEXT NOT NULL,
+    raw_value          TEXT NOT NULL,
+    is_active          BOOLEAN NOT NULL DEFAULT true,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(user_id, key_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_credentials_user ON user_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_credentials_ws ON user_credentials(workspace_id);
+
+-- 19. agent_model_bindings — slot-to-model configuration mapping
+CREATE TABLE IF NOT EXISTS agent_model_bindings (
+    id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    agent_id           TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    slot_id            TEXT NOT NULL,
+    connection_id      TEXT REFERENCES model_connections(id) ON DELETE SET NULL,
+    provider           TEXT NOT NULL DEFAULT 'openai',
+    model_identifier   TEXT NOT NULL DEFAULT 'default',
+    api_key_override   TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(agent_id, slot_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_model_bindings_agent ON agent_model_bindings(agent_id);
+
+-- 20. agent_configurations — user-scoped persistent configuration for each agent
+CREATE TABLE IF NOT EXISTS agent_configurations (
+    id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id            TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    agent_id           TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    execution_mode     TEXT NOT NULL DEFAULT 'faithful',
+    selected_provider  TEXT NOT NULL DEFAULT 'openai',
+    selected_model     TEXT NOT NULL DEFAULT 'default',
+    configuration_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(user_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_configurations_user_agent ON agent_configurations(user_id, agent_id);
+
+-- 21. agent_credentials — encrypted user API keys and secrets per agent
+CREATE TABLE IF NOT EXISTS agent_credentials (
+    id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id            TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    agent_id           TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    credential_name    TEXT NOT NULL,
+    credential_type    TEXT NOT NULL DEFAULT 'api_key',
+    provider           TEXT NOT NULL DEFAULT 'custom',
+    encrypted_value    TEXT NOT NULL,
+    masked_value       TEXT NOT NULL,
+    validation_status  TEXT NOT NULL DEFAULT 'SAVED',
+    last_validated_at  TIMESTAMPTZ,
+    is_active          BOOLEAN NOT NULL DEFAULT true,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(user_id, agent_id, credential_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_credentials_lookup ON agent_credentials(user_id, agent_id, credential_name);
+
+-- 22. agent_setup_states — persisted setup readiness and preflight blockers per agent
+CREATE TABLE IF NOT EXISTS agent_setup_states (
+    id                         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id                    TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    agent_id                   TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    setup_status               TEXT NOT NULL DEFAULT 'NOT_READY',
+    preflight_status           TEXT NOT NULL DEFAULT 'NOT_READY',
+    requirements_json          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    resolved_dependencies_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    blockers_json              JSONB NOT NULL DEFAULT '[]'::jsonb,
+    last_checked_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(user_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_setup_states_lookup ON agent_setup_states(user_id, agent_id);
 
 -- =============================================================================
 -- 4. STAGE 4: EXECUTION & RUNTIME TRACING TABLES

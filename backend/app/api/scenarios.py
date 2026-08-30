@@ -16,7 +16,8 @@ from app.models.scenario import (
     CoverageGapReport,
     ScenarioGenerationRequest,
     ScenarioGenerationRun,
-    ScenarioPlan
+    ScenarioPlan,
+    ScenarioPlanItem
 )
 from app.services.store import store
 from app.core.scenarios.strategy_planner import build_test_strategy, build_deterministic_scenario_plan
@@ -172,6 +173,45 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
 
     # 4. Hard Deterministic Validation (Rule A, Quality Score, Interface Rules)
     hard_passing, rejection_report = hard_validate_scenarios(generated, agent, context)
+
+    # 4.1 Targeted LLM Replenishment for Rejected Scenarios (e.g. duplicates / invalid args)
+    if rejection_report and len(hard_passing) < payload.target_count:
+        missing_count = payload.target_count - len(hard_passing)
+        logger.info(f"Hard validation rejected {len(rejection_report)} scenarios. Requesting targeted LLM replenishment for {missing_count} slots...")
+        try:
+            # Build replenishment plan for rejected items
+            repl_items = []
+            for idx, rej in enumerate(rejection_report[:missing_count]):
+                cat_val = rej.get("category", "normal")
+                cat_enum = ScenarioCategory(cat_val) if cat_val in [c.value for c in ScenarioCategory] else ScenarioCategory.NORMAL
+                repl_items.append(ScenarioPlanItem(
+                    plan_id=f"{plan.plan_id}-repl-{idx}",
+                    plan_item_id=f"repl-item-{idx}",
+                    target_type="REPLENISHMENT",
+                    category=cat_enum,
+                    target=rej.get("title", f"Unique {cat_val} test"),
+                    reason="Targeted replenishment to replace rejected scenario",
+                    required_interface=context.interface_type or "CLI"
+                ))
+            repl_plan = ScenarioPlan(
+                plan_id=f"{plan.plan_id}-replenish",
+                agent_id=agent.id,
+                agent_name=agent.name,
+                total_target=len(repl_items),
+                plan_items=repl_items
+            )
+            replacements = await generate_scenarios_for_agent(
+                agent=agent,
+                llm=llm,
+                scenario_plan=repl_plan,
+                request=payload
+            )
+            repl_passing, _ = hard_validate_scenarios(replacements, agent, context)
+            if repl_passing:
+                hard_passing.extend(repl_passing)
+                logger.info(f"Targeted replenishment added {len(repl_passing)} valid scenarios. Total valid now: {len(hard_passing)}/{payload.target_count}")
+        except Exception as e:
+            logger.warning(f"Targeted replenishment failed: {e}")
     
     # 5. LLM Critic (Only on scenarios that passed hard validation)
     if hard_passing:
@@ -181,8 +221,7 @@ async def execute_scenario_generation_run(payload: ScenarioGenerationRequest):
 
     # Collate results
     final_scenarios = []
-    for sc in generated:
-        # If it was passed to the critic, update it from the critiqued list
+    for sc in hard_passing:
         c_match = next((c for c in critiqued if c.id == sc.id), None)
         if c_match:
             final_scenarios.append(c_match)

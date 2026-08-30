@@ -30,10 +30,12 @@ from app.agent_testers.router import router as agent_testers_router
 from app.core.meta_eval.router import router as platform_ai_router
 from app.api.admin_telemetry import router as admin_telemetry_router
 from app.api.improve import router as improve_router
+from app.api.agent_config import router as agent_config_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
 api_router.include_router(agents_router)
+api_router.include_router(agent_config_router)
 api_router.include_router(intake_router)
 api_router.include_router(capabilities_router)
 api_router.include_router(scenarios_router)

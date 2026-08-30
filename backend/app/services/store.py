@@ -35,6 +35,9 @@ from app.models.evaluation_ontology import Finding, CanonicalReliabilityReport
 from app.models.canonical_data_models import (
     TestCaseSpecification, EvidenceGraph, PatchArtifact, AgentVersionRecord
 )
+from app.models.agent_config import (
+    AgentConfigurationRecord, AgentCredentialRecord, AgentSetupStateRecord
+)
 
 
 logger = logging.getLogger(__name__)
@@ -560,7 +563,7 @@ def _deserialize_scorecard(row: Dict[str, Any]) -> ReliabilityScorecard:
     )
 
 def _serialize_verdicts(key: str, verdicts: List[RunVerdict]) -> Dict[str, Any]:
-    safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
+    safe_eval_id = key if key else "default_eval_run"
     return {
         "id": key,
         "evaluation_run_id": safe_eval_id,
@@ -575,8 +578,7 @@ def _deserialize_verdicts(row: Dict[str, Any]) -> List[RunVerdict]:
     return [RunVerdict(**v) for v in verdicts_data]
 
 def _serialize_traces(key: str, traces: List[ExecutionTrace]) -> Dict[str, Any]:
-    safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
-    # Ensure ID is a valid UUID format for PostgreSQL evaluation_traces table
+    safe_eval_id = key if key else "default_eval_run"
     safe_uuid = key
     if key and not (len(key) == 36 and key.count("-") == 4):
         safe_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, key))
@@ -599,7 +601,7 @@ def _serialize_clusters(key: str, clusters: List[FailureCluster]) -> Dict[str, A
     cat = getattr(first_c, "category", None)
     cat_str = cat.value if hasattr(cat, "value") else (str(cat) if cat else "REASONING_FAILURE")
     sev = getattr(first_c, "severity", "medium")
-    safe_eval_id = key if (key and isinstance(key, str) and not key.startswith(("exec-", "job-"))) else None
+    safe_eval_id = key if key else "default_eval_run"
 
     return {
         "id": key,
@@ -1249,6 +1251,24 @@ def _serialize_test_case_spec(key: str, tc: TestCaseSpecification) -> Dict[str, 
 def _deserialize_test_case_spec(row: Dict[str, Any]) -> TestCaseSpecification:
     return TestCaseSpecification(**row)
 
+def _serialize_agent_configuration(key: str, c: AgentConfigurationRecord) -> Dict[str, Any]:
+    return c.model_dump() if hasattr(c, "model_dump") else c.dict()
+
+def _deserialize_agent_configuration(row: Dict[str, Any]) -> AgentConfigurationRecord:
+    return AgentConfigurationRecord(**row)
+
+def _serialize_agent_credential(key: str, c: AgentCredentialRecord) -> Dict[str, Any]:
+    return c.model_dump() if hasattr(c, "model_dump") else c.dict()
+
+def _deserialize_agent_credential(row: Dict[str, Any]) -> AgentCredentialRecord:
+    return AgentCredentialRecord(**row)
+
+def _serialize_agent_setup_state(key: str, s: AgentSetupStateRecord) -> Dict[str, Any]:
+    return s.model_dump() if hasattr(s, "model_dump") else s.dict()
+
+def _deserialize_agent_setup_state(row: Dict[str, Any]) -> AgentSetupStateRecord:
+    return AgentSetupStateRecord(**row)
+
 # ---------------------------------------------------------------------------
 # Global Store Implementation
 
@@ -1295,6 +1315,9 @@ class Store:
         self.patch_artifacts = SyncedDict("patch_artifacts", _serialize_patch_artifact, _deserialize_patch_artifact)
         self.findings = SyncedDict("findings", _serialize_finding, _deserialize_finding)
         self.canonical_test_cases = SyncedDict("canonical_test_cases", _serialize_test_case_spec, _deserialize_test_case_spec)
+        self.agent_configurations = SyncedDict("agent_configurations", _serialize_agent_configuration, _deserialize_agent_configuration)
+        self.agent_credentials = SyncedDict("agent_credentials", _serialize_agent_credential, _deserialize_agent_credential)
+        self.agent_setup_states = SyncedDict("agent_setup_states", _serialize_agent_setup_state, _deserialize_agent_setup_state)
         self._local_artifacts: Dict[str, Dict[str, Any]] = {}
 
 
@@ -1337,6 +1360,25 @@ class Store:
     def get_execution_actions(self, session_id: str) -> List[Any]:
         actions = [a for a in self.execution_actions.values() if a.execution_session_id == session_id]
         return sorted(actions, key=lambda x: x.sequence)
+
+    def save_verdicts(self, run_id: str, verdicts: List[RunVerdict]) -> None:
+        self.verdicts[run_id] = verdicts
+
+    def save_verdict(self, verdict: RunVerdict) -> None:
+        run_id = verdict.evaluation_run_id or verdict.trace_id
+        existing = self.verdicts.get(run_id)
+        if isinstance(existing, list):
+            self.verdicts[run_id] = existing + [verdict]
+        elif existing:
+            self.verdicts[run_id] = [existing, verdict]
+        else:
+            self.verdicts[run_id] = [verdict]
+
+    def get_verdicts(self, run_id: str) -> List[RunVerdict]:
+        res = self.verdicts.get(run_id)
+        if isinstance(res, list):
+            return res
+        return [res] if res else []
 
 
     def _seed_platform_resources(self):
@@ -1857,6 +1899,23 @@ class Store:
             return self.get_dependency_bindings(agent_id)
         return list(self.dependency_bindings.values())
 
+    # --- Model Connections & Persistent Credentials ---
+    def save_model_connection(self, conn: Any) -> None:
+        cid = getattr(conn, "id", None) or (conn.get("id") if isinstance(conn, dict) else None)
+        if cid:
+            self.model_connections[cid] = conn
+
+    def get_model_connection(self, conn_id: str) -> Optional[Any]:
+        return self.model_connections.get(conn_id)
+
+    def list_model_connections(self) -> List[Any]:
+        return list(self.model_connections.values())
+
+    def delete_model_connection(self, conn_id: str) -> None:
+        if conn_id in self.model_connections:
+            del self.model_connections[conn_id]
+
+
 
     # --- Execution Jobs ---
     def save_execution_job(self, job: ExecutionJob):
@@ -1875,8 +1934,10 @@ class Store:
         return list(self.ai_generation_runs.values())
 
     # --- Kaggle-Style Execution Sessions & Trajectories ---
-    def save_execution_session(self, session: ExecutionSession):
-        self.execution_sessions[session.id] = session
+    def save_execution_session(self, session: Any):
+        sid = getattr(session, "id", None) or (session.get("id") if isinstance(session, dict) else None)
+        if sid:
+            self.execution_sessions[sid] = session
 
     def get_execution_session(self, session_id: str) -> Optional[ExecutionSession]:
         return self.execution_sessions.get(session_id)
@@ -2153,6 +2214,78 @@ class Store:
         if agent_id:
             test_cases = [tc for tc in test_cases if getattr(tc, "agent_id", None) == agent_id]
         return sorted(test_cases, key=lambda x: getattr(x, "created_at", ""), reverse=True)
+
+    # --- User-Scoped Agent Configurations ---
+    def save_agent_configuration(self, cfg: AgentConfigurationRecord) -> None:
+        key = f"{cfg.user_id}:{cfg.agent_id}"
+        self.agent_configurations[key] = cfg
+
+    def get_agent_configuration(self, user_id: str, agent_id: str) -> Optional[AgentConfigurationRecord]:
+        key = f"{user_id}:{agent_id}"
+        if key in self.agent_configurations:
+            return self.agent_configurations[key]
+        for cfg in self.agent_configurations.values():
+            if getattr(cfg, "user_id", None) == user_id and getattr(cfg, "agent_id", None) == agent_id:
+                return cfg
+        return None
+
+    # --- User-Scoped Agent Encrypted Credentials ---
+    def save_agent_credential(self, cred: AgentCredentialRecord) -> None:
+        key = f"{cred.user_id}:{cred.agent_id}:{cred.credential_name.upper()}"
+        self.agent_credentials[key] = cred
+
+    def get_agent_credential(self, user_id: str, agent_id: str, credential_name: str) -> Optional[AgentCredentialRecord]:
+        key = f"{user_id}:{agent_id}:{credential_name.upper()}"
+        if key in self.agent_credentials:
+            return self.agent_credentials[key]
+        for cred in self.agent_credentials.values():
+            if (getattr(cred, "user_id", None) == user_id and 
+                getattr(cred, "agent_id", None) == agent_id and 
+                getattr(cred, "credential_name", "").upper() == credential_name.upper()):
+                return cred
+        return None
+
+    def list_agent_credentials(self, user_id: str, agent_id: str) -> List[AgentCredentialRecord]:
+        creds = []
+        for cred in self.agent_credentials.values():
+            if getattr(cred, "user_id", None) == user_id and getattr(cred, "agent_id", None) == agent_id:
+                creds.append(cred)
+        return creds
+
+    def delete_agent_credential(self, user_id: str, agent_id: str, credential_name: str) -> None:
+        key = f"{user_id}:{agent_id}:{credential_name.upper()}"
+        if key in self.agent_credentials:
+            del self.agent_credentials[key]
+        else:
+            to_del = []
+            for k, c in self.agent_credentials.items():
+                if (getattr(c, "user_id", None) == user_id and 
+                    getattr(c, "agent_id", None) == agent_id and 
+                    getattr(c, "credential_name", "").upper() == credential_name.upper()):
+                    to_del.append(k)
+            for k in to_del:
+                del self.agent_credentials[k]
+
+    # --- User-Scoped Agent Setup States ---
+    def save_agent_setup_state(self, state: AgentSetupStateRecord) -> None:
+        key = f"{state.user_id}:{state.agent_id}"
+        self.agent_setup_states[key] = state
+
+    def get_agent_setup_state(self, user_id: str, agent_id: str) -> Optional[AgentSetupStateRecord]:
+        key = f"{user_id}:{agent_id}"
+        if key in self.agent_setup_states:
+            return self.agent_setup_states[key]
+        for s in self.agent_setup_states.values():
+            if getattr(s, "user_id", None) == user_id and getattr(s, "agent_id", None) == agent_id:
+                return s
+        return None
+
+    def invalidate_agent_setup_state(self, user_id: str, agent_id: str) -> None:
+        st = self.get_agent_setup_state(user_id, agent_id)
+        if st:
+            st.setup_status = "STALE"
+            st.preflight_status = "STALE"
+            self.save_agent_setup_state(st)
 
 store = Store()
 

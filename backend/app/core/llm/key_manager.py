@@ -1,321 +1,271 @@
 """
-Unified Key Manager & AI Rotation Provider.
-Supports dynamic loading of AI_API_KEY_1..AI_API_KEY_n, OPENROUTER_API_KEY, GEMINI_API_KEY,
-Ollama Local Server, and Least-Recently-Used (LRU) round-robin key rotation.
+ForgeX Enterprise Smart Priority Rotation & AI Key Pool Manager.
+
+Architecture:
+1. Three strictly isolated pools:
+   - Pool A: Platform AI (AI_API_KEY_1..N) -> Intake, Scenarios, Observer, Repair.
+   - Pool B: Meta Evaluator (META_EVALUATOR_API_KEY_1..N) -> Independent judgment.
+   - Pool C: Target Agent Credentials (TEST_AI_API_KEY_1..N) -> Sandboxed execution.
+2. Dynamic Discovery: Non-contiguous indexing (1, 2, 4, 6...) dynamically discovered.
+3. Strict Priority Scanning: Every new logical operation starts scanning from Priority 1.
+4. Fine-Grained Error Classification & Smart Cooldown:
+   - 401 (AUTH_FAILED) -> Disable key
+   - 402 (QUOTA_EXHAUSTED) -> 1h cooldown
+   - 429 (RATE_LIMITED) -> 30-120s cooldown
+   - 400 (REQUEST_INVALID) -> Fatal: Do not rotate blindly!
+   - 404 (MODEL_NOT_FOUND) -> Rotate candidate
+   - 408/500 (TIMEOUT/SERVER_ERROR) -> Retry once -> rotate
+   - 502/503/504 (SERVICE_UNAVAILABLE) -> 30s cooldown -> rotate
+5. Fallback: Ollama Local Server as last-resort fallback for Platform AI.
+6. Zero Secret Leakage: Logs and ProviderAttempt records use safe identifiers (e.g. AI_API_KEY_1), NEVER raw secrets.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import time
+import urllib.request
 import logging
+import datetime as dt
+from enum import Enum
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 
+def _now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+class CandidateState(str, Enum):
+    ACTIVE = "ACTIVE"
+    COOLDOWN = "COOLDOWN"
+    DISABLED = "DISABLED"
+    EXHAUSTED = "EXHAUSTED"
+    INVALID = "INVALID"
+
+
+class ErrorClassification(str, Enum):
+    KEY_MISSING = "KEY_MISSING"
+    AUTH_FAILED = "AUTH_FAILED"                 # 401: Invalid / auth failure
+    PERMISSION_DENIED = "PERMISSION_DENIED"     # 403: Forbidden / model permission
+    QUOTA_EXHAUSTED = "QUOTA_EXHAUSTED"         # 402: Credits / payment required
+    RATE_LIMITED = "RATE_LIMITED"               # 429: Rate limit
+    REQUEST_INVALID = "REQUEST_INVALID"         # 400: Bad Request (DO NOT ROTATE)
+    MODEL_NOT_FOUND = "MODEL_NOT_FOUND"         # 404: Model or endpoint not found
+    TIMEOUT = "TIMEOUT"                         # 408: Timeout (retry once -> rotate)
+    CONFLICT = "CONFLICT"                       # 409: Conflict (state/request issue)
+    SERVER_ERROR = "SERVER_ERROR"               # 500: Server error (retry once -> rotate)
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE" # 502/503/504: Service unavailable
+    NETWORK_ERROR = "NETWORK_ERROR"             # Network unreachable
+    MALFORMED_RESPONSE = "MALFORMED_RESPONSE"   # Output JSON unparseable
+    SUCCESS = "SUCCESS"
+
+
 @dataclass
-class AIKey:
-    key_id: str
-    value: str
-    api_name: str
-    model_name: str
-    priority: int = 100
-    is_active: bool = True
+class ProviderAttempt:
+    provider: str
+    model: str
+    key_id: str                      # e.g., "AI_API_KEY_1" (NEVER the raw secret!)
+    priority: int
+    status: str                      # "SUCCESS", "RETRY", "ROTATED", "FATAL_ERROR", "EXHAUSTED"
+    started_at: str
+    finished_at: str
+    error_code: Optional[int] = None
+    error_type: Optional[str] = None
+    cooldown_until: Optional[float] = None
+    attempt_number: int = 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "key_id": self.key_id,
+            "priority": self.priority,
+            "status": self.status,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error_code": self.error_code,
+            "error_type": self.error_type,
+            "attempt_number": self.attempt_number
+        }
+
+
+def _is_valid_key_val(val: str) -> bool:
+    if not val or not isinstance(val, str):
+        return False
+    clean = val.strip().lower()
+    if clean.startswith("your_") or clean.endswith("_here") or "your_key" in clean or clean in ("placeholder", "none", "null", "undefined", ""):
+        return False
+    return True
+
+
+@dataclass
+class PlatformCandidate:
+    key_id: str                      # Identifier like "AI_API_KEY_1"
+    raw_value: str                   # Actual secret (kept in memory, NEVER exposed in logs/attempts)
+    provider: str                    # "openrouter", "gemini", "openai", "groq", "ollama"
+    model: str                       # e.g. "openai/gpt-4o-mini"
+    priority: int                    # 1, 2, 4, 6...
+    state: CandidateState = CandidateState.ACTIVE
     cooldown_until: float = 0.0
     failure_count: int = 0
     total_calls: int = 0
-    total_tokens: int = 0
     last_used_at: float = 0.0
-    consecutive_successes: int = 0
 
     @property
     def is_available(self) -> bool:
-        return self.is_active and time.time() >= self.cooldown_until
+        if self.state in (CandidateState.DISABLED, CandidateState.INVALID):
+            return False
+        if self.state in (CandidateState.COOLDOWN, CandidateState.EXHAUSTED):
+            if time.time() >= self.cooldown_until:
+                # Cooldown expired -> restore to active!
+                self.state = CandidateState.ACTIVE
+                self.cooldown_until = 0.0
+                self.failure_count = 0
+                return True
+            return False
+        return self.state == CandidateState.ACTIVE
 
-
-class UnifiedKeyManager:
-    """Manages all registered AI API keys with strict sequential priority (1 -> 2 -> 3...), cooldowns, and stage-specific fallbacks."""
-    _instance: Optional[UnifiedKeyManager] = None
-
-    def __new__(cls) -> UnifiedKeyManager:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.keys = []
-            cls._instance.meta_keys = []
-            cls._instance.load_keys()
-        return cls._instance
-
-    def load_keys(self) -> None:
-        """Loads all AI API keys dynamically from environment variables in strict priority order."""
-        load_dotenv(override=True)
-        self.keys.clear()
-        self.meta_keys.clear()
-        
-        # 1. Load universal AI_API_KEY_n format for the 4 Platform Stages in strict priority order (1, 2, 3...)
-        for index in range(1, 100):
-            value = os.getenv(f"AI_API_KEY_{index}", "").strip()
-            if not value:
-                continue
-            api_name = os.getenv(f"AI_API_NAME_{index}", "gemini").strip().lower()
-            model_name = os.getenv(f"AI_MODEL_{index}", "").strip()
-            if not model_name:
-                model_name = "gemini-3.6-flash" if api_name in ("gemini", "google") else "openai/gpt-4o-mini"
-
-            if not any(k.value == value for k in self.keys):
-                display_id = f"AI API Key {index}"
-                self.keys.append(AIKey(
-                    key_id=display_id,
-                    value=value,
-                    api_name=api_name,
-                    model_name=model_name,
-                    priority=index
-                ))
-                logger.info(f"Registered {display_id} (priority={index}, {api_name} - {model_name})")
-
-        # 2. Legacy fallback for GEMINI_API_KEY and GEMINI_API_KEY_n
-        gemini_main = os.getenv("GEMINI_API_KEY", "").strip()
-        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
-
-        if gemini_main and not any(k.value == gemini_main for k in self.keys):
-            self.keys.append(AIKey(
-                key_id="Gemini Legacy Key Main",
-                value=gemini_main,
-                api_name="gemini",
-                model_name=gemini_model,
-                priority=100
-            ))
-            logger.info(f"Registered GEMINI_API_KEY as 'Gemini Legacy Key Main' ({gemini_model})")
-
-        for idx in range(1, 10):
-            gemini_val = os.getenv(f"GEMINI_API_KEY_{idx}", "").strip()
-            if gemini_val and not any(k.value == gemini_val for k in self.keys):
-                self.keys.append(AIKey(
-                    key_id=f"Gemini Legacy Key {idx}",
-                    value=gemini_val,
-                    api_name="gemini",
-                    model_name=gemini_model,
-                    priority=100 + idx
-                ))
-
-        # 3. Fallback for OPENROUTER_API_KEY
-        openrouter_main = os.getenv("OPENROUTER_API_KEY", "").strip()
-        openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip()
-        if openrouter_main and not any(k.value == openrouter_main for k in self.keys):
-            self.keys.append(AIKey(
-                key_id="OpenRouter Main Key",
-                value=openrouter_main,
-                api_name="openrouter",
-                model_name=openrouter_model,
-                priority=200
-            ))
-
-        # 4. Fallback for GROQ_API_KEY
-        groq_main = os.getenv("GROQ_API_KEY", "").strip()
-        groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
-        if groq_main and not any(k.value == groq_main for k in self.keys):
-            self.keys.append(AIKey(
-                key_id="Groq Main Key",
-                value=groq_main,
-                api_name="groq",
-                model_name=groq_model,
-                priority=250
-            ))
-            logger.info(f"Registered GROQ_API_KEY as 'Groq Main Key' ({groq_model})")
-
-        # 5. Ollama Local Endpoint for Stage Fallbacks
-        ollama_endpoint = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")).strip()
-        from app.core.llm.providers import discover_active_ollama_model
-        discovered_model = discover_active_ollama_model(ollama_endpoint)
-        ollama_model = os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", discovered_model or "qwen2.5-coder:7b")).strip()
-        self.keys.append(AIKey(
-            key_id="Ollama Local Server",
-            value=ollama_endpoint,
-            api_name="ollama",
-            model_name=ollama_model
-        ))
-        logger.info(f"Registered Ollama Local Server ({ollama_endpoint} - {ollama_model})")
-
-        # Maintain strict priority order (Key 1 -> Key 2 -> Key 3 ...)
-        self.keys.sort(key=lambda k: k.priority)
-
-        # 5. Independent Meta-Evaluator Keys (Rotation Pool + Dedicated Ollama Fallback)
-        for idx in range(1, 20):
-            meta_val = os.getenv(f"META_EVALUATOR_API_KEY_{idx}", "").strip()
-            if not meta_val:
-                continue
-            m_provider = os.getenv(f"META_EVALUATOR_PROVIDER_{idx}", "gemini").strip().lower()
-            m_model = os.getenv(f"META_EVALUATOR_MODEL_{idx}", "gemini-3.6-flash").strip()
-            self.meta_keys.append(AIKey(
-                key_id=f"Meta Evaluator Key {idx}",
-                value=meta_val,
-                api_name=m_provider,
-                model_name=m_model
-            ))
-
-        meta_single = os.getenv("META_EVALUATOR_API_KEY", "").strip()
-        if meta_single and not any(k.value == meta_single for k in self.meta_keys):
-            m_provider = os.getenv("META_EVALUATOR_PROVIDER", "gemini").strip().lower()
-            m_model = os.getenv("META_EVALUATOR_MODEL", "gemini-3.6-flash").strip()
-            self.meta_keys.append(AIKey(
-                key_id="Meta Evaluator Primary Key",
-                value=meta_single,
-                api_name=m_provider,
-                model_name=m_model
-            ))
-
-        # Meta Evaluator Dedicated Local Ollama Fallback
-        meta_ollama_model = os.getenv("META_EVALUATOR_OLLAMA_MODEL", os.getenv("OLLAMA_MODEL", discovered_model or "qwen2.5-coder:3b")).strip()
-        self.meta_keys.append(AIKey(
-            key_id="Meta Evaluator Ollama Fallback",
-            value=ollama_endpoint,
-            api_name="ollama",
-            model_name=meta_ollama_model
-        ))
-        logger.info(f"Registered Meta Evaluator Ollama Fallback ({ollama_endpoint} - {meta_ollama_model})")
-
-    @classmethod
-    def get_stage_fallback_model(cls, stage_name: str) -> str:
-        """Returns the dedicated trainable local model / adapter for a given stage."""
-        stage_clean = stage_name.lower().replace("-", "_")
-        if "intake" in stage_clean or "analysis" in stage_clean:
-            return os.getenv("OLLAMA_INTAKE_MODEL", "qwen2.5-coder:7b").strip()
-        elif "scenario" in stage_clean:
-            return os.getenv("OLLAMA_SCENARIO_MODEL", "qwen2.5-coder:7b").strip()
-        elif "observer" in stage_clean or "execution" in stage_clean:
-            return os.getenv("OLLAMA_OBSERVER_MODEL", "qwen2.5-coder:7b").strip()
-        elif "repair" in stage_clean or "fix" in stage_clean or "improvement" in stage_clean:
-            return os.getenv("OLLAMA_REPAIR_MODEL", "qwen2.5-coder:7b").strip()
-        elif "meta" in stage_clean or "evaluator" in stage_clean or "judge" in stage_clean:
-            return os.getenv("META_EVALUATOR_OLLAMA_MODEL", "qwen2.5-coder:7b").strip()
-        return os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b").strip()
-
-    def select_key(self, api_name: Optional[str] = None) -> Optional[AIKey]:
-        """Selects the best available key using LRU (Least-Recently-Used) round-robin."""
-        return self._select_from_pool(self.keys, api_name)
-
-    def select_meta_key(self, api_name: Optional[str] = None) -> Optional[AIKey]:
-        """Selects the best available key for the independent Meta-Evaluator."""
-        chosen = self._select_from_pool(self.meta_keys, api_name)
-        if chosen is None:
-            # Fallback to general pool if no dedicated meta key configured
-            return self.select_key(api_name)
-        return chosen
-
-    def _select_from_pool(self, pool: List[AIKey], api_name: Optional[str] = None) -> Optional[AIKey]:
+    def apply_failure(self, classification: ErrorClassification, http_code: Optional[int] = None) -> None:
         now = time.time()
+        self.failure_count += 1
 
-        # 1. Reset any keys whose cooldown time has expired
-        for k in pool:
-            if k.cooldown_until > 0 and now >= k.cooldown_until:
-                k.cooldown_until = 0.0
-                k.failure_count = 0
+        if classification == ErrorClassification.AUTH_FAILED or http_code == 401:
+            self.state = CandidateState.INVALID
+            self.cooldown_until = now + 86400.0  # 24 hours disable
+            logger.warning(f"Key '{self.key_id}' ({self.provider}) marked INVALID due to 401 Auth Failure. Skipping in future priority scans.")
 
-        filtered = [
-            k for k in pool
-            if api_name is None or k.api_name.lower() == api_name.lower()
-        ]
+        elif classification == ErrorClassification.QUOTA_EXHAUSTED or http_code == 402:
+            self.state = CandidateState.EXHAUSTED
+            self.cooldown_until = now + 3600.0   # 1 hour cooldown
+            logger.warning(f"Key '{self.key_id}' ({self.provider}) placed on 1-HOUR COOLDOWN due to 402 Credits Exhaustion.")
 
-        # 2. Strict sequential priority selection (Priority 1 -> Priority 2 -> ... -> Fallbacks)
-        sorted_keys = sorted(filtered, key=lambda k: k.priority)
-        for k in sorted_keys:
-            if k.is_available:
-                k.last_used_at = now
-                k.total_calls += 1
-                return k
+        elif classification == ErrorClassification.RATE_LIMITED or http_code == 429:
+            self.state = CandidateState.COOLDOWN
+            self.cooldown_until = now + 60.0     # 60s cooldown
+            logger.warning(f"Key '{self.key_id}' ({self.provider}) placed on 60s COOLDOWN due to 429 Rate Limit.")
 
-        return None
+        elif classification in (ErrorClassification.SERVICE_UNAVAILABLE, ErrorClassification.NETWORK_ERROR) or http_code in (502, 503, 504):
+            self.state = CandidateState.COOLDOWN
+            self.cooldown_until = now + 30.0     # 30s temporary failure cooldown
+            logger.warning(f"Key '{self.key_id}' ({self.provider}) placed on 30s COOLDOWN due to temporary upstream/network outage.")
 
-    def reset_rotation(self) -> None:
-        """Resets cooldowns for active keys so each new user action (intake, scenarios, eval) starts freshly from API Key 1."""
-        self.load_keys()
-        for k in self.keys:
-            if k.is_active:
-                k.cooldown_until = 0.0
-                k.failure_count = 0
-        for k in self.meta_keys:
-            if k.is_active:
-                k.cooldown_until = 0.0
-                k.failure_count = 0
-        logger.info("AI Key Manager: Started fresh from Priority 1 (AI_API_KEY_1)")
+        elif classification == ErrorClassification.MODEL_NOT_FOUND or http_code == 404:
+            self.state = CandidateState.COOLDOWN
+            self.cooldown_until = now + 300.0    # 5 min cooldown for model not found
+            logger.warning(f"Key '{self.key_id}' ({self.provider}) placed on 5m COOLDOWN due to 404 Model Not Found.")
 
-    def report_success(self, key_id: str, tokens: int = 0) -> None:
-        for k in self.keys:
-            if k.key_id == key_id:
-                k.failure_count = 0
-                k.consecutive_successes += 1
-                k.total_tokens += tokens
-                break
+        else:
+            self.state = CandidateState.COOLDOWN
+            self.cooldown_until = now + 30.0
 
-    def mark_key_success(self, key_id: str, tokens: int = 0) -> None:
-        self.report_success(key_id, tokens)
-
-    def report_failure(self, key_id: str, error: Any = None) -> None:
-        now = time.time()
-        for k in self.keys:
-            if k.key_id == key_id:
-                k.failure_count += 1
-                k.consecutive_successes = 0
-                err_type, _ = classify_error(error)
-                if err_type == "AUTHENTICATION_ERROR":
-                    k.is_active = False
-                    k.cooldown_until = now + 86400.0  # Deactivate invalid key for 24h
-                    logger.warning(f"Key '{key_id}' permanently deactivated due to authentication failure (401/Invalid Key). Rotating to next available key.")
-                elif err_type == "QUOTA_EXHAUSTED":
-                    k.cooldown_until = now + 3600.0  # Put exhausted keys on 1h cooldown
-                    logger.warning(f"Key '{key_id}' placed on extended cooldown (1 hour) due to credit/quota exhaustion. Rotating to next available key.")
-                else:
-                    cooldown_secs = 60.0 if err_type == "RATE_LIMITED" else 30.0
-                    k.cooldown_until = now + cooldown_secs
-                    logger.warning(f"Key '{key_id}' placed on cooldown ({cooldown_secs}s) due to failure: {error}")
-                break
+    def report_success(self) -> None:
+        self.state = CandidateState.ACTIVE
+        self.cooldown_until = 0.0
+        self.failure_count = 0
+        self.total_calls += 1
+        self.last_used_at = time.time()
 
 
-    def mark_key_failed(self, key_id: str, error_type: str = "ERROR", error_msg: str = "") -> None:
-        self.report_failure(key_id, f"{error_type}: {error_msg}")
+# Backwards compatibility AIKey dataclass alias
+AIKey = PlatformCandidate
 
 
-class SessionManager:
-    """Helper for managing user / stage AI session keys."""
-    def __init__(self):
-        self.manager = UnifiedKeyManager()
+def classify_error_detail(err: Any) -> Tuple[ErrorClassification, Optional[int]]:
+    """Classifies an exception or HTTP response into ErrorClassification and HTTP status code."""
+    if err is None:
+        return ErrorClassification.SUCCESS, 200
 
-    def get_key(self, api_name: Optional[str] = None) -> Optional[AIKey]:
-        return self.manager.select_key(api_name)
-
-
-def classify_error(err: Any) -> tuple[str, str]:
-    """Classifies an error into (error_type, error_category)."""
     err_str = str(err).lower()
-    if "json" in err_str or "expecting" in err_str or "delimiter" in err_str or "parse" in err_str:
-        return "PARSING_ERROR", "PARSING_ERROR"
-    if "401" in err_str or "unauthenticated" in err_str or "unauthorized" in err_str or "invalid api key" in err_str or "invalid_api_key" in err_str:
+    http_code: Optional[int] = None
+
+    # Check for HTTP status code attributes
+    if hasattr(err, "status_code"):
+        try: http_code = int(err.status_code)
+        except Exception: pass
+    elif hasattr(err, "response") and hasattr(err.response, "status_code"):
+        try: http_code = int(err.response.status_code)
+        except Exception: pass
+
+    # Extract code from message string if available
+    if http_code is None:
+        match = re.search(r"\b(400|401|402|403|404|408|409|429|500|502|503|504)\b", err_str)
+        if match:
+            http_code = int(match.group(1))
+
+    # Detailed classification matrix
+    if http_code == 400 or "bad request" in err_str or "invalid_request" in err_str or "invalid json schema" in err_str:
+        return ErrorClassification.REQUEST_INVALID, http_code or 400
+
+    if http_code == 401 or "unauthenticated" in err_str or "unauthorized" in err_str or "invalid api key" in err_str or "invalid_api_key" in err_str:
+        return ErrorClassification.AUTH_FAILED, http_code or 401
+
+    if http_code == 402 or "credits" in err_str or "payment required" in err_str or "quota exhausted" in err_str or "credit limit" in err_str:
+        return ErrorClassification.QUOTA_EXHAUSTED, http_code or 402
+
+    if http_code == 403 or "forbidden" in err_str or "permission denied" in err_str:
+        return ErrorClassification.PERMISSION_DENIED, http_code or 403
+
+    if http_code == 404 or "model not found" in err_str or "not found" in err_str or "unknown model" in err_str:
+        return ErrorClassification.MODEL_NOT_FOUND, http_code or 404
+
+    if http_code == 408 or "timeout" in err_str or "timed out" in err_str:
+        return ErrorClassification.TIMEOUT, http_code or 408
+
+    if http_code == 409 or "conflict" in err_str:
+        return ErrorClassification.CONFLICT, http_code or 409
+
+    if http_code == 429 or "rate limit" in err_str or "resource_exhausted" in err_str or "too many requests" in err_str:
+        return ErrorClassification.RATE_LIMITED, http_code or 429
+
+    if http_code == 500 or "internal server error" in err_str:
+        return ErrorClassification.SERVER_ERROR, http_code or 500
+
+    if http_code in (502, 503, 504) or "bad gateway" in err_str or "service unavailable" in err_str or "gateway timeout" in err_str:
+        return ErrorClassification.SERVICE_UNAVAILABLE, http_code or 503
+
+    if "network" in err_str or "connection refused" in err_str or "unreachable" in err_str:
+        return ErrorClassification.NETWORK_ERROR, None
+
+    if "json" in err_str or "expecting value" in err_str or "parse error" in err_str:
+        return ErrorClassification.MALFORMED_RESPONSE, None
+
+    return ErrorClassification.NETWORK_ERROR if "connect" in err_str else ErrorClassification.SERVER_ERROR, http_code
+
+
+def classify_error(err: Any) -> Tuple[str, str]:
+    """Compatibility wrapper returning (error_type, error_category)."""
+    classification, _ = classify_error_detail(err)
+    if classification == ErrorClassification.AUTH_FAILED:
         return "AUTHENTICATION_ERROR", "AUTHENTICATION_ERROR"
-    if "402" in err_str or "credits" in err_str or "payment required" in err_str:
+    elif classification == ErrorClassification.QUOTA_EXHAUSTED:
         return "QUOTA_EXHAUSTED", "RATE_LIMITED"
-    if "429" in err_str or "quota" in err_str or "rate limit" in err_str or "rate_limit" in err_str or "resource_exhausted" in err_str:
+    elif classification == ErrorClassification.RATE_LIMITED:
         return "RATE_LIMITED", "RATE_LIMITED"
-    if "504" in err_str or "gateway" in err_str or "timeout" in err_str or "timed out" in err_str:
-        return "SERVER_ERROR", "SERVER_ERROR"
-    if "404" in err_str or "not found" in err_str:
+    elif classification == ErrorClassification.REQUEST_INVALID:
+        return "INVALID_REQUEST", "FATAL"
+    elif classification == ErrorClassification.MODEL_NOT_FOUND:
         return "MODEL_NOT_FOUND", "MODEL_NOT_FOUND"
+    elif classification in (ErrorClassification.SERVER_ERROR, ErrorClassification.SERVICE_UNAVAILABLE, ErrorClassification.TIMEOUT):
+        return "SERVER_ERROR", "SERVER_ERROR"
+    elif classification == ErrorClassification.MALFORMED_RESPONSE:
+        return "PARSING_ERROR", "PARSING_ERROR"
     return "UNKNOWN", "UNKNOWN"
 
 
 def is_rotation_eligible(err: Any) -> bool:
-    if isinstance(err, tuple):
-        category = err[1]
-    else:
-        category = str(err)
-    return category in ("RATE_LIMITED", "SERVER_ERROR", "AUTHENTICATION_ERROR", "PARSING_ERROR", "UNKNOWN")
+    """Returns True if the error warrants rotating to the next candidate (not a fatal 400 request error)."""
+    classification, _ = classify_error_detail(err)
+    return classification not in (ErrorClassification.REQUEST_INVALID, ErrorClassification.CONFLICT)
 
 
 def is_ollama_reachable(url: str = "http://localhost:11434") -> bool:
-    """Synchronous fast check to verify whether local Ollama server is listening and reachable."""
-    import urllib.request
+    """Synchronous fast check to verify whether local Ollama server is listening."""
     clean_url = url.rstrip("/")
     if not clean_url.startswith("http"):
         clean_url = f"http://{clean_url}"
@@ -327,53 +277,269 @@ def is_ollama_reachable(url: str = "http://localhost:11434") -> bool:
         return False
 
 
+# ============================================================================
+# POOL A — PLATFORM AI POOL (Intake, Scenarios, Observer, Repair)
+# ============================================================================
+
+class PlatformAIPool:
+    """Manages AI_API_KEY_1..N priority pool with non-contiguous indexing and smart rotation."""
+    def __init__(self):
+        self.candidates: List[PlatformCandidate] = []
+        self.ollama_candidate: Optional[PlatformCandidate] = None
+        self.load_pool()
+
+    def load_pool(self) -> None:
+        load_dotenv(override=True)
+        self.candidates.clear()
+
+        # Dynamically discover all AI_API_KEY_N (scanning 1 to 100 for non-contiguous gaps)
+        for index in range(1, 100):
+            val = os.getenv(f"AI_API_KEY_{index}", "").strip()
+            if not _is_valid_key_val(val):
+                continue
+            api_name = os.getenv(f"AI_API_NAME_{index}", "openrouter").strip().lower()
+            model_name = os.getenv(f"AI_MODEL_{index}", "").strip()
+            if not model_name:
+                model_name = "gemini-3.6-flash" if api_name in ("gemini", "google") else "openai/gpt-4o-mini"
+
+            # Key ID is safe identifier: e.g. "AI_API_KEY_1"
+            display_id = f"AI_API_KEY_{index}"
+            self.candidates.append(PlatformCandidate(
+                key_id=display_id,
+                raw_value=val,
+                provider=api_name,
+                model=model_name,
+                priority=index
+            ))
+            logger.debug(f"[Pool A] Discovered {display_id} (Priority {index}, {api_name} - {model_name})")
+
+        # Register direct provider alias keys (OPENROUTER_API_KEY, GEMINI_API_KEY, GROQ_API_KEY) if not already added
+        openrouter_direct = os.getenv("OPENROUTER_API_KEY", "").strip()
+        openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip()
+        if _is_valid_key_val(openrouter_direct) and not any(c.raw_value == openrouter_direct for c in self.candidates):
+            self.candidates.append(PlatformCandidate(
+                key_id="OPENROUTER_DIRECT_KEY",
+                raw_value=openrouter_direct,
+                provider="openrouter",
+                model=openrouter_model,
+                priority=100
+            ))
+
+        gemini_direct = os.getenv("GEMINI_API_KEY", "").strip()
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+        if _is_valid_key_val(gemini_direct) and not any(c.raw_value == gemini_direct for c in self.candidates):
+            self.candidates.append(PlatformCandidate(
+                key_id="GEMINI_DIRECT_KEY",
+                raw_value=gemini_direct,
+                provider="gemini",
+                model=gemini_model,
+                priority=101
+            ))
+
+        # Sort strictly by priority index (1 -> 2 -> 4 -> 5 -> 6... -> 100)
+        self.candidates.sort(key=lambda c: c.priority)
+
+        # Register dedicated Ollama fallback
+        ollama_endpoint = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")).strip()
+        from app.core.llm.providers import discover_active_ollama_model
+        disc_model = discover_active_ollama_model(ollama_endpoint)
+        ollama_model = os.getenv("OLLAMA_MODEL", disc_model or "qwen2.5-coder:3b").strip()
+
+        self.ollama_candidate = PlatformCandidate(
+            key_id="Ollama_Local_Fallback",
+            raw_value=ollama_endpoint,
+            provider="ollama",
+            model=ollama_model,
+            priority=9999
+        )
+
+    def get_ordered_candidates(self) -> List[PlatformCandidate]:
+        """Always returns candidates in strict priority order starting from Priority 1."""
+        now = time.time()
+        # Reset any expired cooldowns
+        for c in self.candidates:
+            if c.cooldown_until > 0 and now >= c.cooldown_until:
+                c.state = CandidateState.ACTIVE
+                c.cooldown_until = 0.0
+                c.failure_count = 0
+        return list(self.candidates)
+
+
+# ============================================================================
+# POOL B — META EVALUATOR POOL (Meta Evaluator Judging)
+# ============================================================================
+
+class MetaEvaluatorPool:
+    """Manages META_EVALUATOR_API_KEY_1..N priority pool independently."""
+    def __init__(self):
+        self.candidates: List[PlatformCandidate] = []
+        self.ollama_candidate: Optional[PlatformCandidate] = None
+        self.load_pool()
+
+    def load_pool(self) -> None:
+        load_dotenv(override=True)
+        self.candidates.clear()
+
+        for index in range(1, 30):
+            val = os.getenv(f"META_EVALUATOR_API_KEY_{index}", "").strip()
+            if not _is_valid_key_val(val):
+                continue
+            provider = os.getenv(f"META_EVALUATOR_PROVIDER_{index}", "gemini").strip().lower()
+            model = os.getenv(f"META_EVALUATOR_MODEL_{index}", "gemini-3.6-flash").strip()
+            display_id = f"META_EVALUATOR_API_KEY_{index}"
+            self.candidates.append(PlatformCandidate(
+                key_id=display_id,
+                raw_value=val,
+                provider=provider,
+                model=model,
+                priority=index
+            ))
+
+        meta_single = os.getenv("META_EVALUATOR_API_KEY", "").strip()
+        if _is_valid_key_val(meta_single) and not any(c.raw_value == meta_single for c in self.candidates):
+            provider = os.getenv("META_EVALUATOR_PROVIDER", "gemini").strip().lower()
+            model = os.getenv("META_EVALUATOR_MODEL", "gemini-3.6-flash").strip()
+            self.candidates.append(PlatformCandidate(
+                key_id="META_EVALUATOR_PRIMARY_KEY",
+                raw_value=meta_single,
+                provider=provider,
+                model=model,
+                priority=100
+            ))
+
+        self.candidates.sort(key=lambda c: c.priority)
+
+        ollama_endpoint = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
+        meta_ollama_model = os.getenv("META_EVALUATOR_OLLAMA_MODEL", "qwen2.5-coder:3b").strip()
+        self.ollama_candidate = PlatformCandidate(
+            key_id="Meta_Evaluator_Ollama_Fallback",
+            raw_value=ollama_endpoint,
+            provider="ollama",
+            model=meta_ollama_model,
+            priority=9999
+        )
+
+    def get_ordered_candidates(self) -> List[PlatformCandidate]:
+        now = time.time()
+        for c in self.candidates:
+            if c.cooldown_until > 0 and now >= c.cooldown_until:
+                c.state = CandidateState.ACTIVE
+                c.cooldown_until = 0.0
+                c.failure_count = 0
+        return list(self.candidates)
+
+
+# ============================================================================
+# UNIFIED KEY MANAGER (Global Singleton Facade)
+# ============================================================================
+
+class UnifiedKeyManager:
+    _instance: Optional[UnifiedKeyManager] = None
+
+    def __new__(cls) -> UnifiedKeyManager:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance.platform_pool = PlatformAIPool()
+            cls._instance.meta_pool = MetaEvaluatorPool()
+        return cls._instance
+
+    @property
+    def keys(self) -> List[PlatformCandidate]:
+        # Return platform candidates + ollama fallback
+        res = list(self.platform_pool.candidates)
+        if self.platform_pool.ollama_candidate:
+            res.append(self.platform_pool.ollama_candidate)
+        return res
+
+    @property
+    def meta_keys(self) -> List[PlatformCandidate]:
+        res = list(self.meta_pool.candidates)
+        if self.meta_pool.ollama_candidate:
+            res.append(self.meta_pool.ollama_candidate)
+        return res
+
+    def load_keys(self) -> None:
+        self.platform_pool.load_pool()
+        self.meta_pool.load_pool()
+
+    def select_key(self, api_name: Optional[str] = None) -> Optional[PlatformCandidate]:
+        """Selects the first available candidate starting strictly from Priority 1."""
+        now = time.time()
+        for c in self.platform_pool.get_ordered_candidates():
+            if (api_name is None or c.provider.lower() == api_name.lower()) and c.is_available:
+                c.last_used_at = now
+                c.total_calls += 1
+                return c
+
+        # If all cloud candidates exhausted, check if Ollama is available
+        if (api_name is None or api_name.lower() == "ollama") and self.platform_pool.ollama_candidate:
+            if is_ollama_reachable(self.platform_pool.ollama_candidate.raw_value):
+                return self.platform_pool.ollama_candidate
+
+        return None
+
+    def select_meta_key(self, api_name: Optional[str] = None) -> Optional[PlatformCandidate]:
+        """Selects the first available meta evaluator candidate starting strictly from Priority 1."""
+        now = time.time()
+        for c in self.meta_pool.get_ordered_candidates():
+            if (api_name is None or c.provider.lower() == api_name.lower()) and c.is_available:
+                c.last_used_at = now
+                c.total_calls += 1
+                return c
+
+        if (api_name is None or api_name.lower() == "ollama") and self.meta_pool.ollama_candidate:
+            if is_ollama_reachable(self.meta_pool.ollama_candidate.raw_value):
+                return self.meta_pool.ollama_candidate
+
+        return None
+
+    def mark_key_success(self, key_id: str, tokens: int = 0) -> None:
+        for c in self.keys:
+            if c.key_id == key_id:
+                c.report_success()
+                break
+
+    def mark_key_failed(self, key_id: str, error_type: str = "ERROR", error_msg: str = "") -> None:
+        classification, http_code = classify_error_detail(f"{error_type}: {error_msg}")
+        for c in self.keys:
+            if c.key_id == key_id:
+                c.apply_failure(classification, http_code)
+                break
+
+    def reset_rotation(self) -> None:
+        """Every new logical operation starts fresh from Priority 1 or local Ollama."""
+        self.load_keys()
+        cloud_count = len(self.platform_pool.candidates)
+        if cloud_count > 0:
+            logger.info(f"AI Key Manager: Started fresh from Priority 1 ({self.platform_pool.candidates[0].key_id}) across {cloud_count} cloud candidate(s)")
+        else:
+            logger.info("AI Key Manager: No cloud API keys configured. Directly using local Ollama instance.")
+
+
+class SessionManager:
+    def __init__(self):
+        self.manager = UnifiedKeyManager()
+
+    def get_key(self, api_name: Optional[str] = None) -> Optional[PlatformCandidate]:
+        return self.manager.select_key(api_name)
+
+
+# ============================================================================
+# POOL C — TEST AGENT CREDENTIALS POOL (Sandboxed Execution Environment)
+# ============================================================================
+
 class TestAgentKeyManager:
-    """Provides active AI and tool credentials for sandboxed test agents with multi-provider aliasing and local fallback."""
+    """Manages active AI & tool credentials for sandboxed test agents strictly according to execution mode."""
     def __init__(self):
         self.mgr = UnifiedKeyManager()
 
     def get_active_test_credentials(self) -> Dict[str, str]:
         creds: Dict[str, str] = {}
-        
-        # 1. Check direct env keys (single keys, highest fidelity)
-        for k in ["OPENAI_API_KEY", "GEMINI_API_KEY", "TEST_AGENT_GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY", "NEWS_API_KEY", "STRIPE_TEST_KEY", "SERPER_API_KEY", "WEATHER_API_KEY"]:
-            val = os.getenv(k, "").strip()
-            if val and not val.startswith("your_") and not val.endswith("_here"):
-                creds[k] = val
 
-        # 1.5. Check TAVILY_API_KEY_1..N rotation pool (like AI key rotation)
-        for idx in range(1, 20):
-            val = os.getenv(f"TAVILY_API_KEY_{idx}", "").strip()
-            if not val or val.startswith("your_") or val.endswith("_here"):
-                continue
-            if "TAVILY_API_KEY" not in creds:
-                creds["TAVILY_API_KEY"] = val
-                logger.info(f"Registered TAVILY_API_KEY_{idx} as active Tavily key (priority={idx})")
-            # Keep first found (lowest index = highest priority)
-            break
-
-        # 1.6. Check NEWS_API_KEY_1..N rotation pool
-        for idx in range(1, 20):
-            val = os.getenv(f"NEWS_API_KEY_{idx}", "").strip()
-            if not val or val.startswith("your_") or val.endswith("_here"):
-                continue
-            if "NEWS_API_KEY" not in creds:
-                creds["NEWS_API_KEY"] = val
-            break
-
-        # 1.7. Check SERPER_API_KEY_1..N rotation pool
-        for idx in range(1, 20):
-            val = os.getenv(f"SERPER_API_KEY_{idx}", "").strip()
-            if not val or val.startswith("your_") or val.endswith("_here"):
-                continue
-            if "SERPER_API_KEY" not in creds:
-                creds["SERPER_API_KEY"] = val
-            break
-
-        # 2. Check TEST_AI_API_KEY_1..10 specifically configured for test agents
-        for idx in range(1, 11):
+        # 1. Discover TEST_AI_API_KEY_1..N
+        for idx in range(1, 30):
             val = os.getenv(f"TEST_AI_API_KEY_{idx}", "").strip()
-            if not val or val.startswith("your_"):
+            if not _is_valid_key_val(val):
                 continue
             p_name = os.getenv(f"TEST_AI_API_NAME_{idx}", "gemini").strip().lower()
             if p_name in ("gemini", "google") and "GEMINI_API_KEY" not in creds:
@@ -386,35 +552,36 @@ class TestAgentKeyManager:
             elif p_name == "openai" and "OPENAI_API_KEY" not in creds:
                 creds["OPENAI_API_KEY"] = val
 
-        # 3. Check UnifiedKeyManager keys from platform rotation pool
-        for key in self.mgr.keys:
-            if key.is_active and key.value and not key.value.startswith("your_"):
-                if key.api_name in ("gemini", "google") and "GEMINI_API_KEY" not in creds:
-                    creds["GEMINI_API_KEY"] = key.value
-                    creds["TEST_AGENT_GEMINI_API_KEY"] = key.value
-                elif key.api_name == "openrouter":
-                    if "OPENROUTER_API_KEY" not in creds:
-                        creds["OPENROUTER_API_KEY"] = key.value
-                elif key.api_name == "groq":
-                    if "GROQ_API_KEY" not in creds:
-                        creds["GROQ_API_KEY"] = key.value
-                elif key.api_name == "openai" and "OPENAI_API_KEY" not in creds:
-                    creds["OPENAI_API_KEY"] = key.value
-
-        # 4. OpenAI Compatibility Aliasing (LangChain / CrewAI agents expecting OPENAI_API_KEY)
-        if "OPENAI_API_KEY" not in creds:
-            if "OPENROUTER_API_KEY" in creds:
-                creds["OPENAI_API_KEY"] = creds["OPENROUTER_API_KEY"]
-                creds["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
-            elif "GROQ_API_KEY" in creds:
-                creds["OPENAI_API_KEY"] = creds["GROQ_API_KEY"]
-                creds["OPENAI_BASE_URL"] = "https://api.groq.com/openai/v1"
+        # 2. Tool APIs with rotation pools
+        for tool_name in ["TAVILY_API_KEY", "NEWS_API_KEY", "SERPER_API_KEY", "WEATHER_API_KEY", "STRIPE_TEST_KEY"]:
+            direct_val = os.getenv(tool_name, "").strip()
+            if _is_valid_key_val(direct_val):
+                creds[tool_name] = direct_val
             else:
-                # Only use local Ollama if server is actually running & reachable
-                ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-                if is_ollama_reachable(ollama_url):
-                    creds["OPENAI_API_KEY"] = "ollama"
-                    creds["OPENAI_BASE_URL"] = f"{ollama_url}/v1"
+                for idx in range(1, 20):
+                    val = os.getenv(f"{tool_name}_{idx}", "").strip()
+                    if _is_valid_key_val(val):
+                        creds[tool_name] = val
+                        break
+
+        # 3. Direct cloud aliases (if not already set)
+        for k in ["OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY"]:
+            if k not in creds:
+                val = os.getenv(k, "").strip()
+                if _is_valid_key_val(val):
+                    creds[k] = val
+
+        # 4. OpenAI Compatibility Base URLs (LangChain / CrewAI agents)
+        if "OPENAI_API_KEY" in creds:
+            if "OPENROUTER_API_KEY" in creds and creds["OPENAI_API_KEY"] == creds["OPENROUTER_API_KEY"]:
+                creds["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+            elif "GROQ_API_KEY" in creds and creds["OPENAI_API_KEY"] == creds["GROQ_API_KEY"]:
+                creds["OPENAI_BASE_URL"] = "https://api.groq.com/openai/v1"
+        else:
+            # Check if local Ollama server is reachable for local fallback
+            ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+            if is_ollama_reachable(ollama_url):
+                creds["OPENAI_API_KEY"] = "ollama"
+                creds["OPENAI_BASE_URL"] = f"{ollama_url}/v1"
 
         return creds
-

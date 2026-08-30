@@ -300,6 +300,7 @@ class TraceEvent(BaseModel):
     role: str  # "user", "agent_thought", "agent_message", "tool_call", "tool_result", "security_alert", "fault_injected"
     content: str
     tool_call: Optional[ToolCallRecord] = None
+    step_id: Optional[str] = None
 
 
 class ExecutionTrace(BaseModel):

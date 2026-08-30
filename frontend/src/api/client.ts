@@ -2435,5 +2435,118 @@ export async function runAutomaticSetup(agentId: string): Promise<SetupReadiness
   return res.json();
 }
 
+// ============================================================================
+// Multi-User Persistent Agent Configuration & Encrypted Credentials
+// ============================================================================
+
+export interface AgentConfigurationRecord {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  execution_mode: string;
+  selected_provider: string;
+  selected_model: string;
+  configuration_json: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CredentialStatusItem {
+  credential_name: string;
+  credential_type: string;
+  provider: string;
+  configured: boolean;
+  validation_status: string;
+  source: string;
+  masked?: string;
+  last_validated_at?: string;
+  is_required: boolean;
+  hint?: string;
+}
+
+export interface AgentSetupStateRecord {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  setup_status: string;
+  preflight_status: string;
+  requirements_json: any[];
+  resolved_dependencies_json: any[];
+  blockers_json: string[];
+  last_checked_at: string;
+}
+
+export async function getAgentConfiguration(agentId: string): Promise<AgentConfigurationRecord> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}/configuration`);
+  if (!res.ok) throw new Error(`Failed to get agent configuration: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateAgentConfiguration(agentId: string, payload: Partial<AgentConfigurationRecord> & { slot_configs?: Record<string, any> }): Promise<AgentConfigurationRecord> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}/configuration`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error(`Failed to update agent configuration: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getAgentCredentials(agentId: string): Promise<CredentialStatusItem[]> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}/credentials`);
+  if (!res.ok) throw new Error(`Failed to get agent credentials: ${res.statusText}`);
+  return res.json();
+}
+
+export async function saveAgentCredential(agentId: string, credentialName: string, credentialValue: string, provider?: string): Promise<CredentialStatusItem> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}/credentials`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      credential_name: credentialName,
+      credential_value: credentialValue,
+      provider: provider || credentialName.split('_')[0].toLowerCase()
+    })
+  });
+  if (!res.ok) throw new Error(`Failed to save agent credential: ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteAgentCredential(agentId: string, credentialName: string): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}/credentials/${encodeURIComponent(credentialName)}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error(`Failed to delete agent credential: ${res.statusText}`);
+  return res.json();
+}
+
+export async function validateAgentCredential(agentId: string, credentialName: string, credentialValue?: string): Promise<{ credential_name: string; status: string; message: string; latency_ms: number }> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}/credentials/${encodeURIComponent(credentialName)}/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      credential_name: credentialName,
+      credential_value: credentialValue || ''
+    })
+  });
+  if (!res.ok) throw new Error(`Failed to validate credential: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getAgentSetupStatus(agentId: string): Promise<AgentSetupStateRecord> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}/setup/status`);
+  if (!res.ok) throw new Error(`Failed to get agent setup status: ${res.statusText}`);
+  return res.json();
+}
+
+export async function runAgentSetupPreflight(agentId: string): Promise<AgentSetupStateRecord> {
+  const res = await fetch(`${API_BASE_URL}/agents/${agentId}/setup/preflight`, {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error(`Failed to run agent setup preflight: ${res.statusText}`);
+  return res.json();
+}
+
+
 
 

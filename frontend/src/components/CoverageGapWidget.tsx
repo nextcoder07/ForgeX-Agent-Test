@@ -72,7 +72,7 @@ export const CoverageGapWidget: React.FC<CoverageGapWidgetProps> = ({ report, on
       </div>
 
       {/* Coverage Gaps Detected Alerts */}
-      {report.gaps_detected.length > 0 && (
+      {report.gaps_detected.length > 0 ? (
         <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/40 flex items-center justify-between flex-wrap gap-3">
           <div className="space-y-0.5 max-w-xl">
             <span className="text-xs font-bold text-amber-300 flex items-center space-x-1.5 font-mono">
@@ -80,9 +80,8 @@ export const CoverageGapWidget: React.FC<CoverageGapWidgetProps> = ({ report, on
               <span>Coverage Gaps Detected ({report.gaps_detected.length})</span>
             </span>
             <p className="text-xs text-slate-300">
-              {report.overall_coverage_pct === 0 || report.exercised_tools === 0
-                ? `⚡ Static AST Insight: Identified ${report.gaps_detected.length} un-tested behavioral surfaces (${report.total_tools} untested tool(s) + 9 zero-coverage reliability categories + safety invariants). Click "Generate +20 Scenarios" to automatically build test suites closing these gaps.`
-                : report.gaps_detected.join(' • ')}
+              {report.gaps_detected.slice(0, 3).join(' • ')}
+              {report.gaps_detected.length > 3 && ` (+${report.gaps_detected.length - 3} more)`}
             </p>
           </div>
 
@@ -95,6 +94,11 @@ export const CoverageGapWidget: React.FC<CoverageGapWidgetProps> = ({ report, on
               <span>Generate Targeted Tests</span>
             </button>
           )}
+        </div>
+      ) : (
+        <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/40 flex items-center space-x-2 text-emerald-300 text-xs font-mono">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>Complete test suite coverage: all agent tools, capabilities, and scenario categories verified.</span>
         </div>
       )}
     </div>

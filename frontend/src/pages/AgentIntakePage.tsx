@@ -154,6 +154,18 @@ export const AgentIntakePage: React.FC<AgentIntakePageProps> = ({ onAgentRegiste
         setCredentialsSavedMessage('Credentials saved successfully to secure workspace!');
         const updated = await getSystemCredentials();
         setExistingSystemCredentials(updated || []);
+
+        try {
+          const userJson = localStorage.getItem('forgex_active_user_session');
+          const uid = userJson ? JSON.parse(userJson).uid : null;
+          const key = uid ? `forgex_user_secrets_${uid}` : 'forgex_user_secrets';
+          const stored = localStorage.getItem(key) || localStorage.getItem('forgex_user_secrets');
+          const existing = stored ? JSON.parse(stored) : {};
+          const merged = { ...existing, ...toSave };
+          localStorage.setItem(key, JSON.stringify(merged));
+        } catch (err) {
+          console.debug('Error syncing secrets in AgentIntakePage', err);
+        }
       } catch (err) {
         console.error('Failed to save credentials:', err);
       } finally {

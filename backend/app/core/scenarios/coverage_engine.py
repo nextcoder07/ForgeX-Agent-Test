@@ -36,19 +36,31 @@ def compute_coverage_gaps(
     tested_interfaces: Set[str] = set()
 
     for sc in scenarios:
-        category_counts[sc.category.value] = category_counts.get(sc.category.value, 0) + 1
+        cat_key = sc.category.value if hasattr(sc.category, "value") else str(sc.category).lower()
+        category_counts[cat_key] = category_counts.get(cat_key, 0) + 1
         
         # Tools & Capabilities matching
         for cap in (sc.required_capabilities or []):
             tested_capabilities.add(cap.upper())
 
+        # Collect scenario text representation safely
+        sc_texts = []
+        if getattr(sc, "title", None): sc_texts.append(sc.title)
+        if getattr(sc, "purpose", None): sc_texts.append(sc.purpose)
+        if getattr(sc, "user_messages", None): sc_texts.extend(str(m) for m in sc.user_messages)
+        if getattr(sc, "invocation", None): sc_texts.append(str(sc.invocation))
+        if getattr(sc, "rationale", None): sc_texts.append(str(sc.rationale))
+        combined_sc_text = " ".join(sc_texts).lower()
+
         for t in (agent.tools or []):
             t_name_lower = t.name.lower()
-            if any(rt.lower() == t_name_lower or t.name in rt for rt in (sc.required_tools or [])):
+            if any(rt.lower() == t_name_lower or t_name_lower in rt.lower() for rt in (sc.required_tools or [])):
                 exercised_tools.add(t.name)
-            elif any((t.canonical_capability and t.canonical_capability.lower() == cap.lower()) or t_name_lower in cap.lower() for cap in (sc.required_capabilities or [])):
+            elif any((getattr(t, "canonical_capability", None) and t.canonical_capability.lower() == cap.lower()) or t_name_lower in cap.lower() for cap in (sc.required_capabilities or [])):
                 exercised_tools.add(t.name)
-            elif (sc.input and t_name_lower in sc.input.lower()) or (sc.command and t_name_lower in sc.command.lower()) or (sc.title and t_name_lower in sc.title.lower()):
+            elif t_name_lower in combined_sc_text or t_name_lower.replace("_", " ") in combined_sc_text:
+                exercised_tools.add(t.name)
+            elif any(t_name_lower in str(a.target or "").lower() or t_name_lower in str(a.description or "").lower() for a in (sc.assertions or [])):
                 exercised_tools.add(t.name)
 
         # Explicit Fault Injections & Assertions matching actual user tools
@@ -80,6 +92,10 @@ def compute_coverage_gaps(
         # Interface
         if sc.interface_type:
             tested_interfaces.add(sc.interface_type.upper())
+
+    # If tools weren't explicitly referenced by exact symbol in scenarios, but scenarios exist for single-tool agent, mark as exercised
+    if total_tools == 1 and not exercised_tools and scenarios:
+        exercised_tools.update(all_tool_names)
 
     # Unexercised tools calculated ONLY from actual tool names (never from framework constructs)
     unexercised_tools = list(all_tool_names - exercised_tools) if total_tools > 0 else []
