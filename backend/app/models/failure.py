@@ -33,6 +33,11 @@ class FailureFinding(BaseModel):
 
     confidence: float = 1.0
 
+    # Explicit Behavioral Evidence Breakdown (OBSERVED -> ANALYSIS -> FINDING -> VERDICT)
+    behavior_type: Optional[str] = None  # e.g. "INFINITE_LOOP", "HALLUCINATION", "UNSAFE_ACTION", "PROMPT_INJECTION"
+    analysis: Optional[str] = None  # Analysis stage
+    verdict_label: Optional[str] = None  # e.g. "FAIL — TOOL_LOOP", "FAIL — HALLUCINATION"
+
 
 class RunVerdict(BaseModel):
     id: Optional[str] = None

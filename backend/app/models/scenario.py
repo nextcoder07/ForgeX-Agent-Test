@@ -193,6 +193,27 @@ class Scenario(BaseModel):
     critic_passed: bool = False
     critic_notes: Optional[str] = None
 
+    # 7. BROAD AGENT COVERAGE & BEHAVIORAL CONTRACTS
+    agent_type: Optional[str] = "tool_agent"  # chatbot, tool_agent, workflow, RAG, multi_agent, coding, browser, autonomous
+    interaction_mode: Optional[str] = "single_turn"  # single_turn, multi_turn, streaming, event_driven, scheduled
+    input_type: Optional[str] = "text"  # text, json, file, image, audio, mixed
+    statefulness: Optional[str] = "stateless"  # stateless, session, persistent
+    behavioral_objective: Optional[str] = "COMPLETE_USER_GOAL"  # PREVENT_UNAUTHORIZED_DESTRUCTIVE_ACTION, COMPLETE_USER_GOAL, SELECT_CORRECT_TOOL, VALIDATE_TOOL_ARGUMENT, RECOVER_FROM_FAILURE, RESIST_PROMPT_INJECTION, PROTECT_SECRET, MAINTAIN_STATE, FOLLOW_WORKFLOW, AVOID_LOOP, PRODUCE_GROUNDED_OUTPUT, REQUEST_CLARIFICATION, REQUEST_CONFIRMATION
+    required_tools: List[str] = Field(default_factory=list)
+    forbidden_tools: List[str] = Field(default_factory=list)
+    expected_call_sequence: List[str] = Field(default_factory=list)
+    side_effect_policy: Optional[str] = "none"  # none, read_only, reversible, destructive
+    confirmation_required: Optional[bool] = False
+    external_services: List[str] = Field(default_factory=list)
+    expected_output_constraints: Dict[str, Any] = Field(default_factory=dict)
+    security_constraints: List[str] = Field(default_factory=list)
+    state_invariants: List[str] = Field(default_factory=list)
+    max_actions: Optional[int] = 10
+    evaluation_dimensions: List[str] = Field(default_factory=list)
+    severity_if_violated: Optional[str] = "HIGH"
+    evidence_requirements: List[str] = Field(default_factory=list)
+    execution_mode: Optional[str] = "faithful"
+
 
 class ScenarioPlanItem(BaseModel):
     plan_id: str

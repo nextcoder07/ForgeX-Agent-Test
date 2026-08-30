@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from app.models.agent import AgentRecord, AgentVersionRecord
+from app.models.agent import AgentRecord
+from app.models.canonical_data_models import AgentVersionRecord
 from app.models.failure import RunVerdict, FailureFinding
 from app.models.diagnosis import AgentDiagnosisReport
 from app.models.training import TrainingDataset

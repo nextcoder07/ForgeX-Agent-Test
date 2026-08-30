@@ -107,7 +107,6 @@ class SyncedDict:
         raise KeyError(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
-        is_existing = key in self._local_data
         self._local_data[key] = value
         self._save_local_snapshot()
         if self._sb:
@@ -121,14 +120,13 @@ class SyncedDict:
                         if row[fk_field].startswith(("exec-", "job-")) and fk_field == "evaluation_run_id":
                             row[fk_field] = None
 
-                if is_existing:
-                    # Record already exists locally, update directly to avoid POST 409 conflict
-                    try:
-                        res = self._sb.table(self.table_name).update(row).eq(conflict_col, key).execute()
-                        if res.data:
-                            return
-                    except Exception:
-                        pass
+                # Try UPDATE first to be completely idempotent and avoid POST 409 conflict
+                try:
+                    res_up = self._sb.table(self.table_name).update(row).eq(conflict_col, key).execute()
+                    if res_up.data and len(res_up.data) > 0:
+                        return
+                except Exception:
+                    pass
 
                 self._sb.table(self.table_name).upsert(row, on_conflict=conflict_col).execute()
             except Exception as e:
