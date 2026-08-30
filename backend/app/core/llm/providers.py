@@ -126,6 +126,52 @@ def _clean_and_parse_json(raw: str) -> Any:
                 return json.loads(candidate)
         raise
 
+def discover_active_ollama_model(endpoint: Optional[str] = None) -> Optional[str]:
+    """Dynamically auto-discovers active or installed models from local Ollama server (e.g. qwen2.5-coder:7b, llama3.2, etc.)."""
+    env_model = os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", "")).strip()
+    if env_model:
+        return env_model
+
+    ep = (endpoint or os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434"))).rstrip("/")
+    try:
+        import urllib.request
+        import json
+
+        # 1. Check running model via /api/ps
+        try:
+            req = urllib.request.Request(f"{ep}/api/ps", headers={"User-Agent": "ForgeX"})
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    models = data.get("models", [])
+                    if models and isinstance(models[0], dict) and models[0].get("name"):
+                        running_name = models[0]["name"]
+                        logger.info(f"Auto-detected active running Ollama model: {running_name}")
+                        return running_name
+        except Exception:
+            pass
+
+        # 2. Check installed models via /api/tags
+        req = urllib.request.Request(f"{ep}/api/tags", headers={"User-Agent": "ForgeX"})
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = data.get("models", [])
+                model_names = [m.get("name") for m in models if isinstance(m, dict) and m.get("name")]
+                if model_names:
+                    for priority_kw in ["coder", "qwen", "llama", "mistral", "deepseek", "gemma", "phi"]:
+                        for m in model_names:
+                            if priority_kw in m.lower():
+                                logger.info(f"Auto-detected installed Ollama model ({priority_kw}): {m}")
+                                return m
+                    logger.info(f"Auto-detected default installed Ollama model: {model_names[0]}")
+                    return model_names[0]
+    except Exception as e:
+        logger.debug(f"Ollama model auto-discovery note: {e}")
+
+    return None
+
+
 async def check_local_model_health(endpoint: Optional[str] = None) -> tuple[bool, str]:
     """Fast check (1.5s timeout) to verify whether local Ollama or local LLM server is connected and reachable."""
     import httpx
@@ -143,10 +189,11 @@ async def check_local_model_health(endpoint: Optional[str] = None) -> tuple[bool
 
 
 class OllamaProvider(LLMProvider):
-    """Local model provider (Ollama) — NO API Key required. Pre-checks connectivity before execution."""
+    """Local model provider (Ollama) — NO API Key required. Pre-checks connectivity & auto-detects models."""
     def __init__(self, endpoint: Optional[str] = None, model_name: Optional[str] = None):
         self.endpoint = (endpoint or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
-        self.model_name = model_name or os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", "qwen2.5-coder:7b"))
+        discovered = discover_active_ollama_model(self.endpoint)
+        self.model_name = model_name or os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", discovered or "qwen2.5-coder:7b"))
 
     async def generate(
         self,

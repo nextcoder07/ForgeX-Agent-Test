@@ -128,7 +128,9 @@ class UnifiedKeyManager:
 
         # 5. Ollama Local Endpoint for Stage Fallbacks
         ollama_endpoint = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")).strip()
-        ollama_model = os.getenv("OLLAMA_DEFAULT_MODEL", os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")).strip()
+        from app.core.llm.providers import discover_active_ollama_model
+        discovered_model = discover_active_ollama_model(ollama_endpoint)
+        ollama_model = os.getenv("OLLAMA_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", discovered_model or "qwen2.5-coder:7b")).strip()
         self.keys.append(AIKey(
             key_id="Ollama Local Server",
             value=ollama_endpoint,
@@ -166,7 +168,7 @@ class UnifiedKeyManager:
             ))
 
         # Meta Evaluator Dedicated Local Ollama Fallback
-        meta_ollama_model = os.getenv("META_EVALUATOR_OLLAMA_MODEL", "qwen2.5-coder:7b").strip()
+        meta_ollama_model = os.getenv("META_EVALUATOR_OLLAMA_MODEL", os.getenv("OLLAMA_MODEL", discovered_model or "qwen2.5-coder:3b")).strip()
         self.meta_keys.append(AIKey(
             key_id="Meta Evaluator Ollama Fallback",
             value=ollama_endpoint,

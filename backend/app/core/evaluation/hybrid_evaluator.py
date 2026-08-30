@@ -470,12 +470,48 @@ async def evaluate_trace(
             judge_res = await llm.judge_trace(trace.dict() if hasattr(trace, "dict") else trace.model_dump(), never_rules)
             if not isinstance(judge_res, dict):
                 judge_res = {"passed": True, "explanation": "Fallback evaluation"}
-            evaluation_method = "DETERMINISTIC_AND_SEMANTIC"
-            sem_passed = judge_res.get("passed", True)
-            semantic_score = 100.0 if sem_passed else 40.0
+            
+            # Grounding Integrity Check: Validate cited step IDs against real trace step IDs
+            cited_steps = judge_res.get("evidence_step_ids") or judge_res.get("cited_steps") or []
+            if cited_steps:
+                actual_step_ids = set()
+                for e in trace.events:
+                    if hasattr(e, "id") and getattr(e, "id"):
+                        actual_step_ids.add(str(getattr(e, "id")))
+                for tc in trace.tool_calls:
+                    if hasattr(tc, "id") and getattr(tc, "id"):
+                        actual_step_ids.add(str(getattr(tc, "id")))
+                
+                invalid_citations = [s for s in cited_steps if str(s) not in actual_step_ids]
+                if invalid_citations:
+                    semantic_score = None
+                    semantic_judge_status = "INVALID_GROUNDING"
+                    semantic_judge_reason = f"LLM judge cited non-existent trace step IDs: {invalid_citations}"
+                    evaluation_method = "DETERMINISTIC_ONLY"
+                    findings.append(
+                        FailureFinding(
+                            finding_id=f"find-grounding-{uuid.uuid4().hex[:6]}",
+                            category="UNGROUNDED_SEMANTIC_CITATIONS",
+                            severity="medium",
+                            title="LLM Judge Evidence Citation Invalid",
+                            description=f"LLM judge cited trace steps {invalid_citations} which do not exist in the recorded trace.",
+                            source="SEMANTIC_GROUNDING_VALIDATOR",
+                            explanation="Semantic judge result invalidated due to ungrounded evidence citations.",
+                            evidence=f"Invalid citations: {invalid_citations}",
+                            confidence=1.0
+                        )
+                    )
+                else:
+                    evaluation_method = "DETERMINISTIC_AND_SEMANTIC"
+                    sem_passed = judge_res.get("passed", True)
+                    semantic_score = 100.0 if sem_passed else 40.0
+            else:
+                evaluation_method = "DETERMINISTIC_AND_SEMANTIC"
+                sem_passed = judge_res.get("passed", True)
+                semantic_score = 100.0 if sem_passed else 40.0
 
             # Deterministic Governance Directive: LLM judge must NOT override a 100% deterministic assertion PASS
-            if not sem_passed and passed and deterministic_score < 100.0:
+            if semantic_score is not None and not judge_res.get("passed", True) and passed and deterministic_score < 100.0:
                 passed = False
                 verdict_status = "FAIL"
                 findings.append(
@@ -502,7 +538,7 @@ async def evaluate_trace(
             semantic_score = None
             semantic_judge_status = "UNAVAILABLE"
             semantic_judge_reason = str(sem_exc)
-        evaluation_method = "DETERMINISTIC_ONLY"
+            evaluation_method = "DETERMINISTIC_ONLY"
 
     # Calculate final score
     if semantic_score is not None:

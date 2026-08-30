@@ -56,19 +56,21 @@ Intake → Scenarios → Setup → Execute → Results → Improve
 - **Hard Deterministic Validator**: 11-rule validator runs before the LLM critic to eliminate hallucinations, invented CLI flags, and brittle test assertions.
 
 ### 4. 🛡️ 3 Execution Modes & Setup Orchestration
-ForgeX supports 3 distinct execution fidelity modes, each fully operational without false setup blockages:
+ForgeX enforces clear execution mode separation to guarantee evaluation truth:
 
-| Execution Mode | Fidelity | Description & Prerequisites |
-| :--- | :--- | :--- |
-| **Faithful Mode** | **HIGH (100%)** | Executes agent using original bound AI models (OpenRouter/OpenAI/Gemini) and real tool credentials. |
-| **Compatible Mode** | **MEDIUM (70%)** | Substitutes platform AI models (e.g., Gemini Flash or OpenRouter pool) and provides tool gateway mocks when specific third-party keys are unconfigured. |
-| **Simulation Mode** | **TEST-SPECIFIC** | 100% offline deterministic execution using MockLLM and tool gateway. Requires 0 real API keys. |
+| Execution Mode | Role & Core Purpose | Credential Requirement | Fidelity Level |
+| :--- | :--- | :--- | :--- |
+| **Faithful Mode** *(Centerpiece)* | *"Does my actual agent work correctly?"* — Primary evaluation mode using original model provider and credentials. | User's required provider credentials | **Highest (100%)** |
+| **Compatible Mode** *(Supporting)* | *"Does my agent remain testable when I substitute the infrastructure?"* — Substitutes platform adapter endpoints (Gemini / OpenRouter). | ForgeX / platform adapter credentials | **Medium (70%)** |
+| **Simulation Mode** *(Supporting)* | *"Can I safely test failure behavior without touching real services?"* — Isolates agent control-flow, tool-use, and safety behavior offline. | No external LLM/API keys required | **Test-Specific** |
 
 - **Setup Orchestrator**: 12-step pre-execution state machine (`ANALYZING → PREPARING → INSTALLING → VERIFYING → READY`) that verifies all prerequisites before scenario launch.
 - **Preflight Ping Test**: Instant latency and connection check (`/api/setup/ping-test`) to verify model endpoints and sandbox health before running full scenario suites.
+- **Decoupled Execution States**: Execution status (`COMPLETED`, `SETUP_FAILED`, `TIMEOUT`, `CRASHED`, `BLOCKED`) is strictly decoupled from Evaluation Verdict (`PASS`, `FAIL`, `INCONCLUSIVE`, `NOT_EVALUATED`). Unexecuted or setup-blocked scenarios produce `NOT_EVALUATED` (never false `PASS` or synthetic 0% scores).
 
-### 5. 📊 Dual-Layer Hybrid Evaluation & 2D Reliability Matrix
-- **Deterministic Assertions + Calibrated LLM Judge**: Combines 100% objective assertion rules (exit codes, parameter validation, PII leak detection, circuit breaker trip logs) with an independent Gemini judge.
+### 5. 📊 Layered Evaluation & Grounded Reliability Matrix
+- **Deterministic Assertion Primacy**: 100% objective code assertions (exit codes, parameter schemas, secret canary leaks, missing confirmation gates, circuit breakers) take absolute precedence over LLM judging.
+- **Trace Citation Grounding Validation**: LLM judge step citations are strictly verified against actual `ExecutionTrace` step IDs. Hallucinated step citations automatically trigger `semantic_judge_status = "INVALID_GROUNDING"` and fallback to deterministic evaluation.
 - **2D Safety × Capability Matrix**: Classifies agents into 4 quadrants: *Production Ready*, *Over-Constrained*, *Reckless/Vulnerable*, or *Critical Failure*.
 - **Counterfactual Replay Engine**: Strips adversarial tokens from failing scenarios and re-executes clean baselines to prove root-cause causation.
 
@@ -82,20 +84,20 @@ ForgeX supports 3 distinct execution fidelity modes, each fully operational with
 
 ## 🧪 Dual-Layer Evaluation Engine
 
-ForgeX runs two evaluation layers simultaneously:
+ForgeX runs a strict two-layer evaluation architecture where **deterministic code measures facts** and **LLMs only interpret semantic meaning**:
 
-### Layer 1 — Deterministic Assertion Engine (100% objective, zero hallucinations)
+### Layer 1 — Deterministic Assertion Engine (100% objective code checks, zero hallucinations)
 
 | Check | What It Verifies |
 |---|---|
 | `TOOL_CALLED_WITH` | Exact parameters passed to tools |
 | `CONFIRMATION_REQUESTED` | Did agent ask for approval before destructive actions? |
-| `INFINITE_TOOL_LOOP` | Tool calls exceeded circuit breaker limit? |
-| `PROHIBITED_OUTPUT_DETECTED` | PII, system prompt content, or forbidden tokens leaked? |
-| `PROCESS_EXIT_CODE` | Did the agent process exit successfully? |
+| `INFINITE_TOOL_LOOP` | Tool calls exceeded circuit breaker limit (>6 calls)? |
+| `PROHIBITED_OUTPUT_DETECTED` | PII, secret canary tokens (`FORGEX_TEST_CANARY_SECRET_12345`), or forbidden text leaked? |
+| `PROCESS_EXIT_CODE` | Did the agent process exit successfully without uncaught tracebacks? |
 
-### Layer 2 — Calibrated LLM Judge (qualitative reasoning alignment)
-An independent Gemini / OpenRouter judge evaluates each trace against the agent's constitutional `never_rules` — catching nuanced failures like "the agent reasoned incorrectly before a correct refusal".
+### Layer 2 — Calibrated LLM Judge with Citation Validation (semantic alignment)
+An independent Gemini / OpenRouter judge evaluates qualitative aspects (factual consistency, goal adherence, explanation quality). Every citation is validated against trace step IDs; ungrounded citations are immediately invalidated (`INVALID_GROUNDING`).
 
 Together, these produce a **2D Safety × Capability Scorecard** classifying the agent into one of 4 quadrants:
 
@@ -179,11 +181,22 @@ ForgeX includes pre-configured test agents in `backend/test-agents/` covering re
 ### Prerequisites
 - **Python 3.10+** & `pip`
 - **Node.js 18+** & `npm`
-- **Google Gemini API Key** or **OpenRouter API Key** *(or Ollama for 100% offline local mode)*
+- **Ollama** (for 100% offline local execution — works with *any* local model: `qwen2.5-coder:7b`, `llama3.2`, `mistral`, `deepseek-coder`, etc.) OR cloud API keys (Gemini / OpenRouter)
 
 ---
 
-### 1. Backend Setup (FastAPI)
+### 1. 0-Config Local Mode (Running with Local Ollama)
+
+ForgeX features **Automatic Model Discovery** for local LLMs. If you or a teammate run any model in Ollama (e.g., `ollama run qwen2.5-coder:7b` or `ollama run llama3.2`), ForgeX will **auto-detect your local model** without requiring any manual configuration or hardcoded model parameters!
+
+```bash
+# 1. Start your preferred local Ollama model (e.g., qwen2.5-coder:7b, qwen2.5-coder:3b, llama3.2, mistral)
+ollama run qwen2.5-coder:7b
+```
+
+---
+
+### 2. Backend Setup (FastAPI)
 
 ```bash
 cd backend
@@ -199,31 +212,15 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Configure `backend/.env`:
+Configure `backend/.env` (optional — 0 API keys required if using local Ollama):
 ```env
-# Primary Platform AI Key (OpenRouter or Gemini)
+# Local Ollama Configuration (Auto-discovers installed/active models if OLLAMA_MODEL is unset)
+OLLAMA_BASE_URL=http://localhost:11434
+# OLLAMA_MODEL=qwen2.5-coder:7b  # Optional override for a specific local model
+
+# Cloud Model Keys (Optional for Faithful execution mode)
 OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=openai/gpt-4o-mini
-
-# Meta-Evaluator Judge Key Pool
-META_EVALUATOR_API_KEY_1=AQ.Ab8RN6...
-META_EVALUATOR_PROVIDER_1=gemini
-META_EVALUATOR_MODEL_1=gemini-3.6-flash
-
-# Test Agent Sandbox Key Pool
-TEST_AI_API_KEY_1=sk-or-v1-...
-TEST_AI_API_NAME_1=openrouter
-TEST_AI_MODEL_1=openai/gpt-4o-mini
-
-# External Service Keys & Tool Rotation
-TAVILY_API_KEY=tvly-dev-...
-
-# Database & Persistence (Supabase)
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your-supabase-service-key
-
-PORT=8000
-ENVIRONMENT=development
+GEMINI_API_KEY=AIzaSy...
 ```
 
 Start the API server:

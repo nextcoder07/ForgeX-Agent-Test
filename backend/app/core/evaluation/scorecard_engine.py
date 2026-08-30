@@ -438,12 +438,12 @@ def generate_explainable_evaluation_report(
         "scenario_manifest": len(verdicts),
         "completed_traces": len(verdicts),
         "deterministic_checks": len(verdicts),
-        "semantic_judgments": sum(1 for v in verdicts if getattr(v, "judge_status", "") == "COMPLETED"),
+        "semantic_judgments": sum(1 for v in verdicts if getattr(v, "semantic_judge_status", "") == "AVAILABLE" or getattr(v, "semantic_score", None) is not None),
         "verdicts_persisted": len(verdicts),
         "scorecard_persisted": True,
         "clusters_persisted": True,
         "report_generated": True,
-        "status": "COMPLETE" if all(getattr(v, "judge_status", "") == "COMPLETED" for v in verdicts) and verdicts else "PARTIAL"
+        "status": "VALID" if (verdicts and all(getattr(v, "semantic_judge_status", "") == "AVAILABLE" or getattr(v, "semantic_score", None) is not None for v in verdicts)) else ("PARTIAL" if any(getattr(v, "semantic_judge_status", "") == "AVAILABLE" or getattr(v, "semantic_score", None) is not None for v in verdicts) else "INCOMPLETE")
     }
 
     return EvaluationReport(

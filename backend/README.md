@@ -49,9 +49,10 @@ flowchart TD
 - **12-Step Setup Orchestrator**: Manages state transitions (`NOT_STARTED → ANALYZING → PREPARING → INSTALLING → VERIFYING → READY`) to verify dependencies and pre-requisites before scenario launch.
 - **Preflight Ping Test**: Instant latency and model endpoint check (`/api/dependencies/preflight-ping-test`) verifying connection health before running full scenario suites.
 - **3 Execution Fidelity Modes**:
-  - `FAITHFUL`: 100% fidelity using original bound AI models (OpenRouter/Gemini/OpenAI) and real tool credentials.
-  - `COMPATIBLE`: 70% fidelity substituting platform AI models (Gemini Flash or OpenRouter pool) and tool mocks when specific third-party keys are unconfigured.
-  - `SIMULATION`: 100% offline deterministic execution using MockLLM and tool gateway. Requires 0 real API keys.
+  - `FAITHFUL` *(Primary Centerpiece)*: 100% fidelity testing original bound AI models (OpenRouter/Gemini/OpenAI) and real tool credentials (*"Does my actual agent work correctly?"*).
+  - `COMPATIBLE` *(Supporting Mode)*: 70% fidelity substituting platform AI models (Gemini Flash or OpenRouter pool) and tool mocks when third-party keys are unconfigured (*"Does my agent remain testable when I substitute infrastructure?"*).
+  - `SIMULATION` *(Supporting Mode)*: 100% offline deterministic execution using MockLLM and tool gateway. Requires 0 real API keys. Isolates agent control-flow, tool-use, and safety behavior offline (*"Can I safely test failure behavior without touching real services?"*).
+- **Decoupled Execution States**: Execution status (`COMPLETED`, `SETUP_FAILED`, `TIMEOUT`, `CRASHED`, `BLOCKED`) is strictly separated from Evaluation Verdict (`PASS`, `FAIL`, `INCONCLUSIVE`, `NOT_EVALUATED`). Unexecuted or setup-blocked scenarios produce `NOT_EVALUATED` (never false `PASS` or synthetic 0% scores).
 
 ### Stage 4: Subprocess Sandbox Isolation (`app/core/sandbox/`)
 - **Ephemeral Sandbox Isolation**: Spawns isolated subprocess environments in ephemeral temporary directories, strictly stripping backend platform credentials.
@@ -60,10 +61,12 @@ flowchart TD
 - **Immutable Execution Traces**: Captures step-by-step logs of user prompts, model reasoning chains, tool inputs/outputs, and latency metrics.
 
 ### Stage 5: Dual-Layer Hybrid Evaluation (`app/core/evaluation/`)
-- **Programmatic Rules + LLM Judge**: Combines deterministic assertions (exit codes, JSON schema validation, regex invariants, canary protection) with calibrated LLM judgment.
+- **Deterministic Assertion Primacy**: 100% objective code assertions (exit codes, parameter validation, PII leak detection, secret canary protection `FORGEX_TEST_CANARY_SECRET_12345`, confirmation gates, circuit breaker trip logs) take absolute precedence over LLM judging.
+- **Trace Citation Grounding Validation**: LLM judge step citations are strictly verified against actual `ExecutionTrace` step IDs. Hallucinated step citations automatically trigger `semantic_judge_status = "INVALID_GROUNDING"` and fallback to deterministic evaluation.
 - **Counterfactual Replay Engine**: Strips adversarial tokens from failing scenarios and re-executes clean baselines to prove root-cause causation.
-- **2D Safety × Capability Reliability Scorecard**: Computes independent Safety Index and Capability Index ratings with drill-downs into 5 reliability dimensions.
+- **2D Safety × Capability Reliability Scorecard**: Computes independent Safety Index and Capability Index ratings with drill-downs into 10 reliability dimensions.
 - **Failure Cause Clustering**: Groups execution traces into actionable failure archetypes (e.g., *Tool Authorization Bypass*, *Prompt Injection Vulnerability*, *Network Timeout Crash*).
+- **Evaluation Integrity Audit**: Reports audit status (`VALID`, `PARTIAL`, `INCOMPLETE`) based on semantic judge coverage and trace integrity.
 
 ### Stage 6: Self-Healing Code Repair & Datasets (`app/core/healing/`)
 - **Self-Healing Code Repair**: Synthesizes verified `git diff` patches and system prompt guardrails to fix detected vulnerabilities automatically.
