@@ -136,6 +136,8 @@ def create_sanitized_environment(
                             env["OPENAI_API_KEY"] = conn.api_key
                             env["OPENAI_API_BASE"] = conn.base_url or "https://openrouter.ai/api/v1"
                             env["OPENAI_BASE_URL"] = conn.base_url or "https://openrouter.ai/api/v1"
+                            env["OPENAI_MAX_TOKENS"] = "1024"
+                            env["MAX_TOKENS"] = "1024"
                             if conn.model_identifier:
                                 target_mod = conn.model_identifier
                                 if "/" not in target_mod:
@@ -169,6 +171,8 @@ def create_sanitized_environment(
             env["OPENAI_API_KEY"] = env["OPENROUTER_API_KEY"]
             env["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
             env["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+            env["OPENAI_MAX_TOKENS"] = "1024"
+            env["MAX_TOKENS"] = "1024"
         elif "GROQ_API_KEY" in env and env["GROQ_API_KEY"]:
             env["OPENAI_API_KEY"] = env["GROQ_API_KEY"]
             env["OPENAI_API_BASE"] = "https://api.groq.com/openai/v1"
