@@ -76,7 +76,7 @@ class ExecutionPreflight(BaseModel):
 
 class ToolCallRecord(BaseModel):
     id: str
-    sequence: int
+    sequence: int = 1
     tool_name: str
     canonical_capability: Optional[str] = None
     arguments: Dict[str, Any] = Field(default_factory=dict)

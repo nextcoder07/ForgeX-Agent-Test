@@ -170,6 +170,8 @@ class FallbackMockEngine:
             "evidence": "All tool calls stayed within defined constraints."
         }
 
+    mock_judge_trace = mock_judge_verdict
+
     @staticmethod
     def mock_scenario_generation(agent_spec: Dict[str, Any], strategy_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
         scenarios: List[Dict[str, Any]] = []

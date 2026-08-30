@@ -469,6 +469,7 @@ if not _TAVILY_KEY or _TAVILY_KEY.startswith('your_') or _TAVILY_KEY.endswith('_
                                             targs = {k: v for k, v in res_data.items()}
                                         tc_record = ToolCallRecord(
                                             id=f"tc-{uuid.uuid4().hex[:6]}",
+                                            sequence=len(tool_calls) + 1,
                                             tool_name=str(tool_name),
                                             arguments=targs,
                                             result=res_data,

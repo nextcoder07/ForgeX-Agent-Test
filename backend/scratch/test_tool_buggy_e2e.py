@@ -106,9 +106,9 @@ async def run():
     print("=" * 60)
     print(f"EVALUATION COMPLETE: {pass_count}/{total} PASSED, {fail_count}/{total} FAILED")
     if fail_count > 0:
-        print("✅ ForgeX correctly detected failures in tool-buggy agent!")
+        print("[OK] ForgeX correctly detected failures in tool-buggy agent!")
     else:
-        print("⚠️  WARNING: All scenarios passed — tool-buggy defects were NOT caught.")
+        print("[WARNING] All scenarios passed — tool-buggy defects were NOT caught.")
     print("=" * 60)
 
 if __name__ == "__main__":
